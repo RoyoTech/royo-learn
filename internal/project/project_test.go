@@ -23,9 +23,9 @@ func TestCanonicalize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Canonicalize(%q): %v", dir, err)
 	}
-	abs, _ := filepath.Abs(dir)
-	if got != abs {
-		t.Fatalf("Canonicalize(%q)=%q want %q", dir, got, abs)
+	want := canonicalDir(t, dir)
+	if got != want {
+		t.Fatalf("Canonicalize(%q)=%q want %q", dir, got, want)
 	}
 
 	// Relative path should become absolute.
@@ -34,10 +34,10 @@ func TestCanonicalize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Canonicalize(%q): %v", rel, err)
 	}
-	wantRel := filepath.Clean(rel)
-	absRel, _ := filepath.Abs(wantRel)
-	if gotRel != absRel {
-		t.Fatalf("Canonicalize(%q)=%q want %q", rel, gotRel, absRel)
+	wantClean := filepath.Clean(rel)
+	wantAbs := canonicalDir(t, wantClean)
+	if gotRel != wantAbs {
+		t.Fatalf("Canonicalize(%q)=%q want %q", rel, gotRel, wantAbs)
 	}
 }
 
@@ -55,9 +55,9 @@ func TestCanonicalizeSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Canonicalize(%q): %v", link, err)
 	}
-	absReal, _ := filepath.Abs(realDir)
-	if got != absReal {
-		t.Fatalf("Canonicalize(%q)=%q want %q", link, got, absReal)
+	want := canonicalDir(t, realDir)
+	if got != want {
+		t.Fatalf("Canonicalize(%q)=%q want %q", link, got, want)
 	}
 }
 
@@ -445,6 +445,18 @@ func TestResolveWithKeyDeriver(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// canonicalDir returns the canonical absolute path for dir, using Canonicalize.
+// Unlike filepath.Abs, this resolves symlinks and short names, so tests
+// compare against the same canonical form the production code uses.
+func canonicalDir(t *testing.T, dir string) string {
+	t.Helper()
+	got, err := Canonicalize(dir)
+	if err != nil {
+		t.Fatalf("Canonicalize(%q): %v", dir, err)
+	}
+	return got
+}
 
 func assertProjectErrorCode(t *testing.T, err error, want string) {
 	t.Helper()

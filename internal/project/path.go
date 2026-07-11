@@ -1,6 +1,7 @@
 package project
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -29,7 +30,9 @@ var ProtectedPrefixes = []string{
 
 // Canonicalize resolves path to its absolute canonical form.
 // It rejects UNC, verbatim, and device paths on all platforms.
-// Symlinks are resolved via filepath.EvalSymlinks.
+// Existing prefixes are resolved through symlinks; non-existing suffixes
+// are appended clean so the function works with paths that haven't been
+// created yet (e.g., project directories passed to Resolve).
 func Canonicalize(path string) (string, error) {
 	// Reject UNC, verbatim, and device paths.
 	if strings.HasPrefix(path, `\\`) || strings.HasPrefix(path, `\\.\`) || strings.HasPrefix(path, `\\?\`) {
@@ -40,14 +43,34 @@ func Canonicalize(path string) (string, error) {
 	if err != nil {
 		return "", &Error{Code: ErrPathOutsideRoot, Message: "cannot resolve absolute path", Err: err}
 	}
+	abs = filepath.Clean(abs)
 
-	resolved, err := filepath.EvalSymlinks(abs)
-	if err != nil {
-		// If the path doesn't exist, Abs + Clean is still safe.
-		return filepath.Clean(abs), nil
+	return resolveExistingSymlinks(abs)
+}
+
+// resolveExistingSymlinks walks the path resolving symlinks for the deepest
+// existing prefix. Non-existing suffixes are appended clean but unresolved,
+// so callers can reason about paths that will be created later.
+func resolveExistingSymlinks(path string) (string, error) {
+	if _, err := os.Lstat(path); err == nil {
+		return filepath.EvalSymlinks(path)
 	}
 
-	return resolved, nil
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	for dir != path {
+		if _, err := os.Lstat(dir); err == nil {
+			resolvedDir, err := filepath.EvalSymlinks(dir)
+			if err != nil {
+				return "", &Error{Code: ErrSymlinkEscape, Message: "cannot resolve symlinks", Err: err}
+			}
+			return filepath.Join(resolvedDir, base), nil
+		}
+		path = dir
+		dir = filepath.Dir(path)
+		base = filepath.Join(filepath.Base(path), base)
+	}
+	return path, nil
 }
 
 // IsInsideRoot reports whether path is within root after canonicalization.
