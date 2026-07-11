@@ -34,8 +34,8 @@ Aceptación: `doctor` resuelve repo correctamente.
 
 ## T02 Storage
 
-- [ ] migrations.
-- [ ] SQLite pragmas.
+- [x] migrations.
+- [x] SQLite pragmas.
 - [ ] repositories.
 - [ ] transactions.
 - [ ] audit.
