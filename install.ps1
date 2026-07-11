@@ -6,17 +6,19 @@
     extracts the binary, installs to %LOCALAPPDATA%\royo-learn\bin\, and
     offers to add the directory to PATH.
 .PARAMETER Version
-    Version to install (default: latest). Example: --version v0.1.0
+    Version to install (default: latest). Example: -Version v0.1.0
 .PARAMETER Uninstall
     Remove royo-learn from the system.
 .EXAMPLE
     .\install.ps1
-    .\install.ps1 --version v0.1.0
-    .\install.ps1 --uninstall
+    .\install.ps1 -Version v0.1.0
+    .\install.ps1 -Uninstall
 #>
 
 param(
+    [Alias("version")]
     [string]$Version = "latest",
+    [Alias("uninstall")]
     [switch]$Uninstall
 )
 
