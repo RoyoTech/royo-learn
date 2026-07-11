@@ -9,12 +9,18 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"agent-royo-learn/internal/buildinfo"
+	"agent-royo-learn/internal/capture"
 	"agent-royo-learn/internal/config"
 	"agent-royo-learn/internal/doctor"
+	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/logging"
 	"agent-royo-learn/internal/project"
+	"agent-royo-learn/internal/storage"
+
+	"github.com/google/uuid"
 )
 
 // Exit codes as documented in docs/04-CLI-SPEC.md.
@@ -48,6 +54,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runInit(args[1:], stdout, stderr)
 	case "doctor":
 		return runDoctor(args[1:], stdout, stderr)
+	case "capture":
+		return runCapture(args[1:], stdout, stderr)
 	default:
 		return writeUnknownCommandError(stderr)
 	}
@@ -376,6 +384,146 @@ func writeDoctorError(stderr io.Writer, code, format string, args ...interface{}
 		Recoverable: true,
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn doctor"`,
+	})
+	return exitFailure
+}
+
+// ---------------------------------------------------------------------------
+// capture
+// ---------------------------------------------------------------------------
+
+func runCapture(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("capture", flag.ContinueOnError)
+	title := fs.String("title", "", "learning title (required)")
+	contextStr := fs.String("context", "", "learning context (required)")
+	observation := fs.String("observation", "", "what was observed (required)")
+	lesson := fs.String("lesson", "", "reusable lesson (required)")
+	learningType := fs.String("type", "procedure", "learning type")
+	pScope := fs.String("scope", "project", "scope guess")
+	projectRoot := fs.String("project-root", "", "project root directory")
+	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
+
+	if err := fs.Parse(args); err != nil {
+		return writeCaptureError(stderr, "invalid_argument", "capture: %v", err)
+	}
+
+	if *title == "" {
+		return writeCaptureError(stderr, "invalid_argument", "capture: --title is required")
+	}
+	if *contextStr == "" {
+		return writeCaptureError(stderr, "invalid_argument", "capture: --context is required")
+	}
+	if *observation == "" {
+		return writeCaptureError(stderr, "invalid_argument", "capture: --observation is required")
+	}
+	if *lesson == "" {
+		return writeCaptureError(stderr, "invalid_argument", "capture: --lesson is required")
+	}
+
+	// Resolve project root.
+	cwd, _ := os.Getwd()
+	resolver := project.NewResolver()
+	req := &project.ResolveRequest{
+		CWD:          cwd,
+		ExplicitRoot: *projectRoot,
+	}
+
+	proj, err := resolver.Resolve(context.Background(), req)
+	if err != nil {
+		return mapProjectError(stderr, err)
+	}
+
+	root := proj.Root
+
+	// Open database.
+	dbPath := filepath.Join(root, ".royo-learn", "royo-learn.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		return writeCaptureError(stderr, "invalid_argument", "capture: cannot open database: %v", err)
+	}
+	defer db.Close()
+
+	// Run migrations.
+	if err := storage.Migrate(db); err != nil {
+		return writeCaptureError(stderr, "invalid_argument", "capture: migration failed: %v", err)
+	}
+
+	// Save project if not yet registered.
+	ctx := context.Background()
+	var projectID domain.ProjectID
+	tx, _ := db.DB.BeginTx(ctx, nil)
+	if existing, _ := storage.GetProjectByKey(ctx, tx, proj.Key); existing == nil {
+		projEntity := &domain.Project{
+			ID:            domain.ProjectID(uuid.Must(uuid.NewV7()).String()),
+			ProjectKey:    proj.Key,
+			DisplayName:   proj.Key,
+			CanonicalPath: root,
+			GitRemote:     proj.GitRemote,
+			Fingerprint:   proj.Key,
+			CreatedAt:     time.Now().UTC(),
+			UpdatedAt:     time.Now().UTC(),
+		}
+		if err := storage.SaveProject(ctx, tx, projEntity); err != nil {
+			tx.Rollback()
+			return writeCaptureError(stderr, "invalid_argument", "capture: save project: %v", err)
+		}
+		projectID = projEntity.ID
+	} else {
+		projectID = existing.ID
+	}
+	if err := tx.Commit(); err != nil {
+		return writeCaptureError(stderr, "invalid_argument", "capture: commit project: %v", err)
+	}
+
+	recordsDir := filepath.Join(root, ".royo-learn", "records")
+	svc := capture.NewService(db, recordsDir)
+
+	input := &capture.CaptureInput{
+		Title:       *title,
+		Context:     *contextStr,
+		Observation: *observation,
+		Lesson:      *lesson,
+		Type:        domain.LearningType(*learningType),
+		Scope:       domain.Scope(*pScope),
+		Actor: domain.Actor{
+			Kind:      "human",
+			Name:      "cli-user",
+			Model:     "",
+			SessionID: "",
+		},
+	}
+
+	result, err := svc.Capture(ctx, projectID, input)
+	if err != nil {
+		return writeCaptureError(stderr, "invalid_argument", "capture: %v", err)
+	}
+
+	if *jsonFlag {
+		data, _ := json.MarshalIndent(map[string]interface{}{
+			"learning_id": result.LearningID,
+			"status":      result.Status,
+			"new":         result.New,
+		}, "", "  ")
+		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+	} else {
+		statusLabel := "new"
+		if !result.New {
+			statusLabel = "deduplicated (existing)"
+		}
+		_, _ = fmt.Fprintf(stdout, "captured %s learning %s (status: %s)\n", statusLabel, result.LearningID, result.Status)
+	}
+
+	return exitSuccess
+}
+
+func writeCaptureError(stderr io.Writer, code, format string, args ...interface{}) int {
+	msg := fmt.Sprintf(format, args...)
+	_ = logging.WriteError(stderr, logging.ErrorEnvelope{
+		Code:        code,
+		Message:     msg,
+		Recoverable: true,
+		Details:     map[string]any{},
+		NextAction:  `run "royo-learn capture --help"`,
 	})
 	return exitFailure
 }
