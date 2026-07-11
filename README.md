@@ -58,7 +58,7 @@ Or manually:
 
 ```bash
 # Download and install
-./install.sh --version v1.0.0
+./install.sh --version v0.1.0
 # Uninstall
 ./install.sh --uninstall
 ```
@@ -72,7 +72,7 @@ The binary is installed to `~/.local/bin/royo-learn`. Add it to your PATH if nee
 Invoke-WebRequest -Uri https://github.com/RoyoTech/royo-learn/releases/latest/download/install.ps1 -OutFile install.ps1
 
 # Install
-.\install.ps1 --version v1.0.0
+.\install.ps1 --version v0.1.0
 
 # Uninstall
 .\install.ps1 --uninstall
