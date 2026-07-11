@@ -1,19 +1,33 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"agent-royo-learn/internal/buildinfo"
+	"agent-royo-learn/internal/config"
+	"agent-royo-learn/internal/doctor"
 	"agent-royo-learn/internal/logging"
+	"agent-royo-learn/internal/project"
+)
+
+// Exit codes as documented in docs/04-CLI-SPEC.md.
+const (
+	exitSuccess          = 0
+	exitFailure          = 1
+	exitInvalidArguments = 2
+
+	exitProjectNotFound  = 4
+	exitAmbiguousProject = 5
 )
 
 const (
-	exitSuccess          = 0
-	exitInvalidArguments = 2
-	exitFailure          = 1
-
 	invalidArgumentsMessage    = `invalid arguments: expected "version --json"`
 	invalidArgumentsNextAction = `run "royo-learn version --json"`
 )
@@ -23,10 +37,23 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 2 && args[0] == "version" && args[1] == "--json" {
-		return writeVersionJSON(stdout, stderr)
+	if len(args) == 0 {
+		return writeUnknownCommandError(stderr)
 	}
 
+	switch args[0] {
+	case "version":
+		return runVersion(args[1:], stdout, stderr)
+	case "init":
+		return runInit(args[1:], stdout, stderr)
+	case "doctor":
+		return runDoctor(args[1:], stdout, stderr)
+	default:
+		return writeUnknownCommandError(stderr)
+	}
+}
+
+func writeUnknownCommandError(stderr io.Writer) int {
 	_ = logging.WriteError(stderr, logging.ErrorEnvelope{
 		Code:        "invalid_argument",
 		Message:     invalidArgumentsMessage,
@@ -35,6 +62,38 @@ func run(args []string, stdout, stderr io.Writer) int {
 		NextAction:  invalidArgumentsNextAction,
 	})
 	return exitInvalidArguments
+}
+
+// ---------------------------------------------------------------------------
+// version
+// ---------------------------------------------------------------------------
+
+func runVersion(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("version", flag.ContinueOnError)
+	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
+	if err := fs.Parse(args); err != nil {
+		_ = logging.WriteError(stderr, logging.ErrorEnvelope{
+			Code:        "invalid_argument",
+			Message:     err.Error(),
+			Recoverable: true,
+			Details:     map[string]any{},
+			NextAction:  invalidArgumentsNextAction,
+		})
+		return exitInvalidArguments
+	}
+
+	if !*jsonFlag {
+		_ = logging.WriteError(stderr, logging.ErrorEnvelope{
+			Code:        "invalid_argument",
+			Message:     invalidArgumentsMessage,
+			Recoverable: true,
+			Details:     map[string]any{},
+			NextAction:  invalidArgumentsNextAction,
+		})
+		return exitInvalidArguments
+	}
+
+	return writeVersionJSON(stdout, stderr)
 }
 
 func writeVersionJSON(stdout, stderr io.Writer) int {
@@ -48,4 +107,275 @@ func writeVersionJSON(stdout, stderr io.Writer) int {
 		return exitFailure
 	}
 	return exitSuccess
+}
+
+// ---------------------------------------------------------------------------
+// init
+// ---------------------------------------------------------------------------
+
+const royoLearnDir = ".royo-learn"
+
+func runInit(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("init", flag.ContinueOnError)
+	projectRoot := fs.String("project-root", "", "project root directory (required)")
+	force := fs.Bool("force", false, "recreate generated files (config.yaml, .gitignore); never touches records")
+	if err := fs.Parse(args); err != nil {
+		return writeInitError(stderr, "invalid_argument", "init: %v", err)
+	}
+
+	if *projectRoot == "" {
+		return writeInitError(stderr, "invalid_argument", "init: --project-root is required")
+	}
+
+	absRoot, err := filepath.Abs(*projectRoot)
+	if err != nil {
+		return writeInitError(stderr, "invalid_argument", "init: cannot resolve --project-root: %v", err)
+	}
+
+	royoPath := filepath.Join(absRoot, royoLearnDir)
+
+	// Create subdirectories (records/, evidence/, backups/).
+	for _, sub := range []string{"records", "evidence", "backups"} {
+		dir := filepath.Join(royoPath, sub)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return writeInitError(stderr, "invalid_argument", "init: cannot create %s: %v", dir, err)
+		}
+	}
+
+	// Write config.yaml — only if missing or --force.
+	configPath := filepath.Join(royoPath, "config.yaml")
+	written, err := writeFileIfMissing(configPath, *force, func() ([]byte, error) {
+		return marshalDefaultConfig()
+	})
+	if err != nil {
+		return writeInitError(stderr, "invalid_argument", "init: cannot write config.yaml: %v", err)
+	}
+	if written {
+		_, _ = fmt.Fprintf(stdout, "created %s\n", configPath)
+	}
+
+	// Write .gitignore — only if missing or --force.
+	gitignorePath := filepath.Join(royoPath, ".gitignore")
+	gitignoreContent := []byte("# royo-learn\nroyo-learn.db\n")
+	written, err = writeFileIfMissing(gitignorePath, *force, func() ([]byte, error) {
+		return gitignoreContent, nil
+	})
+	if err != nil {
+		return writeInitError(stderr, "invalid_argument", "init: cannot write .gitignore: %v", err)
+	}
+	if written {
+		_, _ = fmt.Fprintf(stdout, "created %s\n", gitignorePath)
+	}
+
+	return exitSuccess
+}
+
+// writeFileIfMissing writes content at path only when the file does not exist
+// or force is true. Returns (true, nil) when the file was written,
+// (false, nil) when skipped because the file already exists and !force,
+// and (false, error) on I/O errors.
+func writeFileIfMissing(path string, force bool, contentFn func() ([]byte, error)) (bool, error) {
+	if !force {
+		if _, err := os.Stat(path); err == nil {
+			return false, nil // skip: file already exists
+		}
+	}
+
+	content, err := contentFn()
+	if err != nil {
+		return false, err
+	}
+
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func marshalDefaultConfig() ([]byte, error) {
+	cfg := config.DefaultConfig()
+	return yamlMarshalConfig(cfg)
+}
+
+// yamlMarshalConfig writes the config as human-readable YAML.
+func yamlMarshalConfig(cfg *config.Config) ([]byte, error) {
+	return []byte(fmt.Sprintf(`# royo-learn project configuration
+# Generated by: royo-learn init
+version: %d
+
+project:
+  records_root: %s
+  evidence_root: %s
+  backup_root: %s
+
+database:
+  path: %s
+
+records:
+  dir: %s
+
+evidence:
+  dir: %s
+
+publishing:
+  dry_run_default: %t
+
+limits:
+  max_payload_bytes: %d
+`, cfg.Version,
+		cfg.Project.RecordsRoot,
+		cfg.Project.EvidenceRoot,
+		cfg.Project.BackupRoot,
+		cfg.Database.Path,
+		cfg.Records.Dir,
+		cfg.Evidence.Dir,
+		cfg.Publishing.DryRunDefault,
+		cfg.Limits.MaxPayloadBytes,
+	)), nil
+}
+
+func writeInitError(stderr io.Writer, code, format string, args ...interface{}) int {
+	msg := fmt.Sprintf(format, args...)
+	_ = logging.WriteError(stderr, logging.ErrorEnvelope{
+		Code:        code,
+		Message:     msg,
+		Recoverable: true,
+		Details:     map[string]any{},
+		NextAction:  `run "royo-learn init --project-root <dir>"`,
+	})
+	return exitFailure
+}
+
+// ---------------------------------------------------------------------------
+// doctor
+// ---------------------------------------------------------------------------
+
+func runDoctor(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	projectRoot := fs.String("project-root", "", "explicit project root directory (optional)")
+	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
+	fixSafe := fs.Bool("fix-safe", false, "auto-repair safe issues")
+	// --check is repeatable; parse manually since flag.Visit + explicit
+	// tracking avoids the limitation of flag.String (which only captures one value).
+	checkFilters := make(map[string]bool)
+	fs.Func("check", "filter to specific check(s) (repeatable)", func(val string) error {
+		checkFilters[val] = true
+		return nil
+	})
+
+	if err := fs.Parse(args); err != nil {
+		return writeDoctorError(stderr, "invalid_argument", "doctor: %v", err)
+	}
+
+	// Resolve project root.
+	cwd, _ := os.Getwd()
+	resolver := project.NewResolver()
+	req := &project.ResolveRequest{
+		CWD:          cwd,
+		ExplicitRoot: *projectRoot,
+	}
+
+	proj, err := resolver.Resolve(context.Background(), req)
+	if err != nil {
+		return mapProjectError(stderr, err)
+	}
+
+	root := proj.Root
+
+	// Verify the project root has a .royo-learn/config.yaml marker.
+	// The resolver can succeed without a marker (e.g., explicit root
+	// that just happens to be a valid directory). Doctor requires the
+	// marker to confirm this is an initialized project.
+	markerPath := filepath.Join(root, ".royo-learn", "config.yaml")
+	if _, statErr := os.Stat(markerPath); statErr != nil {
+		_ = logging.WriteError(stderr, logging.ErrorEnvelope{
+			Code:    project.ErrProjectNotFound,
+			Message: fmt.Sprintf("no project marker found at %s", root),
+		})
+		return exitProjectNotFound
+	}
+
+	runner := doctor.NewRunner(
+		doctor.WithProjectRoot(root),
+		doctor.WithTrustedRoots([]string{root}),
+		doctor.WithFixSafe(*fixSafe),
+	)
+	defer runner.Close()
+
+	var report *doctor.Report
+	if len(checkFilters) > 0 {
+		// Run specific checks.
+		report = &doctor.Report{Ok: true}
+		for name := range checkFilters {
+			check, checkErr := runner.RunCheck(context.Background(), name)
+			if checkErr != nil {
+				return writeDoctorError(stderr, "invalid_argument", "doctor: %v", checkErr)
+			}
+			if check != nil {
+				report.Checks = append(report.Checks, *check)
+				if check.Status == doctor.StatusFail {
+					report.Ok = false
+				}
+			}
+		}
+		report.Summary = fmt.Sprintf("%d check(s) executed", len(report.Checks))
+	} else {
+		report, err = runner.Run(context.Background())
+		if err != nil {
+			return writeDoctorError(stderr, "invalid_argument", "doctor: %v", err)
+		}
+	}
+
+	if *jsonFlag {
+		data, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			return writeDoctorError(stderr, "invalid_argument", "doctor: cannot marshal report: %v", err)
+		}
+		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+	} else {
+		_, _ = fmt.Fprintf(stdout, "%s\n", report.Summary)
+		for _, c := range report.Checks {
+			_, _ = fmt.Fprintf(stdout, "  [%s] %s: %s\n", c.Status, c.Name, c.Message)
+		}
+	}
+
+	if report.Ok {
+		return exitSuccess
+	}
+	return exitFailure
+}
+
+// mapProjectError converts a project.Error to the appropriate exit code
+// and writes the error envelope to stderr.
+func mapProjectError(stderr io.Writer, err error) int {
+	var pErr *project.Error
+	if errors.As(err, &pErr) {
+		switch pErr.Code {
+		case project.ErrProjectNotFound:
+			_ = logging.WriteError(stderr, logging.ErrorEnvelope{
+				Code:    project.ErrProjectNotFound,
+				Message: pErr.Message,
+			})
+			return exitProjectNotFound
+		case project.ErrAmbiguousProject:
+			_ = logging.WriteError(stderr, logging.ErrorEnvelope{
+				Code:    project.ErrAmbiguousProject,
+				Message: pErr.Message,
+			})
+			return exitAmbiguousProject
+		}
+	}
+	return writeDoctorError(stderr, "invalid_argument", "doctor: %v", err)
+}
+
+func writeDoctorError(stderr io.Writer, code, format string, args ...interface{}) int {
+	msg := fmt.Sprintf(format, args...)
+	_ = logging.WriteError(stderr, logging.ErrorEnvelope{
+		Code:        code,
+		Message:     msg,
+		Recoverable: true,
+		Details:     map[string]any{},
+		NextAction:  `run "royo-learn doctor"`,
+	})
+	return exitFailure
 }

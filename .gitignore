@@ -1,7 +1,6 @@
 # Local AI runtime state
 .atl/
 
-# Build artifacts
-royo-learn
-royo-learn.exe
-*.exe
+# Build artifacts (root directory only)
+/royo-learn
+/royo-learn.exe
