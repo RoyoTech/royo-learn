@@ -79,3 +79,27 @@ runtime command emitted one valid JSON object and no diagnostic output.
 installed (`/usr/bin/bash: line 1: make: command not found`). Its individual,
 equivalent commands were executed successfully above; CI runs the same checks
 on supported GitHub-hosted runners.
+
+## T01 — Config loader dependency and design notes
+
+### Resolved dependencies
+
+- `gopkg.in/yaml.v3 v3.0.1` is the direct YAML parser for configuration files.
+  It is used by `internal/config` to decode `.royo-learn/config.yaml` and the
+  user config file with strict field matching (`KnownFields(true)`), rejection
+  of YAML aliases, and a 1 MiB size limit. This dependency was previously
+  available only as an indirect requirement of the MCP SDK; T01 promotes it to
+  a direct dependency because config loading is a core runtime responsibility.
+
+### Design choices
+
+- Config precedence is implemented as compiled defaults < user config < project
+  config. Explicit CLI flags and environment variables are intentionally left
+  for callers to apply after `Load` returns, keeping the loader free of flag
+  package dependencies in Task 1.
+- The user config directory uses `os.UserConfigDir()` and resolves to
+  `<UserConfigDir>/royo-learn/config.yaml` on all platforms.
+- Validation rejects unknown YAML keys, YAML aliases, and config files larger
+  than 1 MiB. Path validation checks `project_root` and `shared_root` against
+  an explicit list of trusted roots and returns typed `*config.Error` values
+  with stable codes (`invalid_config`, `path_outside_root`).
