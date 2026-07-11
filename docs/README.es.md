@@ -18,20 +18,43 @@ No reemplaza a Gentle-AI ni a Engram:
 
 ---
 
-### Cómo funciona
+### Cómo funciona — un ejemplo real
 
-> **Vos**: *"Dame la frase de aprendizaje para el bug de versiones en los README multi-idioma que acabamos de arreglar."*
->
-> **Modelo**: *"Aprendete esto: cuando un proyecto tiene READMEs multi-idioma con badges de traducción, después de cada release hay que sincronizar todas las versiones. El README canónico en inglés es la fuente de verdad. Bash usa `--version` y `--uninstall` con doble guion; PowerShell usa `-Version` y `-Uninstall` con un solo guion. Nunca referenciar una versión que no existe (ej. v1.0.0 cuando el release es v0.1.0). Después de cada release, correr `grep -r 'v[0-9]' docs/README.*.md` para verificar consistencia."*
->
-> **Vos**: *[guardás la frase]* → próxima sesión → la decís → royo-learn la persiste para siempre.
+**La situación**: lanzamos v0.1.0 y actualizamos el README en inglés. Pero la
+traducción al español seguía diciendo `v1.0.0` y usaba `--version` en los bloques
+de PowerShell. El usuario ejecutó `install.ps1 --version v1.0.0` y falló. Después
+de varias iteraciones arreglamos las traducciones y el script instalador.
 
-El modelo formatea el aprendizaje con la estructura correcta (título, contexto, observación, lección). Vos revisás, aprobás y publicás. La próxima vez que el modelo enfrente la misma situación, recupera el aprendizaje y lo aplica.
+**Paso 1 — Pedirle al modelo una frase de aprendizaje:**
 
-Frases que disparan el ciclo:
+> *"Dame la frase de aprendizaje que resume lo que acaba de pasar: el problema de
+> versiones en los README multi-idioma, por qué falló, y cómo lo arreglamos."*
+
+El modelo responde con una frase completa y bien estructurada:
+
+> *"Aprendete esto: cuando un proyecto tiene READMEs multi-idioma con badges de
+> traducción, después de cada release hay que sincronizar todas las traducciones
+> con la fuente canónica en inglés. El error: el README en español referenciaba
+> v1.0.0 y usaba `--version` en PowerShell, pero el release real era v0.1.0 y
+> PowerShell requiere `-Version` con un solo guion. La solución: grep a todos los
+> docs/README.*.md después de cada release para verificar consistencia de
+> versiones, y hacer que install.ps1 acepte tanto `-Version` como `--version`.
+> Bash mantiene `--version`, PowerShell usa `-Version`."*
+
+**Paso 2 — Copiar la frase y disparar la captura:**
+
+> *"Capturá este aprendizaje."* ← pegás la frase
+
+**Paso 3 — El modelo ejecuta `capture_learning` vía royo-learn MCP.** El aprendizaje
+queda persistido en la base de datos del proyecto con título, contexto, observación
+y lección. En sesiones futuras el modelo lo recupera y lo aplica — no solo queda
+guardado como memoria, sino estructurado para que el modelo pueda razonar sobre él.
+
+**Frases que disparan el ciclo:**
 - *"Dame la frase de aprendizaje para…"*
 - *"Aprendete esto: …"*
-- *"No quiero que esto vuelva a pasar: …"*
+- *"Capturá este aprendizaje"*
+- *"No quiero que esto vuelva a pasar"*
 
 ---
 

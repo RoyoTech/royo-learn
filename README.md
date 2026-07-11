@@ -18,20 +18,42 @@ It does not replace Gentle-AI or Engram:
 
 ---
 
-### How it works
+### How it works — a real example
 
-> **You**: *"Give me the learning phrase for the multi-language README version bug we just fixed."*
->
-> **Model**: *"Capture this as a learning: when a project has multi-language READMEs with translation badges, after every release all translations must be synced. The canonical English README is the source of truth. Bash uses `--version` and `--uninstall` with double dash; PowerShell uses `-Version` and `-Uninstall` with single dash. Never reference a release version that does not exist (e.g. v1.0.0 when the release is v0.1.0). After every release, run `grep -r 'v[0-9]' docs/README.*.md` to verify consistency. Add this check to the release checklist."*
->
-> **You**: *[save the phrase]* → next session → say it → royo-learn persists it permanently.
+**The situation**: we released v0.1.0 and updated the English README. But the Spanish
+translation still said `v1.0.0` and used `--version` in PowerShell blocks. The user
+ran `install.ps1 --version v1.0.0` and it failed. After several iterations we fixed
+the translations and the installer script.
 
-The model formats the learning with the right structure (title, context, observation, lesson). You review, approve, and publish. Next time the model encounters the same situation, it retrieves the learning and applies it.
+**Step 1 — Ask the model for a learning phrase:**
 
-Trigger phrases that start the cycle:
+> *"Give me the learning phrase that summarizes what just happened: the multi-language
+> README version mismatch, why it failed, and how we fixed it."*
+
+The model responds with a complete, well-structured phrase:
+
+> *"Capture this as a learning: when a project has multi-language READMEs with
+> translation badges, after every release all translations must be synced to the
+> canonical English source. The bug: Spanish README referenced v1.0.0 and used
+> `--version` in PowerShell, but the actual release was v0.1.0 and PowerShell
+> requires `-Version` with a single dash. The fix: grep all docs/README.*.md after
+> each release to verify version consistency, and make install.ps1 accept both
+> `-Version` and `--version`. Bash keeps `--version`, PowerShell uses `-Version`."*
+
+**Step 2 — Copy the phrase and trigger capture:**
+
+> *"Capture this learning."* ← paste the phrase
+
+**Step 3 — The model runs `capture_learning` via royo-learn MCP.** The learning is
+persisted in the project database with title, context, observation, and lesson.
+In future sessions the model retrieves it and applies it — not just stored as
+memory, but structured so the model can reason about it.
+
+**Trigger phrases:**
 - *"Give me the learning phrase for…"*
 - *"Aprendete esto: …"*
-- *"I don't want this to happen again: …"*
+- *"Capture this learning"*
+- *"I don't want this to happen again"*
 
 ---
 
