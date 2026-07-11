@@ -417,6 +417,45 @@ type Occurrence struct {
 	Actor                Actor
 }
 
+// RecurrenceRecord tracks a recurrence of a learning pattern.
+// Different captures of the same conceptual learning produce the same
+// RecurrenceFingerprint, and each capture creates one RecurrenceRecord.
+type RecurrenceRecord struct {
+	ID                    RecurrenceRecordID
+	RecurrenceFingerprint string
+	LearningID            LearningID
+	ProjectID             ProjectID
+	Summary               string
+	OccurredAt            time.Time
+}
+
+// RecurrenceMetrics computes frequency, interval, and trend for a recurrence pattern.
+type RecurrenceMetrics struct {
+	Fingerprint  string
+	Count        int
+	FirstSeen    time.Time
+	LastSeen     time.Time
+	AvgInterval  time.Duration
+	Trend        RecurrenceTrend
+	NeedsReview  bool
+	ReviewReason string
+}
+
+// RecurrenceTrend indicates whether the recurrence pattern is increasing,
+// decreasing, or stable.
+type RecurrenceTrend string
+
+const (
+	TrendIncreasing RecurrenceTrend = "increasing"
+	TrendDecreasing RecurrenceTrend = "decreasing"
+	TrendSporadic   RecurrenceTrend = "sporadic"
+	TrendStable     RecurrenceTrend = "stable"
+	TrendFirst      RecurrenceTrend = "first"
+)
+
+// RecurrenceRecordID is a typed string ID for a RecurrenceRecord.
+type RecurrenceRecordID string
+
 // AuditEvent is an append-only record of a system action.
 type AuditEvent struct {
 	Sequence      int

@@ -145,23 +145,23 @@ Aceptación: Engram apagado no impide capture.
 
 ## T11 Gentle-AI/Codex setup
 
-- [ ] Skill install helper.
-- [ ] registry refresh.
-- [ ] Codex MCP register.
-- [ ] config backup.
-- [ ] no duplicate.
-- [ ] doctor checks.
+- [x] Skill install helper.
+- [x] registry refresh.
+- [x] Codex MCP register.
+- [x] config backup.
+- [x] no duplicate.
+- [x] doctor checks.
 
 Aceptación: stack existente sigue operativo.
 
 ## T12 Recurrence
 
-- [ ] fingerprint.
-- [ ] occurrence.
-- [ ] metrics.
-- [ ] needs_review policy.
-- [ ] CLI/MCP.
-- [ ] tests.
+- [x] fingerprint.
+- [x] occurrence.
+- [x] metrics.
+- [x] needs_review policy.
+- [x] CLI/MCP.
+- [x] tests.
 
 Aceptación: segunda recurrencia visible en status.
 

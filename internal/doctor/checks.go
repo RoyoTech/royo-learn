@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,13 +22,13 @@ func (r *Runner) registerBuiltinChecks() {
 	r.Register("git", gitCheck)
 	r.Register("filesystem", filesystemCheck)
 
-	// Optional checks — stubbed as degraded until implemented.
+	// Optional checks — now implemented.
+	r.Register("gentle-ai", gentleAICheck)
+	r.Register("skill-registry", skillRegistryCheck)
+	r.Register("codex-mcp", codexMCPCheck)
 	r.Register("database", stubCheck("database", "not implemented yet"))
 	r.Register("migrations", stubCheck("migrations", "not implemented yet"))
 	r.Register("engram", stubCheck("engram", "not implemented yet"))
-	r.Register("gentle-ai", stubCheck("gentle-ai", "not implemented yet"))
-	r.Register("skill-registry", stubCheck("skill-registry", "not implemented yet"))
-	r.Register("codex-mcp", stubCheck("codex-mcp", "not implemented yet"))
 	r.Register("shared-library", stubCheck("shared-library", "not implemented yet"))
 	r.Register("record-integrity", stubCheck("record-integrity", "not implemented yet"))
 }
@@ -250,5 +251,147 @@ func filesystemCheck(ctx context.Context, r *Runner) *Check {
 		Name:    "filesystem",
 		Status:  StatusPass,
 		Message: fmt.Sprintf("%s directory exists", royoDir),
+	}
+}
+
+// ---------------------------------------------------------------------------
+// setup checks — verify agent environment integration
+// ---------------------------------------------------------------------------
+
+// gentleAICheck verifies that the Gentle-AI/Codex config file exists
+// and is a valid JSON file.
+func gentleAICheck(ctx context.Context, r *Runner) *Check {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return &Check{
+			Name:    "gentle-ai",
+			Status:  StatusDegraded,
+			Message: "cannot determine home directory for gentle-ai config",
+			Detail:  err.Error(),
+		}
+	}
+
+	cfgPath := filepath.Join(home, ".config", "opencode", "opencode.json")
+	info, err := os.Stat(cfgPath)
+	if err != nil {
+		return &Check{
+			Name:    "gentle-ai",
+			Status:  StatusDegraded,
+			Message: fmt.Sprintf("gentle-ai config not found at %s", cfgPath),
+			Detail:  "run royo-learn setup to register",
+		}
+	}
+
+	return &Check{
+		Name:    "gentle-ai",
+		Status:  StatusPass,
+		Message: fmt.Sprintf("gentle-ai config found (%d bytes)", info.Size()),
+		Detail:  cfgPath,
+	}
+}
+
+// skillRegistryCheck verifies that the project has skills installed
+// in the agent's skill directory.
+func skillRegistryCheck(ctx context.Context, r *Runner) *Check {
+	if r.projectRoot == "" {
+		return &Check{
+			Name:    "skill-registry",
+			Status:  StatusFail,
+			Message: "project root is not set",
+		}
+	}
+
+	skillsDir := filepath.Join(r.projectRoot, "skills")
+	entries, err := os.ReadDir(skillsDir)
+	if err != nil {
+		return &Check{
+			Name:    "skill-registry",
+			Status:  StatusDegraded,
+			Message: fmt.Sprintf("cannot read skills dir %s: %v", skillsDir, err),
+		}
+	}
+
+	count := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			// Check for SKILL.md.
+			skillFile := filepath.Join(skillsDir, e.Name(), "SKILL.md")
+			if _, err := os.Stat(skillFile); err == nil {
+				count++
+			}
+		}
+	}
+
+	if count == 0 {
+		return &Check{
+			Name:    "skill-registry",
+			Status:  StatusDegraded,
+			Message: "no skills found in project",
+			Detail:  "run royo-learn setup to install skills",
+		}
+	}
+
+	return &Check{
+		Name:    "skill-registry",
+		Status:  StatusPass,
+		Message: fmt.Sprintf("%d project skill(s) found", count),
+		Detail:  skillsDir,
+	}
+}
+
+// codexMCPCheck verifies that royo-learn is registered as an MCP server
+// in the agent config.
+func codexMCPCheck(ctx context.Context, r *Runner) *Check {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return &Check{
+			Name:    "codex-mcp",
+			Status:  StatusDegraded,
+			Message: "cannot determine home directory",
+			Detail:  err.Error(),
+		}
+	}
+
+	cfgPath := filepath.Join(home, ".config", "opencode", "opencode.json")
+	cfgBytes, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return &Check{
+			Name:    "codex-mcp",
+			Status:  StatusDegraded,
+			Message: fmt.Sprintf("cannot read config at %s", cfgPath),
+		}
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(cfgBytes, &raw); err != nil {
+		return &Check{
+			Name:    "codex-mcp",
+			Status:  StatusDegraded,
+			Message: "cannot parse agent config as JSON",
+		}
+	}
+
+	for _, providers := range []string{"mcpServers", "mcp_servers"} {
+		if servers, ok := raw[providers].(map[string]any); ok {
+			for name, entry := range servers {
+				if _, isMap := entry.(map[string]any); isMap {
+					if name == "royo-learn" {
+						return &Check{
+							Name:    "codex-mcp",
+							Status:  StatusPass,
+							Message: "royo-learn is registered as MCP server",
+							Detail:  cfgPath,
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return &Check{
+		Name:    "codex-mcp",
+		Status:  StatusDegraded,
+		Message: "royo-learn is not registered as an MCP server",
+		Detail:  "run royo-learn setup to register",
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"agent-royo-learn/internal/logging"
 	"agent-royo-learn/internal/project"
 	"agent-royo-learn/internal/publish"
+	"agent-royo-learn/internal/recurrence"
 	"agent-royo-learn/internal/storage"
 
 	"github.com/google/uuid"
@@ -73,6 +74,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runEngramHealth(args[1:], stdout, stderr)
 	case "engram-search":
 		return runEngramSearch(args[1:], stdout, stderr)
+	case "recurrences":
+		return runRecurrences(args[1:], stdout, stderr)
+	case "metrics":
+		return runMetrics(args[1:], stdout, stderr)
 	default:
 		return writeUnknownCommandError(stderr)
 	}
@@ -1130,6 +1135,182 @@ func writeEngramError(stderr io.Writer, code, format string, args ...interface{}
 		Recoverable: true,
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn engram-health"`,
+	})
+	return exitFailure
+}
+
+// ---------------------------------------------------------------------------
+// recurrences
+// ---------------------------------------------------------------------------
+
+func runRecurrences(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("recurrences", flag.ContinueOnError)
+	learningID := fs.String("learning-id", "", "learning ID to list recurrences for (required)")
+	projectRoot := fs.String("project-root", "", "project root directory")
+	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
+	limit := fs.Int("limit", 50, "max results")
+
+	if err := fs.Parse(args); err != nil {
+		return writeRecurrenceError(stderr, "invalid_argument", "recurrences: %v", err)
+	}
+	if *learningID == "" {
+		return writeRecurrenceError(stderr, "invalid_argument", "recurrences: --learning-id is required")
+	}
+
+	_, db, _, exitCode := resolvePublishContext(*projectRoot, stderr)
+	if exitCode != exitSuccess {
+		return exitCode
+	}
+	defer db.Close()
+
+	ctx := context.Background()
+	records, err := recurrence.ListRecurrencesForLearning(ctx, db, domain.LearningID(*learningID), *limit)
+	if err != nil {
+		return writeRecurrenceError(stderr, "invalid_argument", "recurrences: %v", err)
+	}
+
+	if *jsonFlag {
+		items := make([]map[string]any, 0, len(records))
+		for _, r := range records {
+			items = append(items, map[string]any{
+				"id":                     string(r.ID),
+				"recurrence_fingerprint": r.RecurrenceFingerprint,
+				"learning_id":            string(r.LearningID),
+				"summary":                r.Summary,
+				"occurred_at":            r.OccurredAt.Format(time.RFC3339),
+			})
+		}
+		data, _ := json.MarshalIndent(items, "", "  ")
+		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+	} else {
+		_, _ = fmt.Fprintf(stdout, "Recurrences for learning %s:\n", *learningID)
+		for _, r := range records {
+			_, _ = fmt.Fprintf(stdout, "  %s: %s (%s)\n",
+				r.ID, r.Summary, r.OccurredAt.Format(time.RFC3339))
+		}
+		if len(records) == 0 {
+			_, _ = fmt.Fprintf(stdout, "  (none)\n")
+		}
+	}
+
+	return exitSuccess
+}
+
+// ---------------------------------------------------------------------------
+// metrics
+// ---------------------------------------------------------------------------
+
+func runMetrics(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("metrics", flag.ContinueOnError)
+	learningID := fs.String("learning-id", "", "learning ID to compute metrics for (required)")
+	projectRoot := fs.String("project-root", "", "project root directory")
+	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
+
+	if err := fs.Parse(args); err != nil {
+		return writeRecurrenceError(stderr, "invalid_argument", "metrics: %v", err)
+	}
+	if *learningID == "" {
+		return writeRecurrenceError(stderr, "invalid_argument", "metrics: --learning-id is required")
+	}
+
+	root, db, _, exitCode := resolvePublishContext(*projectRoot, stderr)
+	if exitCode != exitSuccess {
+		return exitCode
+	}
+	defer db.Close()
+
+	ctx := context.Background()
+	lid := domain.LearningID(*learningID)
+
+	// Get the learning to compute its fingerprint.
+	tx, txErr := db.DB.BeginTx(ctx, nil)
+	if txErr != nil {
+		return writeRecurrenceError(stderr, "invalid_argument", "metrics: begin tx: %v", txErr)
+	}
+	defer tx.Rollback()
+
+	learning, err := storage.GetLearning(ctx, tx, lid)
+	if err != nil || learning == nil {
+		tx.Rollback()
+		return writeRecurrenceError(stderr, "invalid_argument", "metrics: learning %q not found", *learningID)
+	}
+	tx.Rollback()
+
+	fp := recurrence.RecurrenceFingerprint(learning)
+
+	// Resolve project.
+	cwd, _ := os.Getwd()
+	resolver := project.NewResolver()
+	req := &project.ResolveRequest{CWD: cwd, ExplicitRoot: root}
+	proj, err := resolver.Resolve(context.Background(), req)
+	if err != nil {
+		return mapProjectError(stderr, err)
+	}
+
+	projID, projErr := resolveProjectID(ctx, db, proj)
+	if projErr != nil {
+		return writeRecurrenceError(stderr, "invalid_argument", "metrics: %v", projErr)
+	}
+
+	metrics, err := recurrence.ComputeMetrics(ctx, db, projID, fp)
+	if err != nil {
+		return writeRecurrenceError(stderr, "invalid_argument", "metrics: %v", err)
+	}
+
+	status, _ := recurrence.CheckNeedsReview(ctx, db, projID, learning)
+	metrics.NeedsReview = status.NeedsReview
+
+	if *jsonFlag {
+		data, _ := json.MarshalIndent(map[string]any{
+			"fingerprint":  metrics.Fingerprint,
+			"count":        metrics.Count,
+			"first_seen":   metrics.FirstSeen.Format(time.RFC3339),
+			"last_seen":    metrics.LastSeen.Format(time.RFC3339),
+			"avg_interval": metrics.AvgInterval.String(),
+			"trend":        string(metrics.Trend),
+			"needs_review": metrics.NeedsReview,
+		}, "", "  ")
+		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+	} else {
+		_, _ = fmt.Fprintf(stdout, "Metrics for learning %s:\n", *learningID)
+		_, _ = fmt.Fprintf(stdout, "  Count: %d\n", metrics.Count)
+		_, _ = fmt.Fprintf(stdout, "  First seen: %s\n", metrics.FirstSeen.Format(time.RFC3339))
+		_, _ = fmt.Fprintf(stdout, "  Last seen: %s\n", metrics.LastSeen.Format(time.RFC3339))
+		_, _ = fmt.Fprintf(stdout, "  Avg interval: %s\n", metrics.AvgInterval.String())
+		_, _ = fmt.Fprintf(stdout, "  Trend: %s\n", metrics.Trend)
+		_, _ = fmt.Fprintf(stdout, "  Needs review: %v\n", metrics.NeedsReview)
+	}
+
+	return exitSuccess
+}
+
+func resolveProjectID(ctx context.Context, db *storage.DB, proj *project.Project) (domain.ProjectID, error) {
+	tx, err := db.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+
+	existing, err := storage.GetProjectByKey(ctx, tx, proj.Key)
+	if err != nil {
+		return "", err
+	}
+	if existing != nil {
+		tx.Rollback()
+		return existing.ID, nil
+	}
+	tx.Rollback()
+	return "", fmt.Errorf("project not registered")
+}
+
+func writeRecurrenceError(stderr io.Writer, code, format string, args ...interface{}) int {
+	msg := fmt.Sprintf(format, args...)
+	_ = logging.WriteError(stderr, logging.ErrorEnvelope{
+		Code:        code,
+		Message:     msg,
+		Recoverable: true,
+		Details:     map[string]any{},
+		NextAction:  `run "royo-learn recurrences --learning-id <id>"`,
 	})
 	return exitFailure
 }

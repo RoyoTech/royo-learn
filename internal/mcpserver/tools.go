@@ -12,6 +12,7 @@ import (
 	"agent-royo-learn/internal/curate"
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/publish"
+	"agent-royo-learn/internal/recurrence"
 	"agent-royo-learn/internal/storage"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -129,6 +130,15 @@ type getLearningInput struct {
 }
 
 type doctorInput struct{}
+
+type listRecurrencesInput struct {
+	LearningID string `json:"learning_id" jsonschema:"required,learning ID"`
+	Limit      int    `json:"limit,omitempty"`
+}
+
+type computeMetricsInput struct {
+	LearningID string `json:"learning_id" jsonschema:"required,learning ID"`
+}
 
 // ---------------------------------------------------------------------------
 // Tool helpers
@@ -414,6 +424,78 @@ func handleDoctor(srv *Server) func(ctx context.Context, req *mcp.CallToolReques
 			"ok":      ok,
 			"version": meta.Version,
 			"checks":  checks,
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// list_recurrences / compute_metrics
+// ---------------------------------------------------------------------------
+
+func handleListRecurrences(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in listRecurrencesInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in listRecurrencesInput) (*mcp.CallToolResult, any, error) {
+		limit := in.Limit
+		if limit <= 0 {
+			limit = 50
+		}
+		records, err := recurrence.ListRecurrencesForLearning(ctx, srv.db, domain.LearningID(in.LearningID), limit)
+		if err != nil {
+			return toolError("list_recurrences_failed", err.Error())
+		}
+
+		items := make([]map[string]any, 0, len(records))
+		for _, r := range records {
+			items = append(items, map[string]any{
+				"id":                     string(r.ID),
+				"recurrence_fingerprint": r.RecurrenceFingerprint,
+				"learning_id":            string(r.LearningID),
+				"project_id":             string(r.ProjectID),
+				"summary":                r.Summary,
+				"occurred_at":            r.OccurredAt.Format(time.RFC3339),
+			})
+		}
+		return toolResultJSON(items)
+	}
+}
+
+func handleComputeMetrics(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in computeMetricsInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in computeMetricsInput) (*mcp.CallToolResult, any, error) {
+		tx, err := srv.db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if err != nil {
+			return toolError("db_error", err.Error())
+		}
+		defer tx.Rollback()
+
+		learning, err := storage.GetLearning(ctx, tx, domain.LearningID(in.LearningID))
+		if err != nil {
+			return toolError("get_learning_failed", err.Error())
+		}
+		if learning == nil {
+			return toolError("learning_not_found", fmt.Sprintf("learning %q not found", in.LearningID))
+		}
+		tx.Rollback()
+
+		fp := recurrence.RecurrenceFingerprint(learning)
+		metrics, err := recurrence.ComputeMetrics(ctx, srv.db, srv.projectID, fp)
+		if err != nil {
+			return toolError("compute_metrics_failed", err.Error())
+		}
+
+		status, _ := recurrence.CheckNeedsReview(ctx, srv.db, srv.projectID, learning)
+		metrics.NeedsReview = status.NeedsReview
+		if status.Reason != "" {
+			metrics.ReviewReason = status.Reason
+		}
+
+		return toolResultJSON(map[string]any{
+			"fingerprint":   metrics.Fingerprint,
+			"count":         metrics.Count,
+			"first_seen":    metrics.FirstSeen.Format(time.RFC3339),
+			"last_seen":     metrics.LastSeen.Format(time.RFC3339),
+			"avg_interval":  metrics.AvgInterval.String(),
+			"trend":         string(metrics.Trend),
+			"needs_review":  metrics.NeedsReview,
+			"review_reason": metrics.ReviewReason,
 		})
 	}
 }

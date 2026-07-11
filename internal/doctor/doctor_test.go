@@ -221,14 +221,11 @@ func TestDegradedOptionalChecks(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Find all optional checks (database, migrations, engram, etc.)
+	// Find all optional checks not yet implemented.
 	optionalSet := map[string]bool{
 		"database":         true,
 		"migrations":       true,
 		"engram":           true,
-		"gentle-ai":        true,
-		"skill-registry":   true,
-		"codex-mcp":        true,
 		"shared-library":   true,
 		"record-integrity": true,
 	}

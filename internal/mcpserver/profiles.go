@@ -94,4 +94,26 @@ var allTools = []profileTool{
 			}, handleDoctor(srv))
 		},
 	},
+	{
+		name:        "list_recurrences",
+		description: "List recurrence records for a learning.",
+		profiles:    map[string]bool{"standard": true, "full": true},
+		register: func(ms *mcp.Server, srv *Server) {
+			mcp.AddTool(ms, &mcp.Tool{
+				Name:        "list_recurrences",
+				Description: "List recurrence records for a learning, tracking when the same pattern appears across captures.",
+			}, handleListRecurrences(srv))
+		},
+	},
+	{
+		name:        "compute_metrics",
+		description: "Compute recurrence metrics for a learning.",
+		profiles:    map[string]bool{"standard": true, "full": true},
+		register: func(ms *mcp.Server, srv *Server) {
+			mcp.AddTool(ms, &mcp.Tool{
+				Name:        "compute_metrics",
+				Description: "Compute recurrence metrics (frequency, interval, trend) for a learning's recurrence pattern.",
+			}, handleComputeMetrics(srv))
+		},
+	},
 }
