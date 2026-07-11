@@ -18,6 +18,68 @@ It does not replace Gentle-AI or Engram:
 
 ---
 
+## In plain words
+
+If you are not a developer, here is what royo-learn does — without jargon.
+
+**The problem.** AI assistants that help on a project start from zero in every
+conversation. An assistant can solve a problem brilliantly today, but tomorrow,
+in a new session, it remembers nothing. If the same problem comes back, it may
+repeat the same mistake. It is like a very capable employee who arrives every
+morning with no memory of the day before.
+
+Writing notes helps, but it is not enough. A note that says "this went wrong"
+does not, by itself, change how the AI works. For it to matter, the lesson has
+to reach the instructions the AI reads before it starts working.
+
+**What royo-learn does.** It works like a living project manual that stays up to
+date. Whenever something important is learned — a mistake not to repeat, a good
+practice, a project rule — it is recorded and turned into a concrete instruction
+the AI reads next time. So the next time, it already knows what to do and what to
+avoid.
+
+In one line: **royo-learn keeps a project from tripping over the same stone
+twice.**
+
+**Why it is valuable.** Remembering something does not change how you work. A
+lesson only prevents a repeat mistake if it reaches the instructions the AI
+actually uses — and if a person reviewed and approved it first. That double step
+(turn a memory into an instruction, and have a human approve it) is what
+separates royo-learn from a simple notepad, and what makes it trustworthy: not
+every idea becomes a rule, only what was verified and approved.
+
+**How it fits with the other pieces.**
+
+| Piece | What it is | Analogy |
+|---|---|---|
+| **Gentle-AI** | The environment that sets up the AI: its tools, skills, and workflows | The office, with its rules and team |
+| **Engram** | The memory of what happened in earlier sessions | The diary where events are noted |
+| **royo-learn** | Turns approved lessons into rules the AI must follow | The manual of good practices |
+
+In short: **Engram remembers; royo-learn turns that memory into a change in how
+work is done; and Gentle-AI is the environment where it all happens.** royo-learn
+also works on its own — if Engram or Gentle-AI are present it uses them, and if
+not, it still does its job.
+
+**How you use it.** You do not need to type commands or know how to code. You
+talk to the AI in plain language. It happens in three moments:
+
+1. **Capture** — When something worth remembering happens, you tell the AI:
+   *"Learn this: …"*, *"Save this for next time: …"*, or *"I don't want this to
+   happen again: …"*. Behind the scenes the AI organizes your sentence and stores
+   it.
+2. **Review** — A captured lesson is not a rule yet. A person reviews it and
+   decides: approve, reject, or ask for more evidence. This filter keeps noise
+   out.
+3. **Publish** — Once approved, the lesson becomes a real instruction inside the
+   project. From then on the AI reads and applies it — and if something goes
+   wrong, the change can be undone.
+
+For technical users, the same three steps are available on the command line
+(`royo-learn capture`, `curate`, `publish`).
+
+---
+
 ### How it works — a real example
 
 **The situation**: we released v0.1.0 and updated the English README. But the Spanish
