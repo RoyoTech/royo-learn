@@ -79,3 +79,55 @@ runtime command emitted one valid JSON object and no diagnostic output.
 installed (`/usr/bin/bash: line 1: make: command not found`). Its individual,
 equivalent commands were executed successfully above; CI runs the same checks
 on supported GitHub-hosted runners.
+
+## T01 — Config loader dependency and design notes
+
+### Resolved dependencies
+
+- `gopkg.in/yaml.v3 v3.0.1` is the direct YAML parser for configuration files.
+  It is used by `internal/config` to decode `.royo-learn/config.yaml` and the
+  user config file with strict field matching (`KnownFields(true)`), rejection
+  of YAML aliases, and a 1 MiB size limit. This dependency was previously
+  available only as an indirect requirement of the MCP SDK; T01 promotes it to
+  a direct dependency because config loading is a core runtime responsibility.
+
+### Design choices
+
+- Config precedence is implemented as compiled defaults < user config < project
+  config. Explicit CLI flags and environment variables are intentionally left
+  for callers to apply after `Load` returns, keeping the loader free of flag
+  package dependencies in Task 1.
+- The user config directory uses `os.UserConfigDir()` and resolves to
+  `<UserConfigDir>/royo-learn/config.yaml` on all platforms.
+- Validation rejects unknown YAML keys, YAML aliases, and config files larger
+  than 1 MiB. Path validation checks `project_root` and `shared_root` against
+  an explicit list of trusted roots and returns typed `*config.Error` values
+  with stable codes (`invalid_config`, `path_outside_root`).
+
+## Handoff — T01 Task 1 complete, PR #1 open
+
+### Current state
+
+- T01 Task 1 is committed on local `master` as `7af28fb`.
+- The commit is pushed to `origin/master` on `RoyoTech/royo-learn`.
+- Branch `main` exists on the remote at the T00 commit (`f172143`).
+- PR #1 is open: https://github.com/RoyoTech/royo-learn/pull/1 (master → main).
+- Native review receipt lineage `t01-config-project-v2` is approved and both
+  `pre-commit` and `pre-PR` gates returned `allow`.
+
+### How to resume
+
+1. If PR #1 was merged: pull `main`, create a new branch from `main`, and start
+   T01 Task 2.
+2. If PR #1 is still open: continue from the current `master` branch for T01
+   Task 2, then rebase or retarget before the next PR.
+3. Next work: T01 Task 2 — project resolver (`internal/project`), integrated
+   with `internal/config` and exposed through the `doctor` and CLI commands.
+
+### Operational notes
+
+- `.gitattributes` sets `* text=auto` to avoid CRLF/LF noise on Windows.
+- `.gitignore` ignores build artifacts (`royo-learn`, `*.exe`).
+- `openspec/changes/t01-config-project-v2/reviews/` contains non-authoritative
+  receipt mirrors; the authoritative store is under
+  `.git/gentle-ai/review-transactions/v1/t01-config-project-v2/`.
