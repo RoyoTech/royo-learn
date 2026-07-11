@@ -66,6 +66,7 @@ The binary is installed to `~/.local/bin/royo-learn`.
 ### Windows (PowerShell)
 
 ```powershell
+cd ~/Downloads
 Invoke-WebRequest -Uri https://github.com/RoyoTech/royo-learn/releases/latest/download/install.ps1 -OutFile install.ps1
 .\install.ps1
 ```
