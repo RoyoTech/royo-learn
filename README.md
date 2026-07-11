@@ -43,7 +43,7 @@ royo-learn.exe    # Windows
 ### Linux / macOS
 
 ```bash
-curl -fsSL https://github.com/angel-royo/royo-learn/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/RoyoTech/royo-learn/releases/latest/download/install.sh | bash
 ```
 
 Or manually:
@@ -61,7 +61,7 @@ The binary is installed to `~/.local/bin/royo-learn`. Add it to your PATH if nee
 
 ```powershell
 # Download the installer
-Invoke-WebRequest -Uri https://github.com/angel-royo/royo-learn/releases/latest/download/install.ps1 -OutFile install.ps1
+Invoke-WebRequest -Uri https://github.com/RoyoTech/royo-learn/releases/latest/download/install.ps1 -OutFile install.ps1
 
 # Install
 .\install.ps1 --version v1.0.0
@@ -76,7 +76,7 @@ The binary is installed to `%LOCALAPPDATA%\royo-learn\bin\royo-learn.exe`.
 
 ```bash
 # Prerequisites: Go 1.24+
-git clone https://github.com/angel-royo/royo-learn.git
+git clone https://github.com/RoyoTech/royo-learn.git
 cd royo-learn
 make build       # Build for current platform
 make build-all   # Cross-compile all platforms
@@ -145,18 +145,36 @@ royo-learn e2e --temp
 
 ## MCP Server Setup
 
-Register royo-learn as an MCP server in your Codex/Claude configuration:
-
-### Codex
+The `setup` command registers royo-learn as an MCP server and installs the
+project's Skills across Claude Code, Codex CLI, and OpenCode — all in one step:
 
 ```bash
-codex mcp add royo-learn -- royo-learn mcp-serve
-codex mcp list
+# See current status
+royo-learn setup status
+
+# Install in all three agents
+royo-learn setup install --agent all
+
+# Install in a specific agent (skills only, skip MCP)
+royo-learn setup install --agent claude-code --skip-mcp
+
+# Dry-run first
+royo-learn setup install --agent all --dry-run --json
+
+# Uninstall
+royo-learn setup uninstall --agent all
 ```
 
-### Claude Desktop / OpenCode
+### Manual registration
 
-Add to your MCP config file:
+If you prefer to register manually:
+
+**Codex**:
+```bash
+codex mcp add royo-learn -- royo-learn mcp-serve
+```
+
+**Claude Code / OpenCode** — add to your MCP config file:
 
 ```json
 {
@@ -169,6 +187,8 @@ Add to your MCP config file:
   }
 }
 ```
+
+**OpenCode** uses the `"mcp"` key (not `"mcpServers"`) with `"command"` as an array — use `setup install --agent opencode` for correct formatting.
 
 **Profiles**: `minimal` (capture, search, doctor), `standard` (default; includes curate, preview, list, get), `full` (all tools including publish).
 
