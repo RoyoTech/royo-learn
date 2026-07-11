@@ -46,12 +46,6 @@ checksum:
   name_template: "checksums.txt"
   algorithm: sha256
 
-sboms:
-  - id: default
-    artifacts: all
-    documents:
-      - "{{ .ProjectName }}-{{ .Version }}-spdx.sbom.json"
-
 changelog:
   sort: asc
   filters:
