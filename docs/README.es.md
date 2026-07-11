@@ -85,13 +85,15 @@ El binario se instala en `~/.local/bin/royo-learn`.
 ### Windows
 
 ```powershell
-# Descargar el instalador
+cd ~/Downloads
 Invoke-WebRequest -Uri https://github.com/RoyoTech/royo-learn/releases/latest/download/install.ps1 -OutFile install.ps1
+.\install.ps1
+```
 
-# Instalar
+O manualmente:
+
+```powershell
 .\install.ps1 -Version v0.1.0
-
-# Desinstalar
 .\install.ps1 -Uninstall
 ```
 
