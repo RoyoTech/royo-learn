@@ -238,6 +238,19 @@ Las tres Skills que definen qué significa una experiencia:
 2. `curate-learning`
 3. `publish-learning`
 
+### Cómo capturar un aprendizaje
+
+Con royo-learn MCP activo, decile al modelo en lenguaje natural:
+
+> **"Aprendete esto: cada vez que hagamos un release, después de actualizar el README en inglés hay que revisar todas las traducciones en docs/README.*.md. Hoy el README en español tenía v1.0.0 y --version cuando el release real es v0.1.0 y PowerShell usa -Version con un solo guion. El usuario ejecutó install.ps1 --version v1.0.0 y falló. La lección es: bash usa --version, PowerShell usa -Version. Después de cada release, correr grep -r 'v[0-9]' docs/README.*.md para verificar que todas las traducciones tengan la versión correcta."**
+
+El modelo extrae título, contexto, observación y lección automáticamente
+y los persiste en la base de datos del proyecto. Otras frases que disparan la captura:
+
+- *"Aprendete esto: …"*
+- *"No quiero que esto vuelva a pasar: …"*
+- *"Guardá esto para la próxima: …"*
+
 El binario garantiza:
 
 - persistencia
