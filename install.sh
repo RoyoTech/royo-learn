@@ -25,6 +25,12 @@ detect_platform() {
     esac
     case "$os" in
         linux|darwin) ;;
+        msys*|mingw*|cygwin*)
+            error "Git Bash / MSYS / Cygwin detected. This installer is for Linux/macOS/WSL.
+  On Windows, use PowerShell instead:
+
+    Invoke-WebRequest -Uri https://github.com/RoyoTech/royo-learn/releases/latest/download/install.ps1 -OutFile install.ps1
+    .\install.ps1" ;;
         *) error "unsupported OS: $os" ;;
     esac
     echo "${os}-${arch}"
