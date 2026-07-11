@@ -1171,7 +1171,7 @@ func TestPublish_RollbackFailureObserved(t *testing.T) {
 		Actor: actor, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	curation := &domain.Curation{
-		ID: domain.CurationID(uuid.Must(uuid.NewV7()).String()),
+		ID:         domain.CurationID(uuid.Must(uuid.NewV7()).String()),
 		LearningID: learningID, Decision: domain.CurationApproveNewSkill,
 		Destination: &domain.Destination{
 			Type: domain.DestSkill, Root: "skills",
@@ -1180,7 +1180,7 @@ func TestPublish_RollbackFailureObserved(t *testing.T) {
 		Actor: actor, CreatedAt: now,
 	}
 	preview := &domain.PublicationPreview{
-		ID: domain.PreviewID(uuid.Must(uuid.NewV7()).String()),
+		ID:         domain.PreviewID(uuid.Must(uuid.NewV7()).String()),
 		LearningID: learningID, PreviewHash: previewHash,
 		RequiresApproval: false, CreatedAt: now,
 	}
@@ -1649,7 +1649,7 @@ func seedPublishEnv(t *testing.T, skillPath string, precreateFile bool, initialC
 			return err
 		}
 		curation := &domain.Curation{
-			ID: domain.CurationID(uuid.Must(uuid.NewV7()).String()),
+			ID:         domain.CurationID(uuid.Must(uuid.NewV7()).String()),
 			LearningID: learningID, Decision: decision,
 			Destination: &domain.Destination{
 				Type: domain.DestSkill, Root: "skills",
@@ -1661,7 +1661,7 @@ func seedPublishEnv(t *testing.T, skillPath string, precreateFile bool, initialC
 			return err
 		}
 		preview := &domain.PublicationPreview{
-			ID: domain.PreviewID(uuid.Must(uuid.NewV7()).String()),
+			ID:         domain.PreviewID(uuid.Must(uuid.NewV7()).String()),
 			LearningID: learningID, PreviewHash: previewHash,
 			RequiresApproval: false, CreatedAt: now,
 		}
