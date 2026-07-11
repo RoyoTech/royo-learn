@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,10 +10,15 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"agent-royo-learn/internal/config"
+	"agent-royo-learn/internal/domain"
+	"agent-royo-learn/internal/storage"
+
+	"github.com/google/uuid"
 )
 
 func TestRunVersionJSON(t *testing.T) {
@@ -515,6 +521,264 @@ func TestVersionBinaryStreamContract(t *testing.T) {
 			tt.assertion(t, stdout.Bytes(), stderr.Bytes())
 		})
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Preview, Publish, Rollback tests (RED — subcommands not implemented yet)
+// ---------------------------------------------------------------------------
+
+func TestRunPreviewMissingLearningID(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"preview"}, &stdout, &stderr)
+	if exitCode != exitFailure {
+		t.Fatalf("preview without --learning-id exit = %d, want %d", exitCode, exitFailure)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", stdout.String())
+	}
+	assertErrorEnvelopeCode(t, stderr.Bytes(), "invalid_argument")
+}
+
+func TestRunPublishMissingLearningID(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"publish"}, &stdout, &stderr)
+	if exitCode != exitFailure {
+		t.Fatalf("publish without --learning-id exit = %d, want %d", exitCode, exitFailure)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", stdout.String())
+	}
+	assertErrorEnvelopeCode(t, stderr.Bytes(), "invalid_argument")
+}
+
+func TestRunRollbackMissingPublicationID(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"rollback"}, &stdout, &stderr)
+	if exitCode != exitFailure {
+		t.Fatalf("rollback without --journal-id exit = %d, want %d", exitCode, exitFailure)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", stdout.String())
+	}
+	assertErrorEnvelopeCode(t, stderr.Bytes(), "invalid_argument")
+}
+
+func TestRunPreviewEndToEnd(t *testing.T) {
+	root := t.TempDir()
+	learningID := setupApprovedLearning(t, root)
+	if learningID == "" {
+		t.Fatal("failed to set up approved learning")
+	}
+
+	// Preview must succeed.
+	var prevOut, prevErr bytes.Buffer
+	exitCode := run([]string{
+		"preview",
+		"--project-root", root,
+		"--learning-id", learningID,
+		"--json",
+	}, &prevOut, &prevErr)
+	if exitCode != exitSuccess {
+		t.Fatalf("preview exit = %d, want %d\nstderr: %s", exitCode, exitSuccess, prevErr.String())
+	}
+
+	var prevResult map[string]interface{}
+	if err := json.Unmarshal(prevOut.Bytes(), &prevResult); err != nil {
+		t.Fatalf("preview stdout not valid JSON: %v\n%s", err, prevOut.String())
+	}
+	if _, ok := prevResult["preview_hash"]; !ok {
+		t.Fatal("preview JSON missing preview_hash")
+	}
+}
+
+func TestRunPublishAndRollbackEndToEnd(t *testing.T) {
+	root := t.TempDir()
+	learningID := setupApprovedLearning(t, root)
+	if learningID == "" {
+		t.Fatal("failed to set up approved learning")
+	}
+
+	// Generate preview to get preview hash.
+	var prevOut, prevErr bytes.Buffer
+	if got := run([]string{
+		"preview",
+		"--project-root", root,
+		"--learning-id", learningID,
+		"--json",
+	}, &prevOut, &prevErr); got != exitSuccess {
+		t.Fatalf("preview failed: stderr=%s", prevErr.String())
+	}
+
+	var prevResult map[string]interface{}
+	json.Unmarshal(prevOut.Bytes(), &prevResult)
+	previewHash, _ := prevResult["preview_hash"].(string)
+
+	// Publish with force (bypass dirty check in non-git dir).
+	var pubOut, pubErr bytes.Buffer
+	pubExit := run([]string{
+		"publish",
+		"--project-root", root,
+		"--learning-id", learningID,
+		"--preview-hash", previewHash,
+		"--force",
+		"--json",
+	}, &pubOut, &pubErr)
+	if pubExit != exitSuccess {
+		t.Fatalf("publish exit = %d, want %d\nstderr: %s", pubExit, exitSuccess, pubErr.String())
+	}
+
+	var pubResult map[string]interface{}
+	if err := json.Unmarshal(pubOut.Bytes(), &pubResult); err != nil {
+		t.Fatalf("publish stdout not valid JSON: %v\n%s", err, pubOut.String())
+	}
+	publicationID, _ := pubResult["publication_id"].(string)
+	if publicationID == "" {
+		t.Fatal("publish result missing publication_id")
+	}
+
+	// Rollback.
+	var rbOut, rbErr bytes.Buffer
+	rbExit := run([]string{
+		"rollback",
+		"--project-root", root,
+		"--journal-id", publicationID,
+		"--json",
+	}, &rbOut, &rbErr)
+	if rbExit != exitSuccess {
+		t.Fatalf("rollback exit = %d, want %d\nstderr: %s", rbExit, exitSuccess, rbErr.String())
+	}
+}
+
+func TestRunPreviewWithoutProjectMarker(t *testing.T) {
+	root := t.TempDir()
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{
+		"preview",
+		"--project-root", root,
+		"--learning-id", "nonexistent",
+	}, &stdout, &stderr)
+	if exitCode != exitProjectNotFound {
+		t.Fatalf("preview outside project exit = %d, want %d", exitCode, exitProjectNotFound)
+	}
+	assertErrorEnvelopeCode(t, stderr.Bytes(), "project_not_found")
+}
+
+// setupApprovedLearning initializes a project, opens the DB, inserts a learning
+// with approved status and a curation targeting a skill, and returns the learning ID.
+func setupApprovedLearning(t *testing.T, root string) string {
+	t.Helper()
+
+	// Initialize project.
+	var buf bytes.Buffer
+	if got := run([]string{"init", "--project-root", root}, &buf, &buf); got != exitSuccess {
+		t.Fatalf("init failed: %s", buf.String())
+		return ""
+	}
+
+	// Capture via CLI to get a learning ID.
+	var capOut, capErr bytes.Buffer
+	if got := run([]string{
+		"capture",
+		"--project-root", root,
+		"--title", "E2E Test Skill",
+		"--context", "end to end testing",
+		"--observation", "observed during e2e",
+		"--lesson", "always e2e test publish flows",
+		"--json",
+	}, &capOut, &capErr); got != exitSuccess {
+		t.Fatalf("capture failed: stderr=%s", capErr.String())
+		return ""
+	}
+
+	var capResult map[string]interface{}
+	if err := json.Unmarshal(capOut.Bytes(), &capResult); err != nil {
+		t.Fatalf("capture JSON: %v", err)
+		return ""
+	}
+	learningID, _ := capResult["learning_id"].(string)
+
+	// Update learning directly in DB: set status=approved and add curation.
+	dbPath := filepath.Join(root, ".royo-learn", "royo-learn.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+		return ""
+	}
+	defer db.Close()
+	if err := storage.Migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+		return ""
+	}
+
+	ctx := context.Background()
+	tx, err := db.DB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+		return ""
+	}
+
+	// Read learning to get current fields.
+	learning, err := storage.GetLearning(ctx, tx, domain.LearningID(learningID))
+	if err != nil {
+		tx.Rollback()
+		t.Fatalf("get learning: %v", err)
+		return ""
+	}
+
+	// Set approved status, destination, and evidence level.
+	learning.Status = domain.StatusApproved
+	learning.EvidenceLevel = domain.EvidenceModerate
+	learning.ApprovedDestination = &domain.Destination{
+		Type:     domain.DestSkill,
+		Root:     "skills",
+		Path:     "e2e-test/SKILL.md",
+		Required: false,
+	}
+	scope := domain.ScopeProject
+	learning.ApprovedScope = &scope
+
+	if err := storage.UpdateLearning(ctx, tx, learning); err != nil {
+		tx.Rollback()
+		t.Fatalf("update learning: %v", err)
+		return ""
+	}
+
+	// Insert a curation record for this learning.
+	curationID := domain.CurationID(uuid.Must(uuid.NewV7()).String())
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO curations (id, learning_id, decision, rationale, destination_json, validation_json, acceptance_checks_json, rollback_condition, actor_json, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		string(curationID),
+		learningID,
+		string(domain.CurationApproveNewSkill),
+		"e2e test curation",
+		`{"type":"skill","root":"skills","path":"e2e-test/SKILL.md","required":false}`,
+		`[]`,
+		`[]`,
+		"",
+		`{"kind":"human","name":"cli-user","model":"","session_id":""}`,
+		time.Now().UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		tx.Rollback()
+		t.Fatalf("insert curation: %v", err)
+		return ""
+	}
+
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+		return ""
+	}
+
+	return learningID
 }
 
 // ---------------------------------------------------------------------------

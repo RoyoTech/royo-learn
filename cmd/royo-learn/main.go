@@ -19,6 +19,7 @@ import (
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/logging"
 	"agent-royo-learn/internal/project"
+	"agent-royo-learn/internal/publish"
 	"agent-royo-learn/internal/storage"
 
 	"github.com/google/uuid"
@@ -59,6 +60,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runCapture(args[1:], stdout, stderr)
 	case "curate":
 		return runCurate(args[1:], stdout, stderr)
+	case "preview":
+		return runPreview(args[1:], stdout, stderr)
+	case "publish":
+		return runPublish(args[1:], stdout, stderr)
+	case "rollback":
+		return runRollback(args[1:], stdout, stderr)
 	default:
 		return writeUnknownCommandError(stderr)
 	}
@@ -709,6 +716,272 @@ func writeCurateError(stderr io.Writer, code, format string, args ...interface{}
 		Recoverable: true,
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn curate --help"`,
+	})
+	return exitFailure
+}
+
+// ---------------------------------------------------------------------------
+// preview
+// ---------------------------------------------------------------------------
+
+func runPreview(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("preview", flag.ContinueOnError)
+	learningID := fs.String("learning-id", "", "learning ID to preview (required)")
+	projectRoot := fs.String("project-root", "", "project root directory")
+	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
+
+	if err := fs.Parse(args); err != nil {
+		return writePublishError(stderr, "invalid_argument", "preview: %v", err)
+	}
+
+	if *learningID == "" {
+		return writePublishError(stderr, "invalid_argument", "preview: --learning-id is required")
+	}
+
+	root, db, projectID, exitCode := resolvePublishContext(*projectRoot, stderr)
+	if exitCode != exitSuccess {
+		return exitCode
+	}
+	defer db.Close()
+
+	svc := publish.NewService(db, root,
+		filepath.Join(root, ".royo-learn", "backups"),
+		filepath.Join(root, ".royo-learn"))
+
+	ctx := context.Background()
+	result, err := svc.Preview(ctx, projectID, &publish.PreviewInput{
+		LearningID: domain.LearningID(*learningID),
+		Actor: domain.Actor{
+			Kind: "human", Name: "cli-user", Model: "", SessionID: "",
+		},
+	})
+	if err != nil {
+		return writePublishError(stderr, "invalid_argument", "preview: %v", err)
+	}
+
+	if *jsonFlag {
+		data, _ := json.MarshalIndent(map[string]interface{}{
+			"preview_id":        result.Preview.ID,
+			"preview_hash":      result.Preview.PreviewHash,
+			"risk":              result.Preview.Risk,
+			"requires_approval": result.Preview.RequiresApproval,
+			"diff":              result.Diff,
+			"policies":          result.Policies,
+		}, "", "  ")
+		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+	} else {
+		_, _ = fmt.Fprintf(stdout, "Preview %s for learning %s\n", result.Preview.ID, *learningID)
+		_, _ = fmt.Fprintf(stdout, "  Hash: %s\n", result.Preview.PreviewHash)
+		_, _ = fmt.Fprintf(stdout, "  Risk: %s\n", result.Preview.Risk)
+		_, _ = fmt.Fprintf(stdout, "  Requires approval: %v\n", result.Preview.RequiresApproval)
+		for _, p := range result.Policies {
+			_, _ = fmt.Fprintf(stdout, "  Policy [%s]: passed=%v — %s\n", p.PolicyName, p.Passed, p.Reason)
+		}
+	}
+
+	return exitSuccess
+}
+
+// ---------------------------------------------------------------------------
+// publish
+// ---------------------------------------------------------------------------
+
+func runPublish(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("publish", flag.ContinueOnError)
+	learningID := fs.String("learning-id", "", "learning ID to publish (required)")
+	previewHash := fs.String("preview-hash", "", "preview hash to confirm (required)")
+	force := fs.Bool("force", false, "bypass dirty worktree check")
+	projectRoot := fs.String("project-root", "", "project root directory")
+	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
+
+	if err := fs.Parse(args); err != nil {
+		return writePublishError(stderr, "invalid_argument", "publish: %v", err)
+	}
+
+	if *learningID == "" {
+		return writePublishError(stderr, "invalid_argument", "publish: --learning-id is required")
+	}
+	if *previewHash == "" {
+		return writePublishError(stderr, "invalid_argument", "publish: --preview-hash is required")
+	}
+
+	root, db, projectID, exitCode := resolvePublishContext(*projectRoot, stderr)
+	if exitCode != exitSuccess {
+		return exitCode
+	}
+	defer db.Close()
+
+	svc := publish.NewService(db, root,
+		filepath.Join(root, ".royo-learn", "backups"),
+		filepath.Join(root, ".royo-learn"))
+
+	ctx := context.Background()
+	result, err := svc.Publish(ctx, projectID, &publish.PublishInput{
+		LearningID:  domain.LearningID(*learningID),
+		PreviewHash: *previewHash,
+		Force:       *force,
+		Actor: domain.Actor{
+			Kind: "human", Name: "cli-user", Model: "", SessionID: "",
+		},
+	})
+	if err != nil {
+		return writePublishError(stderr, "invalid_argument", "publish: %v", err)
+	}
+
+	if *jsonFlag {
+		data, _ := json.MarshalIndent(map[string]interface{}{
+			"publication_id": result.Publication.ID,
+			"learning_id":    result.Publication.LearningID,
+			"status":         result.Publication.Status,
+			"journal_id":     result.JournalID,
+		}, "", "  ")
+		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+	} else {
+		_, _ = fmt.Fprintf(stdout, "Published learning %s as %s (status: %s)\n",
+			result.Publication.LearningID, result.Publication.ID, result.Publication.Status)
+	}
+
+	return exitSuccess
+}
+
+// ---------------------------------------------------------------------------
+// rollback
+// ---------------------------------------------------------------------------
+
+func runRollback(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("rollback", flag.ContinueOnError)
+	journalID := fs.String("journal-id", "", "publication ID to rollback (required)")
+	projectRoot := fs.String("project-root", "", "project root directory")
+	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
+
+	if err := fs.Parse(args); err != nil {
+		return writePublishError(stderr, "invalid_argument", "rollback: %v", err)
+	}
+
+	if *journalID == "" {
+		return writePublishError(stderr, "invalid_argument", "rollback: --journal-id is required")
+	}
+
+	root, db, projectID, exitCode := resolvePublishContext(*projectRoot, stderr)
+	if exitCode != exitSuccess {
+		return exitCode
+	}
+	defer db.Close()
+
+	svc := publish.NewService(db, root,
+		filepath.Join(root, ".royo-learn", "backups"),
+		filepath.Join(root, ".royo-learn"))
+
+	ctx := context.Background()
+	err := svc.Rollback(ctx, projectID, &publish.RollbackPublicationInput{
+		PublicationID: domain.PublicationID(*journalID),
+		Actor: domain.Actor{
+			Kind: "human", Name: "cli-user", Model: "", SessionID: "",
+		},
+	})
+	if err != nil {
+		return writePublishError(stderr, "invalid_argument", "rollback: %v", err)
+	}
+
+	if *jsonFlag {
+		data, _ := json.MarshalIndent(map[string]interface{}{
+			"publication_id": *journalID,
+			"status":         "rolled_back",
+		}, "", "  ")
+		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+	} else {
+		_, _ = fmt.Fprintf(stdout, "Rolled back publication %s\n", *journalID)
+	}
+
+	return exitSuccess
+}
+
+// resolvePublishContext resolves project root, opens DB, runs migrations,
+// and ensures the project exists. Returns (root, db, projectID, exitCode).
+func resolvePublishContext(explicitRoot string, stderr io.Writer) (string, *storage.DB, domain.ProjectID, int) {
+	cwd, _ := os.Getwd()
+	resolver := project.NewResolver()
+	req := &project.ResolveRequest{
+		CWD:          cwd,
+		ExplicitRoot: explicitRoot,
+	}
+
+	proj, err := resolver.Resolve(context.Background(), req)
+	if err != nil {
+		return "", nil, "", mapProjectError(stderr, err)
+	}
+
+	root := proj.Root
+
+	markerPath := filepath.Join(root, ".royo-learn", "config.yaml")
+	if _, statErr := os.Stat(markerPath); statErr != nil {
+		_ = logging.WriteError(stderr, logging.ErrorEnvelope{
+			Code:    project.ErrProjectNotFound,
+			Message: fmt.Sprintf("no project marker found at %s", root),
+		})
+		return "", nil, "", exitProjectNotFound
+	}
+
+	dbPath := filepath.Join(root, ".royo-learn", "royo-learn.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		writePublishError(stderr, "invalid_argument", "cannot open database: %v", err)
+		return "", nil, "", exitFailure
+	}
+
+	if err := storage.Migrate(db); err != nil {
+		db.Close()
+		writePublishError(stderr, "invalid_argument", "migration failed: %v", err)
+		return "", nil, "", exitFailure
+	}
+
+	ctx := context.Background()
+	tx, txErr := db.DB.BeginTx(ctx, nil)
+	if txErr != nil {
+		db.Close()
+		writePublishError(stderr, "invalid_argument", "begin tx: %v", txErr)
+		return "", nil, "", exitFailure
+	}
+
+	var projectID domain.ProjectID
+	if existing, _ := storage.GetProjectByKey(ctx, tx, proj.Key); existing == nil {
+		projEntity := &domain.Project{
+			ID:            domain.ProjectID(uuid.Must(uuid.NewV7()).String()),
+			ProjectKey:    proj.Key,
+			DisplayName:   proj.Key,
+			CanonicalPath: root,
+			GitRemote:     proj.GitRemote,
+			Fingerprint:   proj.Key,
+			CreatedAt:     time.Now().UTC(),
+			UpdatedAt:     time.Now().UTC(),
+		}
+		if err := storage.SaveProject(ctx, tx, projEntity); err != nil {
+			tx.Rollback()
+			db.Close()
+			writePublishError(stderr, "invalid_argument", "save project: %v", err)
+			return "", nil, "", exitFailure
+		}
+		projectID = projEntity.ID
+	} else {
+		projectID = existing.ID
+	}
+	if err := tx.Commit(); err != nil {
+		db.Close()
+		writePublishError(stderr, "invalid_argument", "commit project: %v", err)
+		return "", nil, "", exitFailure
+	}
+
+	return root, db, projectID, exitSuccess
+}
+
+func writePublishError(stderr io.Writer, code, format string, args ...interface{}) int {
+	msg := fmt.Sprintf(format, args...)
+	_ = logging.WriteError(stderr, logging.ErrorEnvelope{
+		Code:        code,
+		Message:     msg,
+		Recoverable: true,
+		Details:     map[string]any{},
+		NextAction:  `run "royo-learn preview --help"`,
 	})
 	return exitFailure
 }

@@ -93,27 +93,27 @@ Aceptación: no aprobar hipótesis sin justificación requerida.
 
 ## T07 Preview/approval
 
-- [ ] target resolver.
-- [ ] diff generator.
-- [ ] canonical preview.
-- [ ] policies.
-- [ ] approvals.
-- [ ] invalidation.
-- [ ] tests.
+- [x] target resolver.
+- [x] diff generator.
+- [x] canonical preview.
+- [x] policies.
+- [x] approvals.
+- [x] invalidation.
+- [x] tests.
 
 Aceptación: mutar target invalida publicación.
 
 ## T08 Publish/rollback
 
-- [ ] atomic writer.
-- [ ] backups.
-- [ ] managed blocks.
-- [ ] Skill validator.
-- [ ] verify runner.
-- [ ] journal.
-- [ ] rollback.
-- [ ] dirty worktree handling.
-- [ ] tests.
+- [x] atomic writer.
+- [x] backups.
+- [x] managed blocks.
+- [x] Skill validator.
+- [x] verify runner.
+- [x] journal.
+- [x] rollback.
+- [x] dirty worktree handling.
+- [x] tests.
 
 Aceptación: fallo de verification restaura todos los archivos.
 
