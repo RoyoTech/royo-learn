@@ -20,7 +20,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Repo = "angel-royo/royo-learn"
+$Repo = "RoyoTech/royo-learn"
 $InstallRoot = "$env:LOCALAPPDATA\royo-learn"
 $BinDir = "$InstallRoot\bin"
 $BinaryName = "royo-learn.exe"

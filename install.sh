@@ -5,7 +5,7 @@
 #        ./install.sh --uninstall
 set -euo pipefail
 
-REPO="angel-royo/royo-learn"
+REPO="RoyoTech/royo-learn"
 DEFAULT_VERSION="latest"
 INSTALL_DIR="${HOME}/.local/bin"
 BINARY_NAME="royo-learn"

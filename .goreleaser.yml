@@ -65,7 +65,7 @@ changelog:
 
 release:
   github:
-    owner: angel-royo
+    owner: RoyoTech
     name: royo-learn
   prerelease: auto
   footer: |
@@ -73,11 +73,11 @@ release:
 
     ### Linux/macOS
     ```bash
-    curl -fsSL https://github.com/angel-royo/royo-learn/releases/latest/download/install.sh | bash
+    curl -fsSL https://github.com/RoyoTech/royo-learn/releases/latest/download/install.sh | bash
     ```
 
     ### Windows
     ```powershell
-    Invoke-WebRequest -Uri https://github.com/angel-royo/royo-learn/releases/latest/download/install.ps1 -OutFile install.ps1
+    Invoke-WebRequest -Uri https://github.com/RoyoTech/royo-learn/releases/latest/download/install.ps1 -OutFile install.ps1
     .\install.ps1
     ```

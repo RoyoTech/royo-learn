@@ -22,15 +22,20 @@ combined baseline and bootstrap tree.
 
 ## T01 Config y proyecto
 
-- [ ] Config usuario/proyecto.
-- [ ] Precedencia.
-- [ ] Git root.
-- [ ] project key.
-- [ ] ambigüedad.
-- [ ] monorepo.
-- [ ] tests Windows paths.
+- [x] Config usuario/proyecto.
+- [x] Precedencia.
+- [x] Git root.
+- [x] project key.
+- [x] ambigüedad.
+- [x] monorepo.
+- [x] tests Windows paths.
 
 Aceptación: `doctor` resuelve repo correctamente.
+
+T01 implementation evidence: `internal/config/{config,user,limits}.go`,
+`internal/project/{key,path,project}.go`. Tests: `internal/config/config_test.go`,
+`internal/project/project_test.go`. Windows-path coverage lives in
+`internal/evidence/path_test.go` and `internal/config/config_test.go`.
 
 ## T02 Storage
 
@@ -127,9 +132,15 @@ Aceptación: fallo de verification restaura todos los archivos.
 - [x] middleware.
 - [x] size/time limits.
 - [x] conformance/smoke.
-- [ ] Codex test.
+- [-] Codex test.
 
 Aceptación: Codex lista y llama tools.
+
+T09 Codex test status: in-process conformance suite green
+(`internal/mcpserver/conformance_test.go`: initialize, list/call tools across
+minimal/standard/full profiles, shutdown, error format). Manual Codex desktop
+integration (live MCP over stdio against a real Codex instance) is **not**
+documented — it remains a follow-up before declaring v1 ready for end users.
 
 ## T10 Engram
 

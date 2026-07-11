@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"agent-royo-learn/internal/project"
 )
 
 func TestResolvePathRejectsMaliciousInputs(t *testing.T) {
@@ -38,12 +40,16 @@ func TestResolvePathRejectsMaliciousInputs(t *testing.T) {
 
 func TestResolvePathAcceptsCanonicalUnicodePathsInsideRoot(t *testing.T) {
 	root := t.TempDir()
+	canonicalRoot, err := project.Canonicalize(root)
+	if err != nil {
+		t.Fatalf("canonicalize root: %v", err)
+	}
 	unicodePath := filepath.Join("evidencia", "café-日本語.txt")
 	got, err := ResolvePath(root, unicodePath)
 	if err != nil {
 		t.Fatalf("ResolvePath: %v", err)
 	}
-	want := filepath.Join(root, unicodePath)
+	want := filepath.Join(canonicalRoot, unicodePath)
 	if got != want {
 		t.Fatalf("ResolvePath = %q, want %q", got, want)
 	}
