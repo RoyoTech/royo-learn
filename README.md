@@ -74,8 +74,8 @@ Invoke-WebRequest -Uri https://github.com/RoyoTech/royo-learn/releases/latest/do
 Or with a version:
 
 ```powershell
-.\install.ps1 --version v0.1.0    # install specific version
-.\install.ps1 --uninstall          # remove
+.\install.ps1 -Version v0.1.0     # install specific version
+.\install.ps1 -Uninstall           # remove
 ```
 
 The binary is installed to `%LOCALAPPDATA%\royo-learn\bin\royo-learn.exe`.

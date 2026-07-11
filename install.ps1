@@ -20,6 +20,12 @@ param(
     [switch]$Uninstall
 )
 
+# Normalize: treat any value that starts with "-" or "--" as "latest"
+# (happens when user types --version instead of -Version in PowerShell 5.x)
+if ($Version -match '^-') {
+    $Version = "latest"
+}
+
 $ErrorActionPreference = "Stop"
 $Repo = "RoyoTech/royo-learn"
 $InstallRoot = "$env:LOCALAPPDATA\royo-learn"
