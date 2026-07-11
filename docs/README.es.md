@@ -16,6 +16,25 @@ No reemplaza a Gentle-AI ni a Engram:
 - **Engram** conserva memoria persistente de sesiones, decisiones, descubrimientos y errores.
 - **Agent Royo Learn** transforma experiencias verificadas en cambios reutilizables de comportamiento: conocimiento, Skills, reglas, pruebas y alertas de recurrencia.
 
+---
+
+### Cómo funciona
+
+> **Vos**: *"Dame la frase de aprendizaje para el bug de versiones en los README multi-idioma que acabamos de arreglar."*
+>
+> **Modelo**: *"Aprendete esto: cuando un proyecto tiene READMEs multi-idioma con badges de traducción, después de cada release hay que sincronizar todas las versiones. El README canónico en inglés es la fuente de verdad. Bash usa `--version` y `--uninstall` con doble guion; PowerShell usa `-Version` y `-Uninstall` con un solo guion. Nunca referenciar una versión que no existe (ej. v1.0.0 cuando el release es v0.1.0). Después de cada release, correr `grep -r 'v[0-9]' docs/README.*.md` para verificar consistencia."*
+>
+> **Vos**: *[guardás la frase]* → próxima sesión → la decís → royo-learn la persiste para siempre.
+
+El modelo formatea el aprendizaje con la estructura correcta (título, contexto, observación, lección). Vos revisás, aprobás y publicás. La próxima vez que el modelo enfrente la misma situación, recupera el aprendizaje y lo aplica.
+
+Frases que disparan el ciclo:
+- *"Dame la frase de aprendizaje para…"*
+- *"Aprendete esto: …"*
+- *"No quiero que esto vuelva a pasar: …"*
+
+---
+
 ### Engram + Royo-Learn: Conocimiento + Entendimiento
 
 Existe una distinción útil entre dos conceptos:
