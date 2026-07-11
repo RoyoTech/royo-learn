@@ -16,10 +16,10 @@ import (
 
 // Check represents the result of a single health check.
 type Check struct {
-	Name   string `json:"name"`
-	Status string `json:"status"`
+	Name    string `json:"name"`
+	Status  string `json:"status"`
 	Message string `json:"message"`
-	Detail string `json:"detail,omitempty"`
+	Detail  string `json:"detail,omitempty"`
 }
 
 // Report aggregates the results of all registered checks.
@@ -255,4 +255,3 @@ func (r *Runner) Close() error {
 func (r *Report) ToJSON() ([]byte, error) {
 	return json.MarshalIndent(r, "", "  ")
 }
-

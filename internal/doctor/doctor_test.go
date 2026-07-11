@@ -223,13 +223,13 @@ func TestDegradedOptionalChecks(t *testing.T) {
 
 	// Find all optional checks (database, migrations, engram, etc.)
 	optionalSet := map[string]bool{
-		"database":        true,
-		"migrations":      true,
-		"engram":          true,
-		"gentle-ai":       true,
-		"skill-registry":  true,
-		"codex-mcp":       true,
-		"shared-library":  true,
+		"database":         true,
+		"migrations":       true,
+		"engram":           true,
+		"gentle-ai":        true,
+		"skill-registry":   true,
+		"codex-mcp":        true,
+		"shared-library":   true,
 		"record-integrity": true,
 	}
 
