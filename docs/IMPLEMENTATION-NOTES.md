@@ -103,3 +103,31 @@ on supported GitHub-hosted runners.
   than 1 MiB. Path validation checks `project_root` and `shared_root` against
   an explicit list of trusted roots and returns typed `*config.Error` values
   with stable codes (`invalid_config`, `path_outside_root`).
+
+## Handoff — T01 Task 1 complete, PR #1 open
+
+### Current state
+
+- T01 Task 1 is committed on local `master` as `7af28fb`.
+- The commit is pushed to `origin/master` on `RoyoTech/royo-learn`.
+- Branch `main` exists on the remote at the T00 commit (`f172143`).
+- PR #1 is open: https://github.com/RoyoTech/royo-learn/pull/1 (master → main).
+- Native review receipt lineage `t01-config-project-v2` is approved and both
+  `pre-commit` and `pre-PR` gates returned `allow`.
+
+### How to resume
+
+1. If PR #1 was merged: pull `main`, create a new branch from `main`, and start
+   T01 Task 2.
+2. If PR #1 is still open: continue from the current `master` branch for T01
+   Task 2, then rebase or retarget before the next PR.
+3. Next work: T01 Task 2 — project resolver (`internal/project`), integrated
+   with `internal/config` and exposed through the `doctor` and CLI commands.
+
+### Operational notes
+
+- `.gitattributes` sets `* text=auto` to avoid CRLF/LF noise on Windows.
+- `.gitignore` ignores build artifacts (`royo-learn`, `*.exe`).
+- `openspec/changes/t01-config-project-v2/reviews/` contains non-authoritative
+  receipt mirrors; the authoritative store is under
+  `.git/gentle-ai/review-transactions/v1/t01-config-project-v2/`.
