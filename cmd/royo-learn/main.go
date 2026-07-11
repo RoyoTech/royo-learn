@@ -66,6 +66,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runPublish(args[1:], stdout, stderr)
 	case "rollback":
 		return runRollback(args[1:], stdout, stderr)
+	case "mcp-serve":
+		return runMCPServe(args[1:], stdout, stderr)
 	default:
 		return writeUnknownCommandError(stderr)
 	}

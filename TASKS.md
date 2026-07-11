@@ -119,14 +119,14 @@ Aceptación: fallo de verification restaura todos los archivos.
 
 ## T09 MCP
 
-- [ ] server.
-- [ ] instructions.
-- [ ] tools.
-- [ ] schemas.
-- [ ] profiles.
-- [ ] middleware.
-- [ ] size/time limits.
-- [ ] conformance/smoke.
+- [x] server.
+- [x] instructions.
+- [x] tools.
+- [x] schemas.
+- [x] profiles.
+- [x] middleware.
+- [x] size/time limits.
+- [x] conformance/smoke.
 - [ ] Codex test.
 
 Aceptación: Codex lista y llama tools.
