@@ -36,21 +36,21 @@ Aceptación: `doctor` resuelve repo correctamente.
 
 - [x] migrations.
 - [x] SQLite pragmas.
-- [ ] repositories.
-- [ ] transactions.
-- [ ] audit.
-- [ ] FTS5.
-- [ ] integrity.
+- [x] repositories.
+- [x] transactions.
+- [x] audit.
+- [x] FTS5.
+- [x] integrity.
 - [ ] rebuild.
 
 Aceptación: migration + CRUD + search.
 
 ## T03 Dominio
 
-- [ ] enums.
+- [x] enums.
 - [ ] transitions.
 - [ ] validation.
-- [ ] typed errors.
+- [x] typed errors.
 - [ ] canonical JSON.
 - [ ] hashing.
 
