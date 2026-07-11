@@ -75,7 +75,7 @@ O manualmente:
 
 ```bash
 # Descargar e instalar
-./install.sh --version v1.0.0
+./install.sh --version v0.1.0
 # Desinstalar
 ./install.sh --uninstall
 ```
@@ -89,10 +89,10 @@ El binario se instala en `~/.local/bin/royo-learn`.
 Invoke-WebRequest -Uri https://github.com/RoyoTech/royo-learn/releases/latest/download/install.ps1 -OutFile install.ps1
 
 # Instalar
-.\install.ps1 --version v1.0.0
+.\install.ps1 -Version v0.1.0
 
 # Desinstalar
-.\install.ps1 --uninstall
+.\install.ps1 -Uninstall
 ```
 
 El binario se instala en `%LOCALAPPDATA%\royo-learn\bin\royo-learn.exe`.
