@@ -131,3 +131,67 @@ on supported GitHub-hosted runners.
 - `openspec/changes/t01-config-project-v2/reviews/` contains non-authoritative
   receipt mirrors; the authoritative store is under
   `.git/gentle-ai/review-transactions/v1/t01-config-project-v2/`.
+
+## T01 Task 2 — Project resolver, key derivation, and path security
+
+### Branch
+
+`feat/t01-task2-project-resolver`, started from `main`.
+
+### Resolved dependencies
+
+No new external dependencies. Uses standard library only:
+- `crypto/sha256` for path hashing
+- `os/exec` for Git command interaction
+- `path/filepath` for cross-platform path handling
+- `runtime` for OS detection (case-insensitive filesystem check)
+- `log/slog` for structured logging (optional, via `WithLogger`)
+
+### Design choices
+
+- **Error type**: Package defines its own `Error` type (Code, Message, Err) matching
+  the pattern from `internal/config`. Error codes are `project_not_found`,
+  `ambiguous_project`, `path_outside_root`, `symlink_escape`, `protected_path`.
+- **Path security**: `Canonicalize()` rejects UNC (`\\`), verbatim (`\\?\`), and
+  device (`\\.\`) paths before any filesystem operation. Symlinks are resolved
+  via `filepath.EvalSymlinks`. Non-existent paths fall back to `filepath.Clean`
+  on the absolute path.
+- **Case-insensitive comparison**: `IsInsideRoot` normalizes paths to lowercase
+  on Windows and macOS (`runtime.GOOS` check). Linux comparisons are
+  case-sensitive.
+- **Key derivation**: Prefers Git remote URL parsing (detects both HTTPS and SSH
+  formats) with relative path appended for monorepo sub-projects. Falls back to
+  SHA-256 digest (first 12 hex chars) when no Git metadata exists.
+- **Project resolution precedence**: ExplicitRoot > CWD marker walk-up > CWD Git
+  root > MCPRoot. The walk-up algorithm checks for `.royo-learn/config.yaml` at
+  each ancestor directory. Ambiguity is detected by checking sibling directories
+  under the common parent.
+- **Ambiguity detection**: When a project marker is found at directory D, all
+  sibling directories under `filepath.Dir(D)` are scanned for their own
+  `.royo-learn/config.yaml`. Two or more markers in siblings returns
+  `ambiguous_project`.
+
+### Files
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `internal/project/project.go` | 296 | Resolver, Project struct, ResolveRequest, options pattern, Error type |
+| `internal/project/key.go` | 114 | Git-based key derivation with SHA-256 fallback |
+| `internal/project/path.go` | 126 | Canonicalize, IsInsideRoot, IsProtectedPath, protected path constants |
+| `internal/project/project_test.go` | 458 | Table-driven tests covering all acceptance criteria |
+
+### Testing
+
+- 15 test functions, all passing on Windows/amd64 with Go 1.26.5.
+- Tests requiring Git (`gitAvailable()`) skip gracefully when git is not installed.
+- Symlink tests skip when the platform doesn't support symlink creation.
+- Cross-platform path handling tested with `filepath` and `t.TempDir()`.
+- `go test ./internal/project/...` → PASS
+- `go vet ./internal/project/...` → PASS
+- `go test ./...` → PASS (all packages)
+
+### TDD evidence
+
+Strict TDD cycle followed: tests written first → build failed (RED) → production
+code implemented → all tests pass (GREEN) → refactoring to remove dead code,
+simplify error handling, remove unused functions → all tests still pass.
