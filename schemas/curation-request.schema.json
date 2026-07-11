@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-royo-learn.local/schemas/curation-request.schema.json",
+  "title": "Learning Curation Request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "learning_id",
+    "decision",
+    "rationale",
+    "validation",
+    "acceptance_checks",
+    "rollback_condition",
+    "actor"
+  ],
+  "properties": {
+    "learning_id": {
+      "type": "string",
+      "minLength": 10
+    },
+    "decision": {
+      "enum": [
+        "reject",
+        "needs_evidence",
+        "merge",
+        "approve_project_knowledge",
+        "approve_shared_knowledge",
+        "approve_new_skill",
+        "approve_skill_update",
+        "approve_agents_rule",
+        "approve_test"
+      ]
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 5000
+    },
+    "relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "target_id"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "duplicate_of",
+            "extends",
+            "supersedes",
+            "contradicts",
+            "narrows",
+            "related",
+            "merged_into"
+          ]
+        },
+        "target_id": {
+          "type": "string"
+        }
+      }
+    },
+    "destination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "action"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "knowledge",
+            "skill",
+            "agents_rule",
+            "test",
+            "none"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "action": {
+          "enum": [
+            "create",
+            "update",
+            "merge",
+            "none"
+          ]
+        }
+      }
+    },
+    "validation": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "acceptance_checks": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "rollback_condition": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 3000
+    },
+    "actor": {
+      "$ref": "capture-request.schema.json#/$defs/actor"
+    }
+  }
+}

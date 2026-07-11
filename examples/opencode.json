@@ -1,0 +1,14 @@
+{
+  "mcp": {
+    "royo-learn": {
+      "type": "local",
+      "command": [
+        "royo-learn",
+        "mcp",
+        "--tools",
+        "agent"
+      ],
+      "enabled": true
+    }
+  }
+}

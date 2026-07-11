@@ -1,0 +1,10 @@
+bin/
+dist/
+coverage.out
+*.test
+.royo-learn/*.db
+.royo-learn/*.db-shm
+.royo-learn/*.db-wal
+.royo-learn/backups/
+.royo-learn/evidence/
+!examples/

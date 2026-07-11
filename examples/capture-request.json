@@ -1,0 +1,36 @@
+{
+  "title": "Prevent editing applied database migrations",
+  "type": "prevention",
+  "context": "A migration already executed in staging was edited to fix a new requirement.",
+  "observation": "The checksum diverged and deployment failed.",
+  "reusable_lesson": "Treat applied migrations as immutable; create a new migration for subsequent changes.",
+  "recommended_procedure": [
+    "Check migration history before editing.",
+    "Create a forward migration.",
+    "Add a rollback or compensating migration.",
+    "Run migration tests against an upgraded database."
+  ],
+  "limits": "May not apply before the migration has reached any shared environment.",
+  "scope_guess": "shared",
+  "confidence": "high",
+  "evidence_level": "reproduced",
+  "proposed_destination": "skill_update",
+  "retrieval_terms": [
+    "database migration",
+    "checksum",
+    "immutable migration"
+  ],
+  "evidence": [
+    {
+      "kind": "test",
+      "summary": "Migration test reproduced checksum mismatch."
+    }
+  ],
+  "idempotency_key": "example/applied-migration/001",
+  "actor": {
+    "kind": "agent",
+    "name": "codex",
+    "model": "gpt-5.6",
+    "session_id": "example"
+  }
+}

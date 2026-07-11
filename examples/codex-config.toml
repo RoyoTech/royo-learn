@@ -1,0 +1,14 @@
+[mcp_servers.royo-learn]
+command = "royo-learn"
+args = ["mcp", "--tools", "agent"]
+startup_timeout_sec = 10
+tool_timeout_sec = 120
+enabled = true
+required = false
+default_tools_approval_mode = "writes"
+
+[mcp_servers.royo-learn.tools.learning_publish]
+approval_mode = "approve"
+
+[mcp_servers.royo-learn.tools.learning_approve]
+approval_mode = "approve"

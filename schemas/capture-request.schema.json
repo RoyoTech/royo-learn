@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-royo-learn.local/schemas/capture-request.schema.json",
+  "title": "Learning Capture Request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "title",
+    "type",
+    "context",
+    "observation",
+    "reusable_lesson",
+    "scope_guess",
+    "confidence",
+    "evidence_level",
+    "actor"
+  ],
+  "properties": {
+    "project_root": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 160
+    },
+    "type": {
+      "enum": [
+        "procedure",
+        "prevention",
+        "diagnostic",
+        "tooling",
+        "architecture",
+        "quality",
+        "security",
+        "hypothesis",
+        "preference"
+      ]
+    },
+    "context": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 12000
+    },
+    "observation": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 12000
+    },
+    "reusable_lesson": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 4000
+    },
+    "recommended_procedure": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 1000
+      },
+      "maxItems": 30
+    },
+    "limits": {
+      "type": "string",
+      "maxLength": 4000
+    },
+    "scope_guess": {
+      "enum": [
+        "project",
+        "shared",
+        "personal",
+        "unknown"
+      ]
+    },
+    "confidence": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "evidence_level": {
+      "enum": [
+        "observed",
+        "tested",
+        "reproduced",
+        "hypothesis"
+      ]
+    },
+    "proposed_destination": {
+      "enum": [
+        "project_knowledge",
+        "shared_knowledge",
+        "new_skill",
+        "skill_update",
+        "agents_rule",
+        "test",
+        "more_evidence",
+        "reject",
+        "none"
+      ]
+    },
+    "retrieval_terms": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "maxItems": 50
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/evidence"
+      },
+      "maxItems": 50
+    },
+    "idempotency_key": {
+      "type": "string",
+      "maxLength": 256
+    },
+    "actor": {
+      "$ref": "#/$defs/actor"
+    }
+  },
+  "$defs": {
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "name"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "human",
+            "agent",
+            "system"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "model": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "session_id": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "summary"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "file",
+            "git_diff",
+            "git_commit",
+            "command",
+            "test",
+            "engram_observation",
+            "issue",
+            "pull_request",
+            "text",
+            "external_reference"
+          ]
+        },
+        "uri": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "command": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50
+        },
+        "collect": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,177 @@
+[
+  {
+    "path": ".gitignore.template",
+    "bytes": 144,
+    "sha256": "1aac1f575c26c9cc13558e57adf7a000870d071a1e369c5e7c4bcb96d9770b32"
+  },
+  {
+    "path": "AGENTS.md",
+    "bytes": 5134,
+    "sha256": "e5b1876096891505a8fedb155361116e276b90726c18da3e2955758354cb382b"
+  },
+  {
+    "path": "CODEX_START_HERE.md",
+    "bytes": 1902,
+    "sha256": "ad43f49ad57b925ada60511d961d7a173fd148f8b708953244ffb6d96702a71f"
+  },
+  {
+    "path": "PROMPT_FOR_CODEX.md",
+    "bytes": 1184,
+    "sha256": "34124c18c3723f2ac63ed0223bd4c10509dcd62df86edff712cc831a3860f578"
+  },
+  {
+    "path": "README.md",
+    "bytes": 3187,
+    "sha256": "8c4f3bf101aaa65fb9a82198b77e99cc52d70f95b9854f3ef42ef00d57f2c351"
+  },
+  {
+    "path": "TASKS.md",
+    "bytes": 3252,
+    "sha256": "631546d9e9c286d39e8552033fab4db009b5a278d146256ec6b21554dce79b60"
+  },
+  {
+    "path": "docs/00-PRODUCT-BRIEF.md",
+    "bytes": 1330,
+    "sha256": "9f988c297cf8f25004d585e28d060e8b5ffff782cc98e213d0f18986ec474d2a"
+  },
+  {
+    "path": "docs/01-PRD.md",
+    "bytes": 6069,
+    "sha256": "fd108a25b178510a4f0e607de6fd7fd1f5dc646593ba2cb63c9d8b5fbfb0b642"
+  },
+  {
+    "path": "docs/02-ARCHITECTURE.md",
+    "bytes": 6361,
+    "sha256": "38fcacca20367a5e0b12ba5d2cedbe96aea826ef87156ed0785eb98134f26c45"
+  },
+  {
+    "path": "docs/03-DOMAIN-MODEL.md",
+    "bytes": 4308,
+    "sha256": "dc7c3b220cb3906f391648694e8f47a5898b69626c96ccf56d997a056f65889e"
+  },
+  {
+    "path": "docs/04-CLI-SPEC.md",
+    "bytes": 3959,
+    "sha256": "26eeadecda6bcc7e858e7d253017d961192693343942af51f6215b35b73ecf9b"
+  },
+  {
+    "path": "docs/05-MCP-SPEC.md",
+    "bytes": 4093,
+    "sha256": "ed7b49c5090fa7903bb3b4dab8cc0f26c0966d2009488a5fca990e88e1f3d907"
+  },
+  {
+    "path": "docs/06-DATABASE-SCHEMA.md",
+    "bytes": 1671,
+    "sha256": "dd6a66e476a104d79674cb9f8c87ccaef69296a218ce48c9738969c02bf388d6"
+  },
+  {
+    "path": "docs/07-ENGRAM-INTEGRATION.md",
+    "bytes": 2472,
+    "sha256": "5ede871f57c8a588256ec04e22854ff145d9c5c2b2330fa83ceb0eb97eb55a1f"
+  },
+  {
+    "path": "docs/08-GENTLE-AI-CODEX-INTEGRATION.md",
+    "bytes": 2621,
+    "sha256": "6ff71c1bbb02b9534e3b49665278a69bd66ffb2636d69e2f5bfdfd61b219a33d"
+  },
+  {
+    "path": "docs/09-PUBLISHING-ENGINE.md",
+    "bytes": 3429,
+    "sha256": "3c37b0317c9bf2f3fe9ab370fec2e3bd842058f56c2c69ddfc8c8e97b11b683e"
+  },
+  {
+    "path": "docs/10-SECURITY.md",
+    "bytes": 2531,
+    "sha256": "b8d6f9653ec334ca5bf2566da1574c5f4344c2d5dc8b84565ce084e50759f27e"
+  },
+  {
+    "path": "docs/11-INSTALLATION.md",
+    "bytes": 2330,
+    "sha256": "5605c042018b97bfe654c6bbb18b78251694d7b48c97b9d58889f30576eddd9c"
+  },
+  {
+    "path": "docs/12-TEST-PLAN.md",
+    "bytes": 2357,
+    "sha256": "2756abbdbabd83cbc0cd2ff1542d83e27a17cc562021c463edb22c726ebe8e67"
+  },
+  {
+    "path": "docs/13-IMPLEMENTATION-PLAN.md",
+    "bytes": 2237,
+    "sha256": "93c6dcab98f41bc0b434de0359de5f989c525945d34a97ed38d470cf1d6edc59"
+  },
+  {
+    "path": "docs/14-ACCEPTANCE-CRITERIA.md",
+    "bytes": 3072,
+    "sha256": "b1c801effec5f541ea4be6cd00385001122f9c33da2c9fd3aa75e6d43b9aa32f"
+  },
+  {
+    "path": "docs/15-OPERATIONS.md",
+    "bytes": 1323,
+    "sha256": "b431f7f9d203c2b866be48128e8a3d6b4b1884190f85257486b04adfc99da8a2"
+  },
+  {
+    "path": "docs/16-DECISIONS.md",
+    "bytes": 1293,
+    "sha256": "cbe2cd08933370159879d1bce138109ba226b95d4144a113bd16070b74f5855a"
+  },
+  {
+    "path": "docs/17-ERROR-CODES.md",
+    "bytes": 939,
+    "sha256": "1e940268c447ae3456d4753402388b5a1cddcee6ad2d2bd3b585491d4c485e71"
+  },
+  {
+    "path": "docs/18-REFERENCES.md",
+    "bytes": 907,
+    "sha256": "3208904a7a46140fdaff7c5e69bb4e0cd1ab50793dd27c1a1b229a9bf790b13b"
+  },
+  {
+    "path": "examples/capture-request.json",
+    "bytes": 1168,
+    "sha256": "d31f15955e5026fb310a00a1dbee67864ad43015e20982424b5dbf68b24f514a"
+  },
+  {
+    "path": "examples/codex-config.toml",
+    "bytes": 352,
+    "sha256": "ff1aa3070070be0f9d088ae3a430efa341e674d44580abcce025b67879a56f1f"
+  },
+  {
+    "path": "examples/config.project.yaml",
+    "bytes": 757,
+    "sha256": "5c98b55da5116ba973e35196ce261c7f29d7f5571355c22ee1173af8a656a8de"
+  },
+  {
+    "path": "examples/opencode.json",
+    "bytes": 190,
+    "sha256": "c47ccb8e518cc369ccb91581c9d5631e27d99526762a55bc9e55637f4a45e44d"
+  },
+  {
+    "path": "migrations/001_init.sql",
+    "bytes": 6801,
+    "sha256": "83ef07c585fe13a9cc6c26680d7d586998feee43ef055a78e0011aecf1198996"
+  },
+  {
+    "path": "schemas/capture-request.schema.json",
+    "bytes": 3892,
+    "sha256": "f6cb90c5fdfd16f3e91abf193773af87d10d0b6c733747a3ba26cdf95f769dde"
+  },
+  {
+    "path": "schemas/curation-request.schema.json",
+    "bytes": 2307,
+    "sha256": "4524cab490a62585623f94298e34ece766ae2ee3cba5680cab5afdbd90d71e3c"
+  },
+  {
+    "path": "skills/capture-learning/SKILL.md",
+    "bytes": 1506,
+    "sha256": "86dfe6eacc8247803fadd6236ae733ef776fea323766f47260185231f955c18f"
+  },
+  {
+    "path": "skills/curate-learning/SKILL.md",
+    "bytes": 1290,
+    "sha256": "29f038969ed55b2dba950ca34f068a9ea9e1b4dbcdecb10c908c42e7c0055dbe"
+  },
+  {
+    "path": "skills/publish-learning/SKILL.md",
+    "bytes": 1314,
+    "sha256": "dcfc0ada7e57126ca5d96118ae7602f39f469918b7e038c88d3b2c2f54708131"
+  }
+]

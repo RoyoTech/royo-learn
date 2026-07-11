@@ -1,0 +1,36 @@
+version: 1
+
+project:
+  name: ""
+  records_root: ".royo-learn/records"
+  evidence_root: ".royo-learn/evidence"
+  backup_root: ".royo-learn/backups"
+
+engram:
+  enabled: true
+  base_url: "http://127.0.0.1:7437"
+  timeout_seconds: 2
+  write_reference: false
+
+gentle_ai:
+  enabled: true
+  refresh_skill_registry_after_publish: true
+
+publishing:
+  dry_run_default: true
+  block_dirty_targets: true
+  require_human_for_agents_md: true
+  require_human_for_shared: true
+  require_human_for_existing_skill: true
+  allowed_roots:
+    - "."
+  command_allowlist:
+    - ["go", "test"]
+    - ["go", "vet"]
+    - ["gentle-ai", "skill-registry", "refresh"]
+
+limits:
+  request_bytes: 524288
+  response_bytes: 786432
+  evidence_bytes: 10485760
+  command_output_bytes: 1048576
