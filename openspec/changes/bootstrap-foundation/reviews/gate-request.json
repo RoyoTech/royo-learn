@@ -1,0 +1,19 @@
+{
+  "schema": "gentle-ai.review-gate-request/v1",
+  "gate": "pre-pr",
+  "target": {
+    "kind": "base-diff",
+    "base_ref": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+    "revision": "",
+    "intended_untracked": [],
+    "ledger_ids": []
+  },
+  "store_revision": "sha256:1c5efcf8cac6c5eb0839a1a8f3ff6115cdfea4565b4be4cb60b90a99ed4f3ce6",
+  "genesis_revision": "sha256:e576b808628850c567b2bc11ac5fc3c8c16e09e17bcf8de63c832403a7976ece",
+  "chain_identity": "sha256:cc8c96ca66a2e0eaa52514f6684808a355beaa9b4fdd97f0452ee392efac7d41",
+  "bundle_digest": "sha256:13f63a126dc34766b51eeabf0dea5f87cb8081b16b2a4dc5d0bbf95a1f450251",
+  "policy_artifact": "openspec/changes/bootstrap-foundation/reviews/policy.md",
+  "ledger_artifact": "openspec/changes/bootstrap-foundation/reviews/ledger.json",
+  "evidence_artifact": "openspec/changes/bootstrap-foundation/reviews/evidence.json",
+  "external_evidence": ""
+}

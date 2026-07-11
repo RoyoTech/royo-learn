@@ -2,125 +2,148 @@ package evidence
 
 import (
 	"context"
-	"runtime"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestCommandRunnerSimple(t *testing.T) {
-	t.Parallel()
-
-	runner := &CommandRunner{}
-
-	var cmd []string
-	if runtime.GOOS == "windows" {
-		cmd = []string{"cmd", "/d", "/c", "echo hello"}
-	} else {
-		cmd = []string{"echo", "hello"}
+func TestCommandHelper(t *testing.T) {
+	if os.Getenv("ROYO_COMMAND_HELPER") != "1" {
+		return
 	}
+	args := helperArgs(os.Args)
+	if len(args) == 0 {
+		os.Exit(2)
+	}
+	switch args[0] {
+	case "print":
+		fmt.Print(strings.Join(args[1:], " "))
+	case "both":
+		fmt.Print(args[1])
+		fmt.Fprint(os.Stderr, args[2])
+	case "sleep":
+		time.Sleep(time.Second)
+	case "fail":
+		os.Exit(7)
+	}
+	os.Exit(0)
+}
 
-	result, err := runner.Run(context.Background(), cmd)
+func helperArgs(args []string) []string {
+	for i, arg := range args {
+		if arg == "--" {
+			return args[i+1:]
+		}
+	}
+	return nil
+}
+
+func helperCommand(args ...string) []string {
+	return append([]string{os.Args[0], "-test.run=TestCommandHelper", "--"}, args...)
+}
+
+func testRunner() *CommandRunner {
+	return &CommandRunner{
+		AllowedCommands: []string{os.Args[0]},
+		Environment:     []string{"ROYO_COMMAND_HELPER=1"},
+	}
+}
+
+func TestCommandRunnerExecutesDirectlyAndPreservesArguments(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "injected")
+	payload := "; touch " + marker
+	result, err := testRunner().Run(context.Background(), helperCommand("print", payload))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-
-	if !strings.Contains(result.Stdout, "hello") {
-		t.Errorf("Stdout does not contain 'hello': %q", result.Stdout)
+	if result.Stdout != payload {
+		t.Fatalf("Stdout = %q, want literal argument %q", result.Stdout, payload)
 	}
-	if result.ExitCode != 0 {
-		t.Errorf("ExitCode = %d, want 0", result.ExitCode)
-	}
-}
-
-func TestCommandRunnerFailedCommand(t *testing.T) {
-	t.Parallel()
-
-	runner := &CommandRunner{}
-	ctx := context.Background()
-
-	var cmd []string
-	if runtime.GOOS == "windows" {
-		cmd = []string{"cmd", "/d", "/c", "exit 1"}
-	} else {
-		cmd = []string{"sh", "-c", "exit 1"}
-	}
-
-	result, err := runner.Run(ctx, cmd)
-	if err != nil {
-		t.Fatalf("Run returned error: %v", err)
-	}
-	if result.ExitCode == 0 {
-		t.Error("ExitCode should not be 0 for failed command")
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("injected command created %q", marker)
 	}
 }
 
-func TestCommandRunnerTimeout(t *testing.T) {
-	t.Parallel()
-
-	runner := &CommandRunner{}
-
-	var cmd []string
-	if runtime.GOOS == "windows" {
-		// Windows: use ping with a long timeout
-		cmd = []string{"ping", "-n", "60", "127.0.0.1"}
-	} else {
-		cmd = []string{"sleep", "60"}
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-
-	_, err := runner.Run(ctx, cmd)
-	if err == nil {
-		t.Fatal("expected timeout error, got nil")
+func TestCommandRunnerRejectsCommandsOutsideAllowlist(t *testing.T) {
+	runner := &CommandRunner{AllowedCommands: []string{"git"}}
+	if _, err := runner.Run(context.Background(), helperCommand("print", "blocked")); err == nil {
+		t.Fatal("Run accepted command outside allowlist")
 	}
 }
 
-func TestCommandRunnerEmptyCommand(t *testing.T) {
-	t.Parallel()
-
-	runner := &CommandRunner{}
-	_, err := runner.Run(context.Background(), nil)
-	if err == nil {
-		t.Fatal("expected error for nil command")
+func TestCommandRunnerEnforcesInputBoundaryAndNUL(t *testing.T) {
+	runner := testRunner()
+	atLimit := helperCommand("print", "1234")
+	runner.MaxInputBytes = commandInputBytes(atLimit)
+	if _, err := runner.Run(context.Background(), atLimit); err != nil {
+		t.Fatalf("Run at input limit: %v", err)
 	}
-
-	_, err = runner.Run(context.Background(), []string{})
-	if err == nil {
-		t.Fatal("expected error for empty command")
+	if _, err := runner.Run(context.Background(), helperCommand("print", "12345")); err == nil {
+		t.Fatal("Run above input limit succeeded")
+	}
+	if _, err := runner.Run(context.Background(), helperCommand("print", "bad\x00arg")); err == nil {
+		t.Fatal("Run accepted NUL argument")
 	}
 }
 
-// TestCommandRunnerNoShell confirms we never execute via shell.
-func TestCommandRunnerNoShell(t *testing.T) {
-	t.Parallel()
-
-	runner := &CommandRunner{}
-	// Attempt to inject shell commands via arguments.
-	cmd := []string{"echo", "; rm -rf /"}
-	result, err := runner.Run(context.Background(), cmd)
+func TestCommandRunnerCapsCombinedOutputAndRedactsSecrets(t *testing.T) {
+	runner := testRunner()
+	runner.MaxOutputBytes = 8
+	result, err := runner.Run(context.Background(), helperCommand("both", "123456", "abcdef"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	// The semicolon should be part of the output, not a shell separator.
-	if !strings.Contains(result.Stdout, ";") {
-		t.Logf("Note: output did not contain semicolon: %q (may be shell-dependent)", result.Stdout)
+	if len(result.Stdout)+len(result.Stderr) > 8 || !result.Truncated {
+		t.Fatalf("combined output = %d, truncated = %v; want at most 8, true", len(result.Stdout)+len(result.Stderr), result.Truncated)
+	}
+
+	runner.MaxOutputBytes = 1024
+	secret := "sk-proj-1234567890ABCDE"
+	result, err = runner.Run(context.Background(), helperCommand("print", secret))
+	if err != nil {
+		t.Fatalf("Run secret output: %v", err)
+	}
+	if strings.Contains(result.Stdout, secret) || !result.Redacted {
+		t.Fatalf("secret output was not redacted: %#v", result)
 	}
 }
 
-func TestCommandRunnerRedactionFlag(t *testing.T) {
-	t.Parallel()
+func TestCommandRunnerUsesConfiguredTimeout(t *testing.T) {
+	runner := testRunner()
+	runner.Timeout = 50 * time.Millisecond
+	if _, err := runner.Run(context.Background(), helperCommand("sleep")); err == nil || !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("Run timeout error = %v", err)
+	}
+}
 
-	runner := &CommandRunner{}
-	cmd := []string{"echo", "hello world"}
-	result, err := runner.Run(context.Background(), cmd)
+func TestCommandRunnerValidatesWorkingDirectory(t *testing.T) {
+	root := t.TempDir()
+	runner := testRunner()
+	runner.Root = root
+	runner.Dir = "../outside"
+	if _, err := runner.Run(context.Background(), helperCommand("print", "blocked")); err == nil {
+		t.Fatal("Run accepted working directory outside root")
+	}
+
+	runner.Dir = "work"
+	if err := os.Mkdir(filepath.Join(root, "work"), 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+	result, err := runner.Run(context.Background(), helperCommand("print", "ok"))
+	if err != nil || result.Stdout != "ok" {
+		t.Fatalf("Run in valid directory = %#v, %v", result, err)
+	}
+}
+
+func TestCommandRunnerReportsExitCode(t *testing.T) {
+	result, err := testRunner().Run(context.Background(), helperCommand("fail"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-
-	// The redacted field should be set.
-	if result.Stdout == "" {
-		t.Log("stdout was empty")
+	if result.ExitCode != 7 {
+		t.Fatalf("ExitCode = %d, want 7", result.ExitCode)
 	}
 }

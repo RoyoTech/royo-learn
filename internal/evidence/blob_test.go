@@ -180,3 +180,32 @@ func TestBlobStoreNilStore(t *testing.T) {
 		t.Fatal("Get on nil store: expected error")
 	}
 }
+
+func TestBlobStoreEnforcesConfiguredSizeBoundary(t *testing.T) {
+	store, err := StoreWithinRoot(t.TempDir(), "blobs", 4)
+	if err != nil {
+		t.Fatalf("StoreWithinRoot: %v", err)
+	}
+	if _, err := store.Put([]byte("1234")); err != nil {
+		t.Fatalf("Put at limit: %v", err)
+	}
+	if _, err := store.Put([]byte("12345")); err == nil {
+		t.Fatal("Put above limit succeeded")
+	}
+}
+
+func TestStoreWithinRootRejectsTraversalAndSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	if _, err := StoreWithinRoot(root, "../outside", 10); err == nil {
+		t.Fatal("StoreWithinRoot accepted traversal")
+	}
+
+	outside := t.TempDir()
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if _, err := StoreWithinRoot(root, filepath.Join("link", "blobs"), 10); err == nil {
+		t.Fatal("StoreWithinRoot accepted symlink escape")
+	}
+}

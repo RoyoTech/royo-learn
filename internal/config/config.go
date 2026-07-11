@@ -121,11 +121,13 @@ type Evidence struct {
 
 // Limits holds runtime size and rate guardrails.
 type Limits struct {
-	MaxPayloadBytes    int64 `yaml:"max_payload_bytes,omitempty"`
-	RequestBytes       int64 `yaml:"request_bytes,omitempty"`
-	ResponseBytes      int64 `yaml:"response_bytes,omitempty"`
-	EvidenceBytes      int64 `yaml:"evidence_bytes,omitempty"`
-	CommandOutputBytes int64 `yaml:"command_output_bytes,omitempty"`
+	MaxPayloadBytes       int64 `yaml:"max_payload_bytes,omitempty"`
+	RequestBytes          int64 `yaml:"request_bytes,omitempty"`
+	ResponseBytes         int64 `yaml:"response_bytes,omitempty"`
+	EvidenceBytes         int64 `yaml:"evidence_bytes,omitempty"`
+	CommandOutputBytes    int64 `yaml:"command_output_bytes,omitempty"`
+	CommandInputBytes     int64 `yaml:"command_input_bytes,omitempty"`
+	CommandTimeoutSeconds int   `yaml:"command_timeout_seconds,omitempty"`
 }
 
 // Error is a typed configuration error carrying a stable error code.
@@ -158,7 +160,13 @@ func DefaultConfig() *Config {
 		Database:   Database{Path: DefaultDatabaseFilename},
 		Records:    Records{Dir: DefaultRecordsDir},
 		Evidence:   Evidence{Dir: DefaultEvidenceDir},
-		Limits:     Limits{MaxPayloadBytes: DefaultMaxPayloadBytes},
+		Limits: Limits{
+			MaxPayloadBytes:       DefaultMaxPayloadBytes,
+			EvidenceBytes:         DefaultMaxPayloadBytes,
+			CommandOutputBytes:    DefaultMaxPayloadBytes,
+			CommandInputBytes:     DefaultMaxPayloadBytes,
+			CommandTimeoutSeconds: 60,
+		},
 	}
 }
 
@@ -318,6 +326,12 @@ func (c *Config) Merge(other *Config) {
 	if other.Limits.CommandOutputBytes != 0 {
 		c.Limits.CommandOutputBytes = other.Limits.CommandOutputBytes
 	}
+	if other.Limits.CommandInputBytes != 0 {
+		c.Limits.CommandInputBytes = other.Limits.CommandInputBytes
+	}
+	if other.Limits.CommandTimeoutSeconds != 0 {
+		c.Limits.CommandTimeoutSeconds = other.Limits.CommandTimeoutSeconds
+	}
 }
 
 func mergeProject(dst *Project, src Project) {
@@ -461,6 +475,14 @@ func (c *Config) validateLimits() error {
 		if err := check("limits.command_output_bytes", c.Limits.CommandOutputBytes); err != nil {
 			return err
 		}
+	}
+	if c.Limits.CommandInputBytes != 0 {
+		if err := check("limits.command_input_bytes", c.Limits.CommandInputBytes); err != nil {
+			return err
+		}
+	}
+	if c.Limits.CommandTimeoutSeconds <= 0 || c.Limits.CommandTimeoutSeconds > 3600 {
+		return &Error{Code: ErrInvalidConfig, Message: "limits.command_timeout_seconds must be between 1 and 3600"}
 	}
 	return nil
 }

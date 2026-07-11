@@ -41,7 +41,7 @@ Aceptación: `doctor` resuelve repo correctamente.
 - [x] audit.
 - [x] FTS5.
 - [x] integrity.
-- [ ] rebuild.
+- [x] rebuild.
 
 Aceptación: migration + CRUD + search.
 
@@ -62,9 +62,9 @@ Aceptación: tests de todas las transiciones.
 - [x] blob store.
 - [x] command runner.
 - [x] Git evidence.
-- [ ] path security.
-- [ ] limits.
-- [ ] tests malicious inputs.
+- [x] path security.
+- [x] limits.
+- [x] tests malicious inputs.
 
 Aceptación: secretos nunca persisten.
 

@@ -195,3 +195,4 @@ No new external dependencies. Uses standard library only:
 Strict TDD cycle followed: tests written first → build failed (RED) → production
 code implemented → all tests pass (GREEN) → refactoring to remove dead code,
 simplify error handling, remove unused functions → all tests still pass.
+- **2026-07-11 rebuild scope**: Batch T02 rebuild repairs FTS transactionally from canonical SQLite tables; the broader `rebuild-index` CLI reconstruction from Markdown records remains deferred until a record parser exists.

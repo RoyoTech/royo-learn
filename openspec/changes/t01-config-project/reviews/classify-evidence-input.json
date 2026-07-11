@@ -1,0 +1,32 @@
+{
+  "evidence": [
+    {
+      "command": "go test ./internal/config/... -count=1",
+      "result": "ok agent-royo-learn/internal/config 0.689s"
+    },
+    {
+      "command": "go test -race ./internal/config/... -count=1",
+      "result": "ok agent-royo-learn/internal/config 2.317s"
+    },
+    {
+      "command": "go test ./... -count=1",
+      "result": "ok across all packages"
+    },
+    {
+      "command": "go vet ./...",
+      "result": "clean"
+    },
+    {
+      "command": "GOOS=linux GOARCH=amd64 go build ./cmd/royo-learn",
+      "result": "built"
+    },
+    {
+      "command": "GOOS=darwin GOARCH=amd64 go build ./cmd/royo-learn",
+      "result": "built"
+    },
+    {
+      "command": "GOOS=windows GOARCH=amd64 go build ./cmd/royo-learn",
+      "result": "built"
+    }
+  ]
+}

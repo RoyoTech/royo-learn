@@ -1,0 +1,19 @@
+{
+  "schema": "gentle-ai.review-gate-request/v1",
+  "gate": "pre-pr",
+  "target": {
+    "kind": "current-changes",
+    "base_ref": "ba2afa631cb5d304790040f137986b63dc927860",
+    "revision": "",
+    "intended_untracked": [],
+    "ledger_ids": []
+  },
+  "store_revision": "sha256:5f5876477956fbe8e90761b3c61c4134ebd229c977b36a3d7e945ea923e952f3",
+  "genesis_revision": "sha256:fb88b70d4940338a7d94f617c6e46afc1f43a2fc866bd98fbdee7e1c164b03a6",
+  "chain_identity": "sha256:d1d0b411b9977211b5b85e26bf016648d917b4356038b0f050290a9270e7753c",
+  "bundle_digest": "sha256:cc5c1b5ff484db32509bf6a0c6ba72798d6b1860c004bf93471fc01f5280b8fc",
+  "policy_artifact": "openspec/changes/t01-config-project/reviews/policy.md",
+  "ledger_artifact": "openspec/changes/t01-config-project/reviews/ledger.json",
+  "evidence_artifact": "openspec/changes/t01-config-project/reviews/evidence.json",
+  "external_evidence": ""
+}

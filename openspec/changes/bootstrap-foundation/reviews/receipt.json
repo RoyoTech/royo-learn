@@ -1,0 +1,25 @@
+{
+  "schema": "gentle-ai.review-receipt/v1",
+  "lineage_id": "bootstrap-foundation",
+  "mode": "ordinary_4r",
+  "generation": 1,
+  "base_tree": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+  "initial_review_tree": "ba2afa631cb5d304790040f137986b63dc927860",
+  "final_candidate_tree": "ba2afa631cb5d304790040f137986b63dc927860",
+  "paths_digest": "sha256:e22086569374dd016a9452915513aa285f24f58ac44c79256ac9d9c4ab0f4bfa",
+  "fix_delta_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "policy_hash": "sha256:bf476cbcb71563d49c9bd76ee10018ac51d132ed73fcc14d7afff02d42e5d07e",
+  "ledger_hash": "sha256:77e2c784e31101c9e6f0f6ecf378238f70ff95fadf7ed99a5c53a8593a70cde9",
+  "evidence_hash": "sha256:15ae194d04a96e9216f48ac2ae2543d759dc041c6c35f9dd72f61866e811431f",
+  "counters": {
+    "full_reviews": 1,
+    "refuter_batches": 0,
+    "fix_batches": 0,
+    "scoped_fix_validations": 0,
+    "final_verifications": 1,
+    "fix_rounds": 0,
+    "scoped_rejudgments": 0,
+    "judge_executions": 0
+  },
+  "terminal_state": "approved"
+}

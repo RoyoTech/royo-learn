@@ -1,0 +1,13 @@
+{
+  "schema": "gentle-ai.review-evidence/v1",
+  "verification": {
+    "commands": [
+      "go test ./cmd/royo-learn ./internal/logging",
+      "go test ./cmd/royo-learn -run 'TestRunRejectsInvalidArgumentsOnStderr|TestVersionBinaryStreamContract' -count=1",
+      "go test -race ./cmd/royo-learn ./internal/logging",
+      "go vet ./...",
+      "go build ./cmd/royo-learn"
+    ],
+    "result": "all passed"
+  }
+}

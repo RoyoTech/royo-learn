@@ -1,0 +1,23 @@
+{
+  "schema": "gentle-ai.review-evidence/v1",
+  "verification": {
+    "commands": [
+      "go test ./internal/config/... -count=1",
+      "go test -race ./internal/config/... -count=1",
+      "go test ./... -count=1",
+      "go vet ./...",
+      "GOOS=linux GOARCH=amd64 go build ./cmd/royo-learn",
+      "GOOS=darwin GOARCH=amd64 go build ./cmd/royo-learn",
+      "GOOS=windows GOARCH=amd64 go build ./cmd/royo-learn"
+    ],
+    "results": [
+      "ok agent-royo-learn/internal/config 0.689s",
+      "ok agent-royo-learn/internal/config 2.317s",
+      "ok across all packages",
+      "clean",
+      "built",
+      "built",
+      "built"
+    ]
+  }
+}
