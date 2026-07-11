@@ -59,7 +59,7 @@ func resolveSkillTarget(projectRoot string, dest *domain.Destination) TargetReso
 	}
 
 	return TargetResolution{
-		Root:      filepath.Join(projectRoot, dest.Root),
+		Root:      dest.Root,
 		Path:      dest.Path,
 		Operation: op,
 		Exists:    exists,
@@ -79,7 +79,7 @@ func resolveAgentsTarget(projectRoot string, dest *domain.Destination) TargetRes
 	}
 
 	return TargetResolution{
-		Root:      filepath.Join(projectRoot, dest.Root),
+		Root:      dest.Root,
 		Path:      dest.Path,
 		Operation: op,
 		Exists:    exists,
@@ -94,7 +94,7 @@ func resolveProjectTarget(projectRoot string, dest *domain.Destination) TargetRe
 	exists := err == nil
 
 	return TargetResolution{
-		Root:      filepath.Join(projectRoot, dest.Root),
+		Root:      dest.Root,
 		Path:      dest.Path,
 		Operation: domain.OpReplace,
 		Exists:    exists,
@@ -109,7 +109,7 @@ func resolveSharedTarget(projectRoot string, dest *domain.Destination) TargetRes
 	exists := err == nil
 
 	return TargetResolution{
-		Root:      filepath.Join(projectRoot, dest.Root),
+		Root:      dest.Root,
 		Path:      dest.Path,
 		Operation: domain.OpReplaceManagedBlock,
 		Exists:    exists,

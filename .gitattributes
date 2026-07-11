@@ -1,2 +1,7 @@
 # Normalize line endings to LF in the repository.
 * text=auto
+
+# Go files must always use LF regardless of platform.
+*.go text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf

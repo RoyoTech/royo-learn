@@ -67,7 +67,7 @@ func (s *Service) Preview(ctx context.Context, projectID domain.ProjectID, input
 	var diffLines []string
 	for _, target := range targets {
 		var existingContent []byte
-		targetFullPath := filepath.Join(target.Root, target.Path)
+		targetFullPath := filepath.Join(s.projectRoot, target.Root, target.Path)
 		if existing, err := os.ReadFile(targetFullPath); err == nil {
 			existingContent = existing
 		}
