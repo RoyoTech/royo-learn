@@ -263,9 +263,9 @@ func TestResolveExplicitRootWins(t *testing.T) {
 	if proj == nil {
 		t.Fatal("Resolve returned nil project")
 	}
-	abs, _ := filepath.Abs(root)
-	if proj.Root != abs {
-		t.Fatalf("Project.Root=%q want %q", proj.Root, abs)
+	want := canonicalDir(t, root)
+	if proj.Root != want {
+		t.Fatalf("Project.Root=%q want %q", proj.Root, want)
 	}
 	if proj.Key == "" {
 		t.Fatal("Project.Key is empty")
@@ -301,9 +301,9 @@ func TestResolveCWDGitRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	abs, _ := filepath.Abs(root)
-	if proj.Root != abs {
-		t.Fatalf("got Root=%q want %q", proj.Root, abs)
+	want := canonicalDir(t, root)
+	if proj.Root != want {
+		t.Fatalf("got Root=%q want %q", proj.Root, want)
 	}
 }
 
@@ -330,9 +330,9 @@ func TestResolveMonorepoNestedProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	abs, _ := filepath.Abs(sub)
-	if proj.Root != abs {
-		t.Fatalf("got Root=%q want sub-project root %q", proj.Root, abs)
+	want := canonicalDir(t, sub)
+	if proj.Root != want {
+		t.Fatalf("got Root=%q want sub-project root %q", proj.Root, want)
 	}
 }
 
@@ -414,9 +414,9 @@ func TestResolveMCPRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve with MCPRoot: %v", err)
 	}
-	abs, _ := filepath.Abs(root)
-	if proj.Root != abs {
-		t.Fatalf("got Root=%q want %q", proj.Root, abs)
+	want := canonicalDir(t, root)
+	if proj.Root != want {
+		t.Fatalf("got Root=%q want %q", proj.Root, want)
 	}
 }
 
