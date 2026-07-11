@@ -14,6 +14,7 @@ import (
 	"agent-royo-learn/internal/buildinfo"
 	"agent-royo-learn/internal/capture"
 	"agent-royo-learn/internal/config"
+	"agent-royo-learn/internal/curate"
 	"agent-royo-learn/internal/doctor"
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/logging"
@@ -56,6 +57,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runDoctor(args[1:], stdout, stderr)
 	case "capture":
 		return runCapture(args[1:], stdout, stderr)
+	case "curate":
+		return runCurate(args[1:], stdout, stderr)
 	default:
 		return writeUnknownCommandError(stderr)
 	}
@@ -524,6 +527,188 @@ func writeCaptureError(stderr io.Writer, code, format string, args ...interface{
 		Recoverable: true,
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn capture --help"`,
+	})
+	return exitFailure
+}
+
+// ---------------------------------------------------------------------------
+// curate
+// ---------------------------------------------------------------------------
+
+func runCurate(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("curate", flag.ContinueOnError)
+	learningID := fs.String("learning-id", "", "learning ID to curate (required)")
+	action := fs.String("action", "", "curation action: approve, reject, needs_evidence, relate (required)")
+	targetID := fs.String("target-id", "", "target learning ID for relate action")
+	relation := fs.String("relation", "related", "relation type for relate action")
+	rationale := fs.String("rationale", "", "rationale for the curation decision")
+	projectRoot := fs.String("project-root", "", "project root directory")
+	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
+
+	if err := fs.Parse(args); err != nil {
+		return writeCurateError(stderr, "invalid_argument", "curate: %v", err)
+	}
+
+	if *learningID == "" {
+		return writeCurateError(stderr, "invalid_argument", "curate: --learning-id is required")
+	}
+	if *action == "" {
+		return writeCurateError(stderr, "invalid_argument", "curate: --action is required")
+	}
+
+	// Resolve project root.
+	cwd, _ := os.Getwd()
+	resolver := project.NewResolver()
+	req := &project.ResolveRequest{
+		CWD:          cwd,
+		ExplicitRoot: *projectRoot,
+	}
+
+	proj, err := resolver.Resolve(context.Background(), req)
+	if err != nil {
+		return mapProjectError(stderr, err)
+	}
+
+	root := proj.Root
+
+	// Open database.
+	dbPath := filepath.Join(root, ".royo-learn", "royo-learn.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		return writeCurateError(stderr, "invalid_argument", "curate: cannot open database: %v", err)
+	}
+	defer db.Close()
+
+	// Run migrations.
+	if err := storage.Migrate(db); err != nil {
+		return writeCurateError(stderr, "invalid_argument", "curate: migration failed: %v", err)
+	}
+
+	// Save project if not yet registered.
+	ctx := context.Background()
+	var projectID domain.ProjectID
+	tx, txErr := db.DB.BeginTx(ctx, nil)
+	if txErr != nil {
+		return writeCurateError(stderr, "invalid_argument", "curate: begin tx: %v", txErr)
+	}
+	if existing, _ := storage.GetProjectByKey(ctx, tx, proj.Key); existing == nil {
+		projEntity := &domain.Project{
+			ID:            domain.ProjectID(uuid.Must(uuid.NewV7()).String()),
+			ProjectKey:    proj.Key,
+			DisplayName:   proj.Key,
+			CanonicalPath: root,
+			GitRemote:     proj.GitRemote,
+			Fingerprint:   proj.Key,
+			CreatedAt:     time.Now().UTC(),
+			UpdatedAt:     time.Now().UTC(),
+		}
+		if err := storage.SaveProject(ctx, tx, projEntity); err != nil {
+			tx.Rollback()
+			return writeCurateError(stderr, "invalid_argument", "curate: save project: %v", err)
+		}
+		projectID = projEntity.ID
+	} else {
+		projectID = existing.ID
+	}
+	if err := tx.Commit(); err != nil {
+		return writeCurateError(stderr, "invalid_argument", "curate: commit project: %v", err)
+	}
+
+	recordsDir := filepath.Join(root, ".royo-learn", "records")
+	svc := curate.NewService(db, recordsDir)
+
+	actor := domain.Actor{
+		Kind:      "human",
+		Name:      "cli-user",
+		Model:     "",
+		SessionID: "",
+	}
+
+	// Handle "relate" action.
+	if *action == "relate" {
+		if *targetID == "" {
+			return writeCurateError(stderr, "invalid_argument", "curate: --target-id is required for relate action")
+		}
+		relateInput := &curate.RelateInput{
+			SourceLearningID: domain.LearningID(*learningID),
+			TargetLearningID: domain.LearningID(*targetID),
+			RelationType:     domain.RelationType(*relation),
+			Rationale:        *rationale,
+			Actor:            actor,
+		}
+		result, relErr := svc.Relate(ctx, relateInput)
+		if relErr != nil {
+			return writeCurateError(stderr, "invalid_argument", "curate: %v", relErr)
+		}
+		if *jsonFlag {
+			data, _ := json.MarshalIndent(map[string]interface{}{
+				"relation_id":        result.RelationID,
+				"source_learning_id": *learningID,
+				"target_learning_id": *targetID,
+				"relation":           *relation,
+			}, "", "  ")
+			_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+		} else {
+			_, _ = fmt.Fprintf(stdout, "relation %s created between %s and %s\n", result.RelationID, *learningID, *targetID)
+		}
+		return exitSuccess
+	}
+
+	// Handle curate action (approve / reject / needs_evidence).
+	decision, decErr := parseCurateAction(*action)
+	if decErr != nil {
+		return writeCurateError(stderr, "invalid_argument", "curate: %v", decErr)
+	}
+
+	curateInput := &curate.CurateInput{
+		LearningID: domain.LearningID(*learningID),
+		Decision:   decision,
+		Rationale:  *rationale,
+		Actor:      actor,
+	}
+
+	result, curErr := svc.Curate(ctx, projectID, curateInput)
+	if curErr != nil {
+		return writeCurateError(stderr, "invalid_argument", "curate: %v", curErr)
+	}
+
+	if *jsonFlag {
+		data, _ := json.MarshalIndent(map[string]interface{}{
+			"curation_id": result.CurationID,
+			"learning_id": result.LearningID,
+			"new_status":  result.NewStatus,
+		}, "", "  ")
+		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+	} else {
+		_, _ = fmt.Fprintf(stdout, "curated learning %s: %s -> %s (curation: %s)\n",
+			result.LearningID, *action, result.NewStatus, result.CurationID)
+	}
+
+	return exitSuccess
+}
+
+// parseCurateAction maps a CLI action string to a CurationDecision.
+func parseCurateAction(action string) (domain.CurationDecision, error) {
+	switch action {
+	case "approve":
+		return domain.CurationApproveProjectKnowledge, nil
+	case "reject":
+		return domain.CurationReject, nil
+	case "needs_evidence":
+		return domain.CurationNeedsEvidence, nil
+	default:
+		return "", fmt.Errorf("unknown action %q: must be one of approve, reject, needs_evidence, relate", action)
+	}
+}
+
+func writeCurateError(stderr io.Writer, code, format string, args ...interface{}) int {
+	msg := fmt.Sprintf(format, args...)
+	_ = logging.WriteError(stderr, logging.ErrorEnvelope{
+		Code:        code,
+		Message:     msg,
+		Recoverable: true,
+		Details:     map[string]any{},
+		NextAction:  `run "royo-learn curate --help"`,
 	})
 	return exitFailure
 }

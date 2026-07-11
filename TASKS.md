@@ -82,12 +82,12 @@ Aceptación: dos llamadas iguales producen una entidad.
 
 ## T06 Curate
 
-- [ ] curation service.
-- [ ] relation service.
-- [ ] evidence thresholds.
-- [ ] CLI.
-- [ ] records update.
-- [ ] tests.
+- [x] curation service.
+- [x] relation service.
+- [x] evidence thresholds.
+- [x] CLI.
+- [x] records update.
+- [x] tests.
 
 Aceptación: no aprobar hipótesis sin justificación requerida.
 

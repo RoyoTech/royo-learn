@@ -1,0 +1,477 @@
+package curate
+
+import (
+	"context"
+	"database/sql"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"agent-royo-learn/internal/domain"
+	"agent-royo-learn/internal/storage"
+
+	"github.com/google/uuid"
+)
+
+// setupCurateDB creates a temporary DB with migrations and a test project.
+func setupCurateDB(t *testing.T) (*storage.DB, *domain.Project) {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "test.db")
+	db, err := storage.Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	if err := storage.Migrate(db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	proj := &domain.Project{
+		ID:            domain.ProjectID(uuid.Must(uuid.NewV7()).String()),
+		ProjectKey:    "curate-test",
+		DisplayName:   "Curate Test",
+		CanonicalPath: t.TempDir(),
+		GitRemote:     "",
+		Fingerprint:   "fp-cur-proj",
+	}
+
+	ctx := context.Background()
+	tx, err := db.DB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	if err := storage.SaveProject(ctx, tx, proj); err != nil {
+		tx.Rollback()
+		t.Fatalf("SaveProject: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	return db, proj
+}
+
+// saveTestLearning inserts a learning with the given fields and returns it.
+func saveTestLearning(t *testing.T, db *storage.DB, proj *domain.Project, status domain.LearningStatus, evidenceLevel domain.EvidenceLevel) *domain.Learning {
+	t.Helper()
+
+	now := time.Now().UTC()
+	ctx := context.Background()
+	learning := &domain.Learning{
+		ID:                  domain.LearningID(uuid.Must(uuid.NewV7()).String()),
+		ProjectID:           proj.ID,
+		Status:              status,
+		Type:                domain.TypeProcedure,
+		Title:               "Test Learning for Curation",
+		Context:             "Testing curation flow",
+		Observation:         "The curation service works correctly",
+		ReusableLesson:      "Always test curation transitions",
+		ScopeGuess:          domain.ScopeProject,
+		Confidence:          domain.ConfidenceHigh,
+		EvidenceLevel:       evidenceLevel,
+		ProposedDestination: domain.DestProject,
+		NormalizedHash:      "hash-curate-test-" + string(status),
+		Fingerprint:         "fp-curate-test-" + string(status),
+		Revision:            1,
+		CreatedAt:           now,
+		UpdatedAt:           now,
+	}
+
+	tx, err := db.DB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	if err := storage.SaveLearning(ctx, tx, learning); err != nil {
+		tx.Rollback()
+		t.Fatalf("SaveLearning: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	return learning
+}
+
+// saveTestEvidence inserts a test evidence record for a learning.
+func saveTestEvidence(t *testing.T, db *storage.DB, learningID domain.LearningID) {
+	t.Helper()
+
+	ctx := context.Background()
+	evt := &domain.Evidence{
+		ID:         domain.EvidenceID(uuid.Must(uuid.NewV7()).String()),
+		LearningID: learningID,
+		Kind:       domain.KindTest,
+		URI:        "test://evidence",
+		Summary:    "Test evidence for curation",
+		SHA256:     "abc123",
+		Redacted:   false,
+	}
+
+	tx, err := db.DB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	if err := storage.SaveEvidence(ctx, tx, evt); err != nil {
+		tx.Rollback()
+		t.Fatalf("SaveEvidence: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+}
+
+func TestCurateApproveCaptured(t *testing.T) {
+	t.Parallel()
+
+	db, proj := setupCurateDB(t)
+	learning := saveTestLearning(t, db, proj, domain.StatusCaptured, domain.EvidenceModerate)
+	saveTestEvidence(t, db, learning.ID)
+
+	recordsDir := t.TempDir()
+	svc := NewService(db, recordsDir)
+
+	input := &CurateInput{
+		LearningID: learning.ID,
+		Decision:   domain.CurationApproveProjectKnowledge,
+		Rationale:  "Evidence is sufficient and learning is valid",
+		Actor:      domain.Actor{Kind: "agent", Name: "test-curator", Model: "test-model", SessionID: "sess-001"},
+	}
+
+	result, err := svc.Curate(context.Background(), proj.ID, input)
+	if err != nil {
+		t.Fatalf("Curate: %v", err)
+	}
+
+	if result.CurationID == "" {
+		t.Fatal("Curate returned empty CurationID")
+	}
+	if result.NewStatus != domain.StatusApproved {
+		t.Errorf("NewStatus = %q, want %q", result.NewStatus, domain.StatusApproved)
+	}
+
+	// Verify learning was updated in DB.
+	ctx := context.Background()
+	tx, err := db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatalf("BeginTx read: %v", err)
+	}
+	defer tx.Rollback()
+
+	updated, err := storage.GetLearning(ctx, tx, learning.ID)
+	if err != nil {
+		t.Fatalf("GetLearning: %v", err)
+	}
+	if updated.Status != domain.StatusApproved {
+		t.Errorf("Learning status in DB = %q, want %q", updated.Status, domain.StatusApproved)
+	}
+	if updated.Revision != 2 {
+		t.Errorf("Learning revision = %d, want 2", updated.Revision)
+	}
+
+	// Verify curation record was created.
+	curations, err := storage.ListCurationsByLearning(ctx, tx, learning.ID)
+	if err != nil {
+		t.Fatalf("ListCurationsByLearning: %v", err)
+	}
+	if len(curations) == 0 {
+		t.Fatal("No curation record found")
+	}
+	if curations[0].Decision != domain.CurationApproveProjectKnowledge {
+		t.Errorf("Curation decision = %q, want %q", curations[0].Decision, domain.CurationApproveProjectKnowledge)
+	}
+}
+
+func TestCurateRejectCaptured(t *testing.T) {
+	t.Parallel()
+
+	db, proj := setupCurateDB(t)
+	learning := saveTestLearning(t, db, proj, domain.StatusCaptured, domain.EvidenceWeak)
+
+	recordsDir := t.TempDir()
+	svc := NewService(db, recordsDir)
+
+	input := &CurateInput{
+		LearningID: learning.ID,
+		Decision:   domain.CurationReject,
+		Rationale:  "Not enough evidence, learning is speculative",
+		Actor:      domain.Actor{Kind: "agent", Name: "test-curator", Model: "test-model", SessionID: "sess-001"},
+	}
+
+	result, err := svc.Curate(context.Background(), proj.ID, input)
+	if err != nil {
+		t.Fatalf("Curate: %v", err)
+	}
+
+	if result.NewStatus != domain.StatusRejected {
+		t.Errorf("NewStatus = %q, want %q", result.NewStatus, domain.StatusRejected)
+	}
+
+	ctx := context.Background()
+	tx, err := db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatalf("BeginTx read: %v", err)
+	}
+	defer tx.Rollback()
+
+	updated, err := storage.GetLearning(ctx, tx, learning.ID)
+	if err != nil {
+		t.Fatalf("GetLearning: %v", err)
+	}
+	if updated.Status != domain.StatusRejected {
+		t.Errorf("Learning status in DB = %q, want %q", updated.Status, domain.StatusRejected)
+	}
+}
+
+func TestCurateNeedsEvidence(t *testing.T) {
+	t.Parallel()
+
+	db, proj := setupCurateDB(t)
+	learning := saveTestLearning(t, db, proj, domain.StatusCaptured, domain.EvidenceWeak)
+
+	recordsDir := t.TempDir()
+	svc := NewService(db, recordsDir)
+
+	input := &CurateInput{
+		LearningID: learning.ID,
+		Decision:   domain.CurationNeedsEvidence,
+		Rationale:  "More evidence required before approval",
+		Actor:      domain.Actor{Kind: "agent", Name: "test-curator", Model: "test-model", SessionID: "sess-001"},
+	}
+
+	result, err := svc.Curate(context.Background(), proj.ID, input)
+	if err != nil {
+		t.Fatalf("Curate: %v", err)
+	}
+
+	if result.NewStatus != domain.StatusNeedsEvidence {
+		t.Errorf("NewStatus = %q, want %q", result.NewStatus, domain.StatusNeedsEvidence)
+	}
+}
+
+func TestCurateApproveWithoutEvidenceFails(t *testing.T) {
+	t.Parallel()
+
+	db, proj := setupCurateDB(t)
+	// Learning with insufficient evidence and NO evidence records.
+	learning := saveTestLearning(t, db, proj, domain.StatusCaptured, domain.EvidenceInsufficient)
+
+	recordsDir := t.TempDir()
+	svc := NewService(db, recordsDir)
+
+	input := &CurateInput{
+		LearningID: learning.ID,
+		Decision:   domain.CurationApproveProjectKnowledge,
+		Rationale:  "Trying to approve without evidence",
+		Actor:      domain.Actor{Kind: "agent", Name: "test-curator", Model: "test-model", SessionID: "sess-001"},
+	}
+
+	_, err := svc.Curate(context.Background(), proj.ID, input)
+	if err == nil {
+		t.Fatal("Expected error for approving learning with insufficient evidence")
+	}
+
+	// Verify learning was NOT updated.
+	ctx := context.Background()
+	tx, err := db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatalf("BeginTx read: %v", err)
+	}
+	defer tx.Rollback()
+
+	unchanged, err := storage.GetLearning(ctx, tx, learning.ID)
+	if err != nil {
+		t.Fatalf("GetLearning: %v", err)
+	}
+	if unchanged.Status != domain.StatusCaptured {
+		t.Errorf("Learning status should remain %q, got %q", domain.StatusCaptured, unchanged.Status)
+	}
+}
+
+func TestCurateApproveWithWeakEvidenceFails(t *testing.T) {
+	t.Parallel()
+
+	db, proj := setupCurateDB(t)
+	learning := saveTestLearning(t, db, proj, domain.StatusCaptured, domain.EvidenceWeak)
+	saveTestEvidence(t, db, learning.ID) // has evidence but level is weak
+
+	recordsDir := t.TempDir()
+	svc := NewService(db, recordsDir)
+
+	input := &CurateInput{
+		LearningID: learning.ID,
+		Decision:   domain.CurationApproveProjectKnowledge,
+		Rationale:  "Trying to approve with weak evidence level",
+		Actor:      domain.Actor{Kind: "agent", Name: "test-curator", Model: "test-model", SessionID: "sess-001"},
+	}
+
+	_, err := svc.Curate(context.Background(), proj.ID, input)
+	if err == nil {
+		t.Fatal("Expected error for approving learning with weak evidence level")
+	}
+}
+
+func TestCurateInvalidTransition(t *testing.T) {
+	t.Parallel()
+
+	db, proj := setupCurateDB(t)
+	// rejected is a terminal state.
+	learning := saveTestLearning(t, db, proj, domain.StatusRejected, domain.EvidenceStrong)
+	saveTestEvidence(t, db, learning.ID)
+
+	recordsDir := t.TempDir()
+	svc := NewService(db, recordsDir)
+
+	input := &CurateInput{
+		LearningID: learning.ID,
+		Decision:   domain.CurationApproveProjectKnowledge,
+		Rationale:  "Cannot approve a rejected learning",
+		Actor:      domain.Actor{Kind: "agent", Name: "test-curator", Model: "test-model", SessionID: "sess-001"},
+	}
+
+	_, err := svc.Curate(context.Background(), proj.ID, input)
+	if err == nil {
+		t.Fatal("Expected error for invalid transition from rejected to approved")
+	}
+}
+
+func TestCurateLearningNotFound(t *testing.T) {
+	t.Parallel()
+
+	db, proj := setupCurateDB(t)
+
+	recordsDir := t.TempDir()
+	svc := NewService(db, recordsDir)
+
+	input := &CurateInput{
+		LearningID: "nonexistent-id",
+		Decision:   domain.CurationApproveProjectKnowledge,
+		Rationale:  "This should fail",
+		Actor:      domain.Actor{Kind: "agent", Name: "test-curator", Model: "test-model", SessionID: "sess-001"},
+	}
+
+	_, err := svc.Curate(context.Background(), proj.ID, input)
+	if err == nil {
+		t.Fatal("Expected error for nonexistent learning")
+	}
+}
+
+func TestCurateNilInput(t *testing.T) {
+	t.Parallel()
+
+	db, _ := setupCurateDB(t)
+
+	recordsDir := t.TempDir()
+	svc := NewService(db, recordsDir)
+
+	_, err := svc.Curate(context.Background(), "proj-1", nil)
+	if err == nil {
+		t.Fatal("Expected error for nil input")
+	}
+}
+
+func TestCurateEmptyLearningID(t *testing.T) {
+	t.Parallel()
+
+	db, proj := setupCurateDB(t)
+
+	recordsDir := t.TempDir()
+	svc := NewService(db, recordsDir)
+
+	input := &CurateInput{
+		LearningID: "",
+		Decision:   domain.CurationApproveProjectKnowledge,
+		Rationale:  "Empty ID should fail",
+		Actor:      domain.Actor{Kind: "agent", Name: "test-curator", Model: "test-model", SessionID: "sess-001"},
+	}
+
+	_, err := svc.Curate(context.Background(), proj.ID, input)
+	if err == nil {
+		t.Fatal("Expected error for empty learning ID")
+	}
+}
+
+func TestCurateEmptyDecision(t *testing.T) {
+	t.Parallel()
+
+	db, proj := setupCurateDB(t)
+	learning := saveTestLearning(t, db, proj, domain.StatusCaptured, domain.EvidenceModerate)
+	saveTestEvidence(t, db, learning.ID)
+
+	recordsDir := t.TempDir()
+	svc := NewService(db, recordsDir)
+
+	input := &CurateInput{
+		LearningID: learning.ID,
+		Decision:   "",
+		Rationale:  "Empty decision should fail",
+		Actor:      domain.Actor{Kind: "agent", Name: "test-curator", Model: "test-model", SessionID: "sess-001"},
+	}
+
+	_, err := svc.Curate(context.Background(), proj.ID, input)
+	if err == nil {
+		t.Fatal("Expected error for empty decision")
+	}
+}
+
+func TestCurateRecordUpdated(t *testing.T) {
+	t.Parallel()
+
+	db, proj := setupCurateDB(t)
+	learning := saveTestLearning(t, db, proj, domain.StatusCaptured, domain.EvidenceModerate)
+	saveTestEvidence(t, db, learning.ID)
+
+	recordsDir := t.TempDir()
+	svc := NewService(db, recordsDir)
+
+	input := &CurateInput{
+		LearningID: learning.ID,
+		Decision:   domain.CurationApproveProjectKnowledge,
+		Rationale:  "Approval for record test",
+		Actor:      domain.Actor{Kind: "agent", Name: "test-curator", Model: "test-model", SessionID: "sess-001"},
+	}
+
+	_, err := svc.Curate(context.Background(), proj.ID, input)
+	if err != nil {
+		t.Fatalf("Curate: %v", err)
+	}
+
+	// Check that a record file was written.
+	recordPath := filepath.Join(recordsDir, string(learning.ID)+".md")
+	info, err := os.Stat(recordPath)
+	if err != nil {
+		t.Fatalf("Record file not found at %s: %v", recordPath, err)
+	}
+	if info.Size() == 0 {
+		t.Fatal("Record file is empty")
+	}
+}
+
+func TestCurateApproveNeedsEvidenceStatus(t *testing.T) {
+	t.Parallel()
+
+	db, proj := setupCurateDB(t)
+	learning := saveTestLearning(t, db, proj, domain.StatusNeedsEvidence, domain.EvidenceStrong)
+	saveTestEvidence(t, db, learning.ID)
+
+	recordsDir := t.TempDir()
+	svc := NewService(db, recordsDir)
+
+	input := &CurateInput{
+		LearningID: learning.ID,
+		Decision:   domain.CurationApproveProjectKnowledge,
+		Rationale:  "Now has sufficient evidence",
+		Actor:      domain.Actor{Kind: "agent", Name: "test-curator", Model: "test-model", SessionID: "sess-001"},
+	}
+
+	result, err := svc.Curate(context.Background(), proj.ID, input)
+	if err != nil {
+		t.Fatalf("Curate: %v", err)
+	}
+
+	if result.NewStatus != domain.StatusApproved {
+		t.Errorf("NewStatus = %q, want %q", result.NewStatus, domain.StatusApproved)
+	}
+}
