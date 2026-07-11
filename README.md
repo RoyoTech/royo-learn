@@ -8,6 +8,29 @@ It does not replace Gentle-AI or Engram:
 - **Engram** preserves persistent memory of sessions, decisions, discoveries, and errors.
 - **Agent Royo Learn** transforms verified experiences into reusable behavior changes: knowledge, Skills, rules, tests, and recurrence alerts.
 
+### Engram + Royo-Learn: Knowledge + Understanding
+
+There is a useful distinction between two concepts:
+
+- **Knowledge**: raw data, facts, answers — easily accessible. Today, tools like AI give us instant access to "knowledge" with zero effort.
+- **Understanding**: the deep cognitive process of processing, reasoning, and integrating that information. When we delegate everything, we stop burning neurons and lose the ability to truly understand.
+
+This same distinction maps to the two systems:
+
+| | Engram | Royo-Learn |
+|---|---|---|
+| **Role** | Persistent memory | Learning engine |
+| **What it does** | Stores what happened | Processes, reasons, integrates |
+| **Analogy** | Knowledge (the notebook) | Understanding (the act of studying) |
+
+**Processing**: Royo-Learn does not accept raw data and store it. The capture flow validates the payload, normalizes and hashes it, checks idempotency, searches lexically (FTS5), collects deterministic evidence, and only then persists the record.
+
+**Reasoning**: The deduplication system defines semantic relationships between learnings: `duplicate_of`, `extends`, `supersedes`, `contradicts`, `narrows`, `related`. The state machine forces decisions: is this rejected, does it need evidence, should it be merged or approved? It is not neutral storage — it evaluates the validity and coherence of knowledge.
+
+**Integrating**: A learning does not stay in a database row. It becomes a Skill or a rule, gets recovered in another session, and *prevents or detects a recurrence*. The publication flow (approved → preview → approve → publish → verify → rollback) turns understanding into operational behavior change.
+
+Royo-Learn does not understand *for* the model. It is the scaffolding that makes understanding matter. Without it, an LLM can understand something in one session, but that understanding evaporates. With it, that understanding becomes persistent, verifiable, relational, and actionable.
+
 The repository produces a single cross-platform binary:
 
 ```text
