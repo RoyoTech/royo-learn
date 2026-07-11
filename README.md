@@ -1,5 +1,13 @@
 # Agent Royo Learn
 
+[![English](https://img.shields.io/badge/lang-en-blue.svg)](README.md)
+[![Español](https://img.shields.io/badge/lang-es-yellow.svg)](docs/README.es.md)
+[![Français](https://img.shields.io/badge/lang-fr-purple.svg)](docs/README.fr.md)
+[![Deutsch](https://img.shields.io/badge/lang-de-red.svg)](docs/README.de.md)
+[![中文](https://img.shields.io/badge/lang-zh-green.svg)](docs/README.zh.md)
+[![हिन्दी](https://img.shields.io/badge/lang-hi-orange.svg)](docs/README.hi.md)
+[![Português](https://img.shields.io/badge/lang-pt-lightgrey.svg)](docs/README.pt.md)
+
 **Agent Royo Learn** is a local institutional learning engine for AI agents.
 
 It does not replace Gentle-AI or Engram:
