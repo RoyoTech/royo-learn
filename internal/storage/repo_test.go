@@ -85,7 +85,6 @@ func newUUID() string {
 // ---------------------------------------------------------------------------
 
 func TestSaveProject(t *testing.T) {
-	t.Parallel()
 
 	db, _ := setupTestDB(t)
 	ctx := context.Background()
@@ -128,7 +127,6 @@ func TestSaveProject(t *testing.T) {
 }
 
 func TestSaveProjectDuplicateKey(t *testing.T) {
-	t.Parallel()
 
 	db, _ := setupTestDB(t)
 	ctx := context.Background()
@@ -156,7 +154,6 @@ func TestSaveProjectDuplicateKey(t *testing.T) {
 }
 
 func TestGetProjectByKey(t *testing.T) {
-	t.Parallel()
 
 	db, _ := setupTestDB(t)
 	ctx := context.Background()
@@ -173,7 +170,6 @@ func TestGetProjectByKey(t *testing.T) {
 }
 
 func TestGetProjectByKeyNotFound(t *testing.T) {
-	t.Parallel()
 
 	db, _ := setupTestDB(t)
 	ctx := context.Background()
@@ -222,7 +218,6 @@ func newTestLearning(projID domain.ProjectID) *domain.Learning {
 }
 
 func TestSaveAndGetLearning(t *testing.T) {
-	t.Parallel()
 
 	db, proj := setupTestDB(t)
 	ctx := context.Background()
@@ -256,7 +251,6 @@ func TestSaveAndGetLearning(t *testing.T) {
 }
 
 func TestSaveLearningDuplicate(t *testing.T) {
-	t.Parallel()
 
 	db, proj := setupTestDB(t)
 	ctx := context.Background()
@@ -276,7 +270,6 @@ func TestSaveLearningDuplicate(t *testing.T) {
 }
 
 func TestUpdateLearning(t *testing.T) {
-	t.Parallel()
 
 	db, proj := setupTestDB(t)
 	ctx := context.Background()
@@ -322,7 +315,6 @@ func TestUpdateLearning(t *testing.T) {
 }
 
 func TestListLearningsByProject(t *testing.T) {
-	t.Parallel()
 
 	db, proj := setupTestDB(t)
 	ctx := context.Background()
@@ -393,7 +385,6 @@ func TestFindLearningByHash(t *testing.T) {
 }
 
 func TestFindLearningByHashNotFound(t *testing.T) {
-	t.Parallel()
 
 	db, proj := setupTestDB(t)
 	ctx := context.Background()
@@ -410,7 +401,6 @@ func TestFindLearningByHashNotFound(t *testing.T) {
 }
 
 func TestSaveAndGetRevisions(t *testing.T) {
-	t.Parallel()
 
 	db, proj := setupTestDB(t)
 	ctx := context.Background()
@@ -466,7 +456,6 @@ func newTestEvidence(learningID domain.LearningID) *domain.Evidence {
 }
 
 func TestSaveAndListEvidence(t *testing.T) {
-	t.Parallel()
 
 	db, proj := setupTestDB(t)
 	ctx := context.Background()
@@ -507,7 +496,6 @@ func TestSaveAndListEvidence(t *testing.T) {
 }
 
 func TestGetEvidence(t *testing.T) {
-	t.Parallel()
 
 	db, proj := setupTestDB(t)
 	ctx := context.Background()
@@ -563,7 +551,6 @@ func newTestRelation(sourceID, targetID domain.LearningID) *domain.LearningRelat
 }
 
 func TestSaveAndListRelations(t *testing.T) {
-	t.Parallel()
 
 	db, proj := setupTestDB(t)
 	ctx := context.Background()
@@ -615,7 +602,6 @@ func TestSaveAndListRelations(t *testing.T) {
 }
 
 func TestSaveRelationSelfReference(t *testing.T) {
-	t.Parallel()
 
 	db, proj := setupTestDB(t)
 	ctx := context.Background()
@@ -658,7 +644,6 @@ func newTestCuration(learningID domain.LearningID) *domain.Curation {
 }
 
 func TestSaveAndGetCuration(t *testing.T) {
-	t.Parallel()
 
 	db, proj := setupTestDB(t)
 	ctx := context.Background()
@@ -753,7 +738,6 @@ func newTestOccurrence(projID domain.ProjectID) *domain.Occurrence {
 func boolPtr(b bool) *bool { return &b }
 
 func TestSaveAndListOccurrences(t *testing.T) {
-	t.Parallel()
 
 	db, proj := setupTestDB(t)
 	ctx := context.Background()
@@ -810,8 +794,6 @@ func newTestAuditEvent() *domain.AuditEvent {
 }
 
 func TestRecordAndListAuditEvents(t *testing.T) {
-	t.Parallel()
-
 	db, _ := setupTestDB(t)
 	ctx := context.Background()
 
@@ -842,7 +824,6 @@ func TestRecordAndListAuditEvents(t *testing.T) {
 }
 
 func TestAuditAppendOnly(t *testing.T) {
-	t.Parallel()
 
 	db, _ := setupTestDB(t)
 	ctx := context.Background()
@@ -880,7 +861,6 @@ func TestAuditAppendOnly(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestFTSSearch(t *testing.T) {
-	t.Parallel()
 
 	db, proj := setupTestDB(t)
 	ctx := context.Background()
@@ -951,7 +931,6 @@ func TestFTSSearch(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWithTxCommit(t *testing.T) {
-	t.Parallel()
 
 	db, proj := setupTestDB(t)
 	ctx := context.Background()
@@ -977,7 +956,6 @@ func TestWithTxCommit(t *testing.T) {
 }
 
 func TestWithTxRollback(t *testing.T) {
-	t.Parallel()
 
 	db, proj := setupTestDB(t)
 	ctx := context.Background()

@@ -42,5 +42,8 @@ func Open(path string) (*DB, error) {
 
 // Close closes the underlying database connection.
 func (db *DB) Close() error {
+	if db.DB != nil {
+		db.DB.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	}
 	return db.DB.Close()
 }
