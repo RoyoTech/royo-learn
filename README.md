@@ -48,7 +48,7 @@ royo-learn.exe    # Windows
 
 ## Installation
 
-### Linux / macOS
+### Linux / macOS / WSL
 
 ```bash
 curl -fsSL https://github.com/RoyoTech/royo-learn/releases/latest/download/install.sh | bash
@@ -57,28 +57,30 @@ curl -fsSL https://github.com/RoyoTech/royo-learn/releases/latest/download/insta
 Or manually:
 
 ```bash
-# Download and install
-./install.sh --version v0.1.0
-# Uninstall
-./install.sh --uninstall
+./install.sh --version v0.1.0     # install specific version
+./install.sh --uninstall           # remove
 ```
 
-The binary is installed to `~/.local/bin/royo-learn`. Add it to your PATH if needed.
+The binary is installed to `~/.local/bin/royo-learn`.
 
-### Windows
+### Windows (PowerShell)
 
 ```powershell
-# Download the installer
 Invoke-WebRequest -Uri https://github.com/RoyoTech/royo-learn/releases/latest/download/install.ps1 -OutFile install.ps1
+.\install.ps1
+```
 
-# Install
-.\install.ps1 --version v0.1.0
+Or with a version:
 
-# Uninstall
-.\install.ps1 --uninstall
+```powershell
+.\install.ps1 --version v0.1.0    # install specific version
+.\install.ps1 --uninstall          # remove
 ```
 
 The binary is installed to `%LOCALAPPDATA%\royo-learn\bin\royo-learn.exe`.
+
+> **Note**: the PowerShell script requires **PowerShell**, not Git Bash or WSL bash.
+> On WSL, use the Linux instructions above.
 
 ### Build from source
 
