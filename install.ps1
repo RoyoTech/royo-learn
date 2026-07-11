@@ -2,15 +2,16 @@
 .SYNOPSIS
     royo-learn installer for Windows
 .DESCRIPTION
-    Downloads the royo-learn binary from GitHub Releases, verifies SHA-256,
-    installs to %LOCALAPPDATA%\royo-learn\bin\, and optionally adds to PATH.
+    Downloads the royo-learn archive from GitHub Releases, verifies SHA-256,
+    extracts the binary, installs to %LOCALAPPDATA%\royo-learn\bin\, and
+    offers to add the directory to PATH.
 .PARAMETER Version
-    Version to install (default: latest). Example: --version v1.0.0
+    Version to install (default: latest). Example: --version v0.1.0
 .PARAMETER Uninstall
     Remove royo-learn from the system.
 .EXAMPLE
     .\install.ps1
-    .\install.ps1 --version v1.0.0
+    .\install.ps1 --version v0.1.0
     .\install.ps1 --uninstall
 #>
 
@@ -28,6 +29,15 @@ $BinaryName = "royo-learn.exe"
 function Write-Info { Write-Host "[royo-learn] $args" -ForegroundColor Cyan }
 function Write-Error-Custom { Write-Host "[royo-learn] ERROR: $args" -ForegroundColor Red; exit 1 }
 
+# Auto-detect architecture.
+function Get-Arch {
+    switch ($env:PROCESSOR_ARCHITECTURE) {
+        "AMD64" { return "amd64" }
+        "ARM64" { return "arm64" }
+        default  { return "amd64" }
+    }
+}
+
 function Uninstall-RoyoLearn {
     $target = Join-Path $BinDir $BinaryName
     if (Test-Path $target) {
@@ -35,7 +45,7 @@ function Uninstall-RoyoLearn {
         Write-Info "removed $target"
     }
     if (Test-Path $InstallRoot) {
-        $remaining = Get-ChildItem $InstallRoot -Recurse -File | Measure-Object | Select-Object -ExpandProperty Count
+        $remaining = Get-ChildItem $InstallRoot -Recurse -File -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count
         if ($remaining -eq 0) {
             Remove-Item $InstallRoot -Recurse -Force
             Write-Info "removed $InstallRoot"
@@ -48,62 +58,87 @@ function Uninstall-RoyoLearn {
 function Install-RoyoLearn {
     param([string]$Ver)
 
-    $platform = "windows-amd64"
-    $archiveName = "royo-learn-${platform}.exe"
+    $arch = Get-Arch
+    $archiveName = "royo-learn-windows-${arch}.zip"
 
+    $baseUrl = "https://github.com/$Repo/releases"
     if ($Ver -eq "latest") {
-        $downloadUrl = "https://github.com/$Repo/releases/latest/download/$archiveName"
+        $downloadUrl = "$baseUrl/latest/download/$archiveName"
+        $checksumUrl = "$baseUrl/latest/download/checksums.txt"
     } else {
-        $downloadUrl = "https://github.com/$Repo/releases/download/$Ver/$archiveName"
+        $downloadUrl = "$baseUrl/download/$Ver/$archiveName"
+        $checksumUrl = "$baseUrl/download/$Ver/checksums.txt"
     }
-    $checksumUrl = "${downloadUrl}.sha256"
 
-    Write-Info "installing royo-learn $Ver for $platform..."
+    Write-Info "installing royo-learn $Ver for windows/$arch..."
 
     $tmpDir = Join-Path $env:TEMP "royo-learn-install-$(Get-Random)"
     New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
 
     try {
-        # Download binary.
+        # Download archive.
         Write-Info "downloading $downloadUrl..."
-        $binaryPath = Join-Path $tmpDir $BinaryName
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $binaryPath -UseBasicParsing
+        $archivePath = Join-Path $tmpDir $archiveName
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $archivePath -UseBasicParsing
 
-        # Download checksum.
+        # Download checksums and verify.
         try {
-            $checksumPath = Join-Path $tmpDir "${BinaryName}.sha256"
+            $checksumPath = Join-Path $tmpDir "checksums.txt"
             Invoke-WebRequest -Uri $checksumUrl -OutFile $checksumPath -UseBasicParsing -ErrorAction Stop
             Write-Info "verifying checksum..."
-            $expected = (Get-Content $checksumPath).Split()[0]
-            $actual = (Get-FileHash -Path $binaryPath -Algorithm SHA256).Hash
-            if ($expected -eq $actual) {
-                Write-Info "checksum OK"
+            $checksumLines = Get-Content $checksumPath
+            $expected = $null
+            foreach ($line in $checksumLines) {
+                if ($line -match [regex]::Escape($archiveName)) {
+                    $expected = ($line -split '\s+')[0]
+                    break
+                }
+            }
+            if ($expected) {
+                $actual = (Get-FileHash -Path $archivePath -Algorithm SHA256).Hash.ToLower()
+                if ($expected -eq $actual) {
+                    Write-Info "checksum OK"
+                } else {
+                    Write-Info "checksum mismatch (expected $expected, got $actual)"
+                }
             } else {
-                Write-Info "checksum mismatch (expected $expected, got $actual)"
+                Write-Info "checksum entry not found for $archiveName"
             }
         } catch {
             Write-Info "checksum download failed, skipping verification"
         }
 
+        # Extract.
+        Write-Info "extracting..."
+        $extractDir = Join-Path $tmpDir "extracted"
+        Expand-Archive -Path $archivePath -DestinationPath $extractDir -Force
+
+        $extractedBinary = Join-Path $extractDir $BinaryName
+        if (-not (Test-Path $extractedBinary)) {
+            Write-Error-Custom "$BinaryName not found inside archive"
+        }
+
         # Install.
         New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
-        Copy-Item $binaryPath -Destination (Join-Path $BinDir $BinaryName) -Force
+        Copy-Item $extractedBinary -Destination (Join-Path $BinDir $BinaryName) -Force
         Write-Info "installed to $BinDir\$BinaryName"
 
-        # Verify.
+        # Verify the installed binary works.
         try {
             $versionOutput = & (Join-Path $BinDir $BinaryName) version --json 2>$null
-            Write-Info "verified: $versionOutput"
+            if ($versionOutput) {
+                Write-Info "verified: $versionOutput"
+            }
         } catch {
             Write-Info "version check skipped"
         }
 
-        # PATH note.
+        # PATH guidance.
         $currentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
         if ($currentPath -notlike "*$BinDir*") {
             Write-Info "NOTE: add $BinDir to your PATH:"
             Write-Info "  setx PATH `"%PATH%;$BinDir`""
-            Write-Info "  or add manually via System Properties > Environment Variables"
+            Write-Info "  (or add manually via System Properties > Environment Variables)"
         }
 
         Write-Info "install complete!"

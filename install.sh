@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # install.sh — royo-learn installer for Linux and macOS
 # Usage: curl -fsSL <url>/install.sh | bash
-#        ./install.sh --version v1.0.0
+#        ./install.sh --version v0.1.0
 #        ./install.sh --uninstall
 set -euo pipefail
 
@@ -39,7 +39,6 @@ do_uninstall() {
     else
         info "${BINARY_NAME} not found at ${target}"
     fi
-    # Remove from PATH note (informational only).
     info "uninstall complete. Remove '${INSTALL_DIR}' from your PATH if desired."
     exit 0
 }
@@ -50,43 +49,57 @@ do_install() {
     local platform
     platform=$(detect_platform)
 
-    # Resolve download URL.
-    local archive_name="${BINARY_NAME}-${platform}"
-    local download_url
-    if [ "$version" = "latest" ]; then
-        download_url="https://github.com/${REPO}/releases/latest/download/${archive_name}"
-    else
-        download_url="https://github.com/${REPO}/releases/download/${version}/${archive_name}"
-    fi
+    # GoReleaser naming: royo-learn-linux-amd64.tar.gz
+    local archive_name="${BINARY_NAME}-${platform}.tar.gz"
 
-    local checksum_url="${download_url}.sha256"
+    local base_url="https://github.com/${REPO}/releases"
+    local download_url checksum_url
+    if [ "$version" = "latest" ]; then
+        download_url="${base_url}/latest/download/${archive_name}"
+        checksum_url="${base_url}/latest/download/checksums.txt"
+    else
+        download_url="${base_url}/download/${version}/${archive_name}"
+        checksum_url="${base_url}/download/${version}/checksums.txt"
+    fi
 
     info "installing royo-learn ${version} for ${platform}..."
 
-    # Create temp directory.
     local tmpdir
     tmpdir=$(mktemp -d)
     trap 'rm -rf "$tmpdir"' EXIT
 
-    # Download binary.
+    # Download archive.
     info "downloading ${download_url}..."
+    local archive_path="${tmpdir}/${archive_name}"
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL -o "${tmpdir}/${BINARY_NAME}" "$download_url" || error "download failed"
-        curl -fsSL -o "${tmpdir}/${BINARY_NAME}.sha256" "$checksum_url" 2>/dev/null || true
+        curl -fsSL -o "$archive_path" "$download_url" || error "download failed"
+        curl -fsSL -o "${tmpdir}/checksums.txt" "$checksum_url" 2>/dev/null || true
     elif command -v wget >/dev/null 2>&1; then
-        wget -q -O "${tmpdir}/${BINARY_NAME}" "$download_url" || error "download failed"
-        wget -q -O "${tmpdir}/${BINARY_NAME}.sha256" "$checksum_url" 2>/dev/null || true
+        wget -q -O "$archive_path" "$download_url" || error "download failed"
+        wget -q -O "${tmpdir}/checksums.txt" "$checksum_url" 2>/dev/null || true
     else
         error "curl or wget required"
     fi
 
     # Verify checksum if available.
-    if [ -f "${tmpdir}/${BINARY_NAME}.sha256" ] && command -v sha256sum >/dev/null 2>&1; then
-        info "verifying checksum..."
-        (cd "$tmpdir" && sha256sum -c "${BINARY_NAME}.sha256" --ignore-missing 2>/dev/null) || \
-            info "checksum verification skipped (no match found)"
+    local expected
+    expected=$(grep "$archive_name" "${tmpdir}/checksums.txt" 2>/dev/null | awk '{print $1}')
+    if [ -n "$expected" ] && command -v sha256sum >/dev/null 2>&1; then
+        local actual
+        actual=$(sha256sum "$archive_path" | awk '{print $1}')
+        if [ "$expected" = "$actual" ]; then
+            info "checksum OK"
+        else
+            info "checksum mismatch (expected $expected, got $actual)"
+        fi
     fi
 
+    # Extract.
+    info "extracting..."
+    tar -xzf "$archive_path" -C "$tmpdir"
+    if [ ! -f "${tmpdir}/${BINARY_NAME}" ]; then
+        error "${BINARY_NAME} not found inside archive"
+    fi
     chmod +x "${tmpdir}/${BINARY_NAME}"
 
     # Install.
