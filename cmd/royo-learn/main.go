@@ -17,6 +17,7 @@ import (
 	"agent-royo-learn/internal/curate"
 	"agent-royo-learn/internal/doctor"
 	"agent-royo-learn/internal/domain"
+	"agent-royo-learn/internal/engram"
 	"agent-royo-learn/internal/logging"
 	"agent-royo-learn/internal/project"
 	"agent-royo-learn/internal/publish"
@@ -68,6 +69,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runRollback(args[1:], stdout, stderr)
 	case "mcp-serve":
 		return runMCPServe(args[1:], stdout, stderr)
+	case "engram-health":
+		return runEngramHealth(args[1:], stdout, stderr)
+	case "engram-search":
+		return runEngramSearch(args[1:], stdout, stderr)
 	default:
 		return writeUnknownCommandError(stderr)
 	}
@@ -984,6 +989,147 @@ func writePublishError(stderr io.Writer, code, format string, args ...interface{
 		Recoverable: true,
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn preview --help"`,
+	})
+	return exitFailure
+}
+
+// ---------------------------------------------------------------------------
+// engram-health
+// ---------------------------------------------------------------------------
+
+func runEngramHealth(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("engram-health", flag.ContinueOnError)
+	projectRoot := fs.String("project-root", "", "project root directory")
+	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
+
+	if err := fs.Parse(args); err != nil {
+		return writeEngramError(stderr, "invalid_argument", "engram-health: %v", err)
+	}
+
+	// Resolve project to get Engram config.
+	cwd, _ := os.Getwd()
+	resolver := project.NewResolver()
+	req := &project.ResolveRequest{CWD: cwd, ExplicitRoot: *projectRoot}
+	proj, err := resolver.Resolve(context.Background(), req)
+	if err != nil {
+		return mapProjectError(stderr, err)
+	}
+
+	cfg, err := config.Load(proj.Root)
+	if err != nil {
+		return writeEngramError(stderr, "invalid_argument", "engram-health: cannot load config: %v", err)
+	}
+
+	engramURL := cfg.Engram.BaseURL
+	if engramURL == "" {
+		engramURL = "http://localhost:8765"
+	}
+	if !cfg.Engram.Enabled {
+		if *jsonFlag {
+			data, _ := json.MarshalIndent(map[string]interface{}{
+				"status":  "disabled",
+				"message": "engram integration is disabled in config",
+			}, "", "  ")
+			_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+		} else {
+			_, _ = fmt.Fprintf(stdout, "Engram: disabled (set engram.enabled: true in config)\n")
+		}
+		return exitSuccess
+	}
+
+	client := engram.NewHTTPClient(engramURL)
+	result, err := client.Health(context.Background())
+	if err != nil {
+		return writeEngramError(stderr, "invalid_argument", "engram-health: %v", err)
+	}
+
+	if *jsonFlag {
+		data, _ := json.MarshalIndent(map[string]interface{}{
+			"status":  result.Status.String(),
+			"message": result.Message,
+			"url":     engramURL,
+		}, "", "  ")
+		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+	} else {
+		_, _ = fmt.Fprintf(stdout, "Engram: %s (%s)\n", result.Status.String(), result.Message)
+	}
+	return exitSuccess
+}
+
+// ---------------------------------------------------------------------------
+// engram-search
+// ---------------------------------------------------------------------------
+
+func runEngramSearch(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("engram-search", flag.ContinueOnError)
+	query := fs.String("query", "", "search query (required)")
+	projectRoot := fs.String("project-root", "", "project root directory")
+	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
+
+	if err := fs.Parse(args); err != nil {
+		return writeEngramError(stderr, "invalid_argument", "engram-search: %v", err)
+	}
+	if *query == "" {
+		return writeEngramError(stderr, "invalid_argument", "engram-search: --query is required")
+	}
+
+	cwd, _ := os.Getwd()
+	resolver := project.NewResolver()
+	req := &project.ResolveRequest{CWD: cwd, ExplicitRoot: *projectRoot}
+	proj, err := resolver.Resolve(context.Background(), req)
+	if err != nil {
+		return mapProjectError(stderr, err)
+	}
+
+	cfg, err := config.Load(proj.Root)
+	if err != nil {
+		return writeEngramError(stderr, "invalid_argument", "engram-search: cannot load config: %v", err)
+	}
+
+	engramURL := cfg.Engram.BaseURL
+	if engramURL == "" {
+		engramURL = "http://localhost:8765"
+	}
+	if !cfg.Engram.Enabled {
+		_ = logging.WriteError(stderr, logging.ErrorEnvelope{
+			Code:    "engram_disabled",
+			Message: "engram integration is disabled in config",
+		})
+		return exitFailure
+	}
+
+	client := engram.NewHTTPClient(engramURL)
+	degraded := engram.NewDegradedClient(client)
+	results, err := degraded.Search(context.Background(), *query)
+	if err != nil {
+		return writeEngramError(stderr, "invalid_argument", "engram-search: %v", err)
+	}
+
+	if *jsonFlag {
+		if results == nil {
+			results = []engram.SearchResult{}
+		}
+		data, _ := json.MarshalIndent(results, "", "  ")
+		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+	} else {
+		for _, r := range results {
+			_, _ = fmt.Fprintf(stdout, "[%.2f] %s: %s\n", r.Score, r.Title, r.Content)
+		}
+		if len(results) == 0 {
+			_, _ = fmt.Fprintf(stdout, "No results.\n")
+		}
+	}
+	return exitSuccess
+}
+
+func writeEngramError(stderr io.Writer, code, format string, args ...interface{}) int {
+	msg := fmt.Sprintf(format, args...)
+	_ = logging.WriteError(stderr, logging.ErrorEnvelope{
+		Code:        code,
+		Message:     msg,
+		Recoverable: true,
+		Details:     map[string]any{},
+		NextAction:  `run "royo-learn engram-health"`,
 	})
 	return exitFailure
 }

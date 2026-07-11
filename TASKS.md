@@ -133,13 +133,13 @@ Aceptación: Codex lista y llama tools.
 
 ## T10 Engram
 
-- [ ] health.
-- [ ] search.
-- [ ] context.
-- [ ] optional save.
-- [ ] degradation.
-- [ ] project ambiguity.
-- [ ] tests fake/real.
+- [x] health.
+- [x] search.
+- [x] context.
+- [x] optional save.
+- [x] degradation.
+- [x] project ambiguity.
+- [x] tests fake/real.
 
 Aceptación: Engram apagado no impide capture.
 

@@ -4,3 +4,7 @@
 # Build artifacts (root directory only)
 /royo-learn
 /royo-learn.exe
+
+# Temp files
+*test_isnotexist*
+*Temp/opencode/*
