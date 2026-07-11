@@ -23,11 +23,11 @@ This same distinction maps to the two systems:
 | **What it does** | Stores what happened | Processes, reasons, integrates |
 | **Analogy** | Knowledge (the notebook) | Understanding (the act of studying) |
 
-**Processing**: Royo-Learn does not accept raw data and store it. The capture flow validates the payload, normalizes and hashes it, checks idempotency, searches lexically (FTS5), collects deterministic evidence, and only then persists the record.
+**Processing**: Royo-Learn does not accept raw data and store it. The capture flow ([Architecture §4](docs/02-ARCHITECTURE.md)) validates the payload, normalizes and hashes it, checks idempotency, searches lexically (FTS5), collects deterministic evidence, and only then persists the record.
 
-**Reasoning**: The deduplication system defines semantic relationships between learnings: `duplicate_of`, `extends`, `supersedes`, `contradicts`, `narrows`, `related`. The state machine forces decisions: is this rejected, does it need evidence, should it be merged or approved? It is not neutral storage — it evaluates the validity and coherence of knowledge.
+**Reasoning**: The deduplication system ([RF-004](docs/01-PRD.md#rf-004-deduplicación)) defines semantic relationships between learnings: `duplicate_of`, `extends`, `supersedes`, `contradicts`, `narrows`, `related`. The state machine ([RF-005](docs/01-PRD.md#rf-005-estado)) forces decisions: is this rejected, does it need evidence, should it be merged or approved? It is not neutral storage — it evaluates the validity and coherence of knowledge.
 
-**Integrating**: A learning does not stay in a database row. It becomes a Skill or a rule, gets recovered in another session, and *prevents or detects a recurrence*. The publication flow (approved → preview → approve → publish → verify → rollback) turns understanding into operational behavior change.
+**Integrating**: A learning does not stay in a database row. It becomes a Skill or a rule, gets recovered in another session, and *prevents or detects a recurrence* ([PRD §8](docs/01-PRD.md)). The publication flow ([Architecture §5](docs/02-ARCHITECTURE.md)) — approved → preview → approve → publish → verify → rollback — turns understanding into operational behavior change.
 
 Royo-Learn does not understand *for* the model. It is the scaffolding that makes understanding matter. Without it, an LLM can understand something in one session, but that understanding evaporates. With it, that understanding becomes persistent, verifiable, relational, and actionable.
 
