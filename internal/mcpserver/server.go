@@ -141,6 +141,8 @@ Use the listed tools to capture, search, curate, preview and publish learnings.
 - preview_publication: preview what would be published
 - publish_learning: publish an approved learning
 - doctor: health check and diagnostics
+- list_recurrences: list recurrence records for learning patterns
+- compute_metrics: compute recurrence metrics and trend analysis
 
 All tool outputs are structured JSON. Errors are returned in the response content with IsError=true.`,
 		meta.Version, profile, meta.SchemaVersion,

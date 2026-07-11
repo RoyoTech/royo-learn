@@ -167,22 +167,22 @@ Aceptación: segunda recurrencia visible en status.
 
 ## T13 Install/release
 
-- [ ] install.ps1.
-- [ ] install.sh.
-- [ ] uninstall.
-- [ ] GoReleaser.
-- [ ] cross-build.
-- [ ] checksums.
-- [ ] SBOM.
-- [ ] docs.
+- [x] install.ps1.
+- [x] install.sh.
+- [x] uninstall.
+- [x] GoReleaser.
+- [x] cross-build.
+- [x] checksums.
+- [x] SBOM.
+- [x] docs.
 
 ## T14 E2E/final
 
-- [ ] `e2e --temp`.
-- [ ] Linux.
-- [ ] Windows.
-- [ ] MCP Inspector/client.
-- [ ] Codex manual.
-- [ ] security suite.
-- [ ] final report.
-- [ ] cero TODO crítico.
+- [x] `e2e --temp`.
+- [x] Linux.
+- [x] Windows.
+- [x] MCP Inspector/client.
+- [x] Codex manual.
+- [x] security suite.
+- [x] final report.
+- [x] cero TODO crítico.

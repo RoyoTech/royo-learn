@@ -782,6 +782,52 @@ func setupApprovedLearning(t *testing.T, root string) string {
 }
 
 // ---------------------------------------------------------------------------
+// E2E tests
+// ---------------------------------------------------------------------------
+
+func TestRunE2ETempCompletesAllSteps(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
+	}
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"e2e", "--temp"}, &stdout, &stderr)
+	if exitCode != exitSuccess {
+		t.Fatalf("e2e exit code = %d, want %d\nstderr: %s\nstdout: %s",
+			exitCode, exitSuccess, stderr.String(), stdout.String())
+	}
+
+	var result e2eResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("e2e stdout is not valid JSON: %v\nstdout: %s", err, stdout.String())
+	}
+	if result.Total == 0 {
+		t.Fatal("e2e result has zero steps")
+	}
+	if result.Failed > 0 {
+		t.Fatalf("e2e had %d failing steps:\n", result.Failed)
+		for _, s := range result.Steps {
+			if !s.Passed {
+				t.Logf("  FAIL %s: %s", s.Step, s.Error)
+			}
+		}
+	}
+	if result.Summary == "" {
+		t.Error("e2e result missing summary")
+	}
+}
+
+func TestRunE2ERequiresTempFlag(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr bytes.Buffer
+	exitCode := run([]string{"e2e"}, &stdout, &stderr)
+	if exitCode != exitFailure {
+		t.Fatalf("e2e without --temp exit = %d, want %d", exitCode, exitFailure)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

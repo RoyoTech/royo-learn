@@ -1,71 +1,217 @@
 # Agent Royo Learn
 
-**Agent Royo Learn** es un motor local de aprendizaje institucional para agentes de IA.
+**Agent Royo Learn** is a local institutional learning engine for AI agents.
 
-No reemplaza a Gentle-AI ni a Engram:
+It does not replace Gentle-AI or Engram:
 
-- **Gentle-AI** configura agentes, Skills, workflows y MCP.
-- **Engram** conserva memoria persistente de sesiones, decisiones, descubrimientos y errores.
-- **Agent Royo Learn** transforma experiencias verificadas en cambios reutilizables de comportamiento: conocimiento, Skills, reglas, pruebas y alertas de reincidencia.
+- **Gentle-AI** configures agents, Skills, workflows, and MCP.
+- **Engram** preserves persistent memory of sessions, decisions, discoveries, and errors.
+- **Agent Royo Learn** transforms verified experiences into reusable behavior changes: knowledge, Skills, rules, tests, and recurrence alerts.
 
-El repositorio produce un único binario multiplataforma:
+The repository produces a single cross-platform binary:
 
 ```text
 royo-learn        # Linux/macOS
 royo-learn.exe    # Windows
 ```
 
-## Problema que resuelve
+## Installation
 
-Guardar una memoria no asegura que el siguiente agente trabaje mejor. El proyecto añade un ciclo explícito:
+### Linux / macOS
 
-```text
-experiencia
-    ↓
-captura estructurada
-    ↓
-búsqueda de duplicados y antecedentes
-    ↓
-curaduría con evidencia
-    ↓
-aprobación
-    ↓
-publicación controlada
-    ↓
-verificación
-    ↓
-detección de reincidencias
+```bash
+curl -fsSL https://github.com/angel-royo/royo-learn/releases/latest/download/install.sh | bash
 ```
 
-## Principio arquitectónico
+Or manually:
 
-> El LLM interpreta; el binario garantiza.
+```bash
+# Download and install
+./install.sh --version v1.0.0
+# Uninstall
+./install.sh --uninstall
+```
 
-Las tres Skills determinan qué significa una experiencia:
+The binary is installed to `~/.local/bin/royo-learn`. Add it to your PATH if needed.
+
+### Windows
+
+```powershell
+# Download the installer
+Invoke-WebRequest -Uri https://github.com/angel-royo/royo-learn/releases/latest/download/install.ps1 -OutFile install.ps1
+
+# Install
+.\install.ps1 --version v1.0.0
+
+# Uninstall
+.\install.ps1 --uninstall
+```
+
+The binary is installed to `%LOCALAPPDATA%\royo-learn\bin\royo-learn.exe`.
+
+### Build from source
+
+```bash
+# Prerequisites: Go 1.24+
+git clone https://github.com/angel-royo/royo-learn.git
+cd royo-learn
+make build       # Build for current platform
+make build-all   # Cross-compile all platforms
+make install     # Install to $GOPATH/bin
+make clean       # Remove build artifacts
+make quality     # Run fmt, test, vet, build
+```
+
+## Quick Start
+
+```bash
+# Check version
+royo-learn version --json
+
+# Initialize a project
+royo-learn init --project-root /path/to/your/project
+
+# Run health check
+royo-learn doctor --project-root /path/to/your/project --json
+
+# Capture a learning
+royo-learn capture \
+  --project-root /path/to/your/project \
+  --title "PostgreSQL connection pooling" \
+  --context "production deployment" \
+  --observation "connection pool exhausted at 100 concurrent" \
+  --lesson "set max_connections based on available memory" \
+  --type "procedure" \
+  --scope "project" \
+  --json
+
+# Curate (approve/reject) a learning
+royo-learn curate \
+  --project-root /path/to/your/project \
+  --learning-id "<learning-id>" \
+  --action "approve" \
+  --rationale "validated with load testing" \
+  --json
+
+# Preview before publishing
+royo-learn preview \
+  --project-root /path/to/your/project \
+  --learning-id "<learning-id>" \
+  --json
+
+# Publish (requires preview hash)
+royo-learn publish \
+  --project-root /path/to/your/project \
+  --learning-id "<learning-id>" \
+  --preview-hash "<preview-hash>" \
+  --json
+
+# Rollback a publication
+royo-learn rollback \
+  --project-root /path/to/your/project \
+  --journal-id "<publication-id>" \
+  --json
+
+# Check recurrences
+royo-learn recurrences --learning-id "<learning-id>" --json
+royo-learn metrics --learning-id "<learning-id>" --json
+
+# Run end-to-end smoke test
+royo-learn e2e --temp
+```
+
+## MCP Server Setup
+
+Register royo-learn as an MCP server in your Codex/Claude configuration:
+
+### Codex
+
+```bash
+codex mcp add royo-learn -- royo-learn mcp-serve
+codex mcp list
+```
+
+### Claude Desktop / OpenCode
+
+Add to your MCP config file:
+
+```json
+{
+  "mcpServers": {
+    "royo-learn": {
+      "command": "royo-learn",
+      "args": ["mcp-serve"],
+      "env": {}
+    }
+  }
+}
+```
+
+**Profiles**: `minimal` (capture, search, doctor), `standard` (default; includes curate, preview, list, get), `full` (all tools including publish).
+
+```bash
+royo-learn mcp-serve --profile full
+```
+
+## Architecture
+
+```
+LLM + Skill → semantic proposal
+royo-learn  → operational guarantee
+```
+
+The three Skills that define what an experience means:
 
 1. `capture-learning`
 2. `curate-learning`
 3. `publish-learning`
 
-El binario garantiza:
+The binary guarantees:
 
-- persistencia;
-- estados válidos;
-- idempotencia;
-- trazabilidad;
-- deduplicación lexical;
-- integración opcional con Engram;
-- evidencia de Git y pruebas;
-- publicación segura;
-- aprobación humana;
-- rollback;
-- detección de reincidencias;
-- MCP por `stdio`;
-- CLI equivalente.
+- persistence
+- valid states
+- idempotency
+- traceability
+- lexical deduplication
+- optional Engram integration
+- Git evidence and tests
+- secure publication
+- human approval
+- rollback
+- recurrence detection
+- MCP over stdio
 
-## Inicio obligatorio para Codex
+## Problem It Solves
 
-Codex debe leer, en este orden:
+Storing a memory doesn't ensure the next agent works better. The project adds an explicit cycle:
+
+```
+experience
+    ↓
+structured capture
+    ↓
+duplicate and antecedent search
+    ↓
+curation with evidence
+    ↓
+approval
+    ↓
+controlled publication
+    ↓
+verification
+    ↓
+recurrence detection
+```
+
+## Version 1 Scope
+
+Version 1 is local, without cloud service or embedded LLM provider. Semantic reasoning is performed by the agent calling the MCP server.
+
+The application works even if Gentle-AI or Engram are not installed. Their integrations are optional and degradable.
+
+## Codex Onboarding
+
+Codex must read, in this order:
 
 1. `AGENTS.md`
 2. `CODEX_START_HERE.md`
@@ -73,69 +219,55 @@ Codex debe leer, en este orden:
 4. `docs/02-ARCHITECTURE.md`
 5. `TASKS.md`
 
-No debe comenzar a implementar desde este README.
+Do not start implementing from this README.
 
-## Alcance de la versión 1
+## Development
 
-La versión 1 es local, sin servicio cloud y sin proveedor LLM embebido. El razonamiento semántico lo realiza el agente que llama al servidor MCP.
+```bash
+make fmt        # Format code
+make test       # Run tests
+make vet        # Run vet
+make build      # Build for current platform
+make build-all  # Cross-compile all platforms
+make quality    # Full quality check (fmt + test + vet + build)
+```
 
-La aplicación debe funcionar aunque Gentle-AI o Engram no estén instalados. Sus integraciones son opcionales y degradables.
-
-## Estructura final esperada
+## Project Structure
 
 ```text
 agent-royo-learn/
-├── cmd/royo-learn/
+├── cmd/royo-learn/        # CLI entry point + e2e
 ├── internal/
-│   ├── approval/
-│   ├── audit/
-│   ├── capture/
-│   ├── config/
-│   ├── domain/
-│   ├── engram/
-│   ├── evidence/
-│   ├── gitx/
-│   ├── mcpserver/
-│   ├── project/
-│   ├── publish/
-│   ├── recurrence/
-│   ├── redact/
-│   ├── search/
-│   ├── storage/
-│   └── validate/
-├── migrations/
-├── schemas/
-├── skills/
-├── scripts/
-├── docs/
-├── examples/
-├── e2e/
-├── AGENTS.md
-├── TASKS.md
-├── Makefile
+│   ├── buildinfo/         # Version metadata
+│   ├── capture/           # Learning capture service
+│   ├── config/            # Project/user configuration
+│   ├── curate/            # Curation service
+│   ├── doctor/            # Health checks
+│   ├── domain/            # Domain types and transitions
+│   ├── engram/            # Engram integration
+│   ├── evidence/          # Evidence collection (redaction, path security, git)
+│   ├── logging/           # Structured logging
+│   ├── mcpserver/         # MCP server implementation
+│   ├── project/           # Project resolution
+│   ├── publish/           # Publication engine
+│   ├── recurrence/        # Recurrence detection
+│   ├── setup/             # Setup helpers (skills, MCP registration, backup)
+│   └── storage/           # SQLite database (migrations, repos, FTS5)
+├── migrations/            # SQL migration files
+├── schemas/               # JSON schemas
+├── skills/                # Project Skills
+├── docs/                  # Documentation
+├── examples/              # Example inputs
+├── AGENTS.md              # Agent instructions
+├── TASKS.md               # Implementation tasks
+├── Makefile               # Build targets
+├── .goreleaser.yml        # Release configuration
+├── install.sh             # Linux/macOS installer
+├── install.ps1            # Windows installer
 ├── go.mod
-├── go.sum
-└── .goreleaser.yaml
+└── go.sum
 ```
 
-## Resultado esperado
+## License
 
-Al finalizar, esto debe funcionar:
-
-```bash
-royo-learn doctor
-royo-learn init
-royo-learn capture --file examples/capture-request.json
-royo-learn search "migraciones"
-royo-learn review
-royo-learn mcp
-```
-
-Y Codex debe poder registrar el MCP:
-
-```bash
-codex mcp add royo-learn -- royo-learn mcp
-codex mcp list
-```
-
-La definición de “terminado” está en `docs/14-ACCEPTANCE-CRITERIA.md`.
+MIT
