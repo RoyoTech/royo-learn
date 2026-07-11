@@ -48,20 +48,20 @@ Aceptación: migration + CRUD + search.
 ## T03 Dominio
 
 - [x] enums.
-- [ ] transitions.
-- [ ] validation.
+- [x] transitions.
+- [x] validation.
 - [x] typed errors.
-- [ ] canonical JSON.
-- [ ] hashing.
+- [x] canonical JSON.
+- [x] hashing.
 
 Aceptación: tests de todas las transiciones.
 
 ## T04 Evidence/security
 
-- [ ] redaction.
-- [ ] blob store.
-- [ ] command runner.
-- [ ] Git evidence.
+- [x] redaction.
+- [x] blob store.
+- [x] command runner.
+- [x] Git evidence.
 - [ ] path security.
 - [ ] limits.
 - [ ] tests malicious inputs.
@@ -70,13 +70,13 @@ Aceptación: secretos nunca persisten.
 
 ## T05 Capture/search
 
-- [ ] capture service.
-- [ ] idempotency.
-- [ ] exact dedup.
-- [ ] lexical similar.
-- [ ] Markdown records.
-- [ ] CLI.
-- [ ] tests.
+- [x] capture service.
+- [x] idempotency.
+- [x] exact dedup.
+- [x] lexical similar.
+- [x] Markdown records.
+- [x] CLI.
+- [x] tests.
 
 Aceptación: dos llamadas iguales producen una entidad.
 

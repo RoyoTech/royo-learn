@@ -365,8 +365,6 @@ func TestListLearningsByProject(t *testing.T) {
 }
 
 func TestFindLearningByHash(t *testing.T) {
-	t.Parallel()
-
 	db, proj := setupTestDB(t)
 	ctx := context.Background()
 	l := newTestLearning(proj.ID)
@@ -697,8 +695,6 @@ func TestSaveAndGetCuration(t *testing.T) {
 }
 
 func TestListCurationsByLearning(t *testing.T) {
-	t.Parallel()
-
 	db, proj := setupTestDB(t)
 	ctx := context.Background()
 	l := newTestLearning(proj.ID)
