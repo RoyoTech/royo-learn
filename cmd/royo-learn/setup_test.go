@@ -107,9 +107,9 @@ func TestSetupInstall_DryRun_JSON(t *testing.T) {
 		t.Fatalf("expected %d results, got %d", len(setup.AllAgents), len(parsed.Results))
 	}
 	for _, r := range parsed.Results {
-		// Dry-run must never mutate, never record a backup, never set Error.
-		if r.Error != "" {
-			t.Errorf("[%s] dry-run should not error: %s", r.Agent, r.Error)
+		// Dry-run must never mutate, never record a backup, never set Errors.
+		if len(r.Errors) > 0 {
+			t.Errorf("[%s] dry-run should not error: %v", r.Agent, r.Errors)
 		}
 	}
 }
@@ -252,5 +252,79 @@ func TestSetupInstall_RequiresBinary(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "binary not found") {
 		t.Errorf("stderr should mention missing binary; got %q", errOut.String())
+	}
+}
+
+// Regression: if RegisterMCP fails, InstallSkills must still proceed.
+// We force MCP registration to fail by pre-writing an invalid (non-JSON)
+// config file at the Claude Code MCP config path, then verify that skills
+// are installed anyway.
+func TestSetupInstall_MCPFailsStillInstallsSkills(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	cfgDir := filepath.Join(tmp, ".claude")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(cfgDir, "mcp.json")
+	if err := os.WriteFile(cfgPath, []byte("THIS IS NOT JSON {{{{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	projectRoot := t.TempDir()
+	skillsDir := filepath.Join(projectRoot, "skills", "demo")
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsDir, "SKILL.md"), []byte("# demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fakeBin := filepath.Join(t.TempDir(), "royo-learn.exe")
+	_ = os.WriteFile(fakeBin, []byte(""), 0o644)
+
+	var out, errOut bytes.Buffer
+	code := run([]string{
+		"setup", "install",
+		"--agent", "claude-code",
+		"--binary", fakeBin,
+		"--project-root", projectRoot,
+		"--json",
+	}, &out, &errOut)
+
+	var parsed struct {
+		Results []setupResult `json:"results"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &parsed); err != nil {
+		t.Fatalf("output not JSON: %v\n%s", err, out.String())
+	}
+	if len(parsed.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(parsed.Results))
+	}
+	r := parsed.Results[0]
+
+	// MCP registration must have failed (invalid JSON config).
+	if len(r.Errors) == 0 {
+		t.Errorf("expected at least one error from MCP registration, got none")
+	}
+
+	// But skills must have been installed regardless.
+	if r.Skills == nil {
+		t.Fatalf("skills should have been installed even though MCP failed; result=%+v", r)
+	}
+	if r.Skills.Installed != 1 {
+		t.Errorf("expected 1 skill installed, got %d", r.Skills.Installed)
+	}
+
+	// Verify the skill file exists on disk.
+	installedSkill := filepath.Join(tmp, ".claude", "skills", "demo", "SKILL.md")
+	if _, err := os.Stat(installedSkill); err != nil {
+		t.Errorf("skill file not installed at %s: %v", installedSkill, err)
+	}
+
+	// Exit code should be failure because MCP registration failed.
+	if code != exitFailure {
+		t.Errorf("expected exitFailure, got %d", code)
 	}
 }

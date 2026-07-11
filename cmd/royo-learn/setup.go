@@ -31,7 +31,7 @@ type setupResult struct {
 	Reason  string        `json:"reason,omitempty"`
 	MCP     bool          `json:"mcp_registered,omitempty"`
 	Skills  *skillSummary `json:"skills,omitempty"`
-	Error   string        `json:"error,omitempty"`
+	Errors  []string      `json:"errors,omitempty"`
 	Notes   []string      `json:"notes,omitempty"`
 }
 
@@ -93,7 +93,7 @@ func runSetupInstall(args []string, stdout, stderr io.Writer) int {
 	for _, kind := range kinds {
 		res := installForAgent(kind, binary, skillsSrc, *dryRun, *skipMCP, *skipSkills)
 		results = append(results, res)
-		if res.Error != "" {
+		if len(res.Errors) > 0 {
 			exitCode = exitFailure
 		}
 	}
@@ -135,7 +135,7 @@ func runSetupUninstall(args []string, stdout, stderr io.Writer) int {
 	for _, kind := range kinds {
 		res := uninstallForAgent(kind, *dryRun)
 		results = append(results, res)
-		if res.Error != "" {
+		if len(res.Errors) > 0 {
 			exitCode = exitFailure
 		}
 	}
@@ -322,7 +322,7 @@ func resolveSkillsSource(projectRoot string) (string, error) {
 func installForAgent(kind setup.AgentKind, binary, skillsSrc string, dryRun, skipMCP, skipSkills bool) setupResult {
 	a, err := setup.ResolveAgent(kind)
 	if err != nil {
-		return setupResult{Agent: string(kind), Action: "install", Error: err.Error()}
+		return setupResult{Agent: string(kind), Action: "install", Errors: []string{err.Error()}}
 	}
 
 	res := setupResult{
@@ -340,6 +340,7 @@ func installForAgent(kind setup.AgentKind, binary, skillsSrc string, dryRun, ski
 		res.Path = cfgPath
 	}
 
+	// --- MCP registration (independent from skills) ---
 	if !skipMCP {
 		if dryRun {
 			res.Notes = append(res.Notes, fmt.Sprintf("would register MCP server in %s", fallbackIfEmpty(cfgPath, a.DisplayName()+"'s native config")))
@@ -347,8 +348,7 @@ func installForAgent(kind setup.AgentKind, binary, skillsSrc string, dryRun, ski
 			// Backup before mutation.
 			if cfgPath != "" {
 				if backup, berr := a.BackupMCPConfig(); berr != nil {
-					res.Error = fmt.Sprintf("backup failed: %v", berr)
-					return res
+					res.Errors = append(res.Errors, fmt.Sprintf("backup failed: %v", berr))
 				} else if backup != "" {
 					res.Backup = backup
 				}
@@ -360,16 +360,17 @@ func installForAgent(kind setup.AgentKind, binary, skillsSrc string, dryRun, ski
 			}
 			mcpResult, mcpErr := a.RegisterMCP(entry)
 			if mcpErr != nil {
-				res.Error = fmt.Sprintf("MCP registration failed: %v", mcpErr)
-				return res
+				res.Errors = append(res.Errors, fmt.Sprintf("MCP registration failed: %v", mcpErr))
+			} else {
+				res.Added = mcpResult.Added
+				res.Skipped = mcpResult.Skipped
+				res.Reason = mcpResult.Reason
+				res.MCP = true
 			}
-			res.Added = mcpResult.Added
-			res.Skipped = mcpResult.Skipped
-			res.Reason = mcpResult.Reason
-			res.MCP = true
 		}
 	}
 
+	// --- Skill installation (independent from MCP) ---
 	if !skipSkills {
 		skillsDir, sErr := a.SkillsDir()
 		if sErr != nil {
@@ -378,19 +379,19 @@ func installForAgent(kind setup.AgentKind, binary, skillsSrc string, dryRun, ski
 			res.Notes = append(res.Notes, fmt.Sprintf("would install skills from %s to %s", skillsSrc, skillsDir))
 		} else {
 			if err := os.MkdirAll(skillsDir, 0o755); err != nil {
-				res.Error = fmt.Sprintf("cannot create skills dir %s: %v", skillsDir, err)
-				return res
-			}
-			insResult, iErr := setup.InstallSkills(skillsSrc, skillsDir)
-			if iErr != nil {
-				res.Error = fmt.Sprintf("skill install failed: %v", iErr)
-				return res
-			}
-			res.Skills = &skillSummary{
-				Installed: insResult.Installed,
-				Skipped:   insResult.Skipped,
-				Errors:    insResult.Errors,
-				Target:    skillsDir,
+				res.Errors = append(res.Errors, fmt.Sprintf("cannot create skills dir %s: %v", skillsDir, err))
+			} else {
+				insResult, iErr := setup.InstallSkills(skillsSrc, skillsDir)
+				if iErr != nil {
+					res.Errors = append(res.Errors, fmt.Sprintf("skill install failed: %v", iErr))
+				} else {
+					res.Skills = &skillSummary{
+						Installed: insResult.Installed,
+						Skipped:   insResult.Skipped,
+						Errors:    insResult.Errors,
+						Target:    skillsDir,
+					}
+				}
 			}
 		}
 	}
@@ -401,7 +402,7 @@ func installForAgent(kind setup.AgentKind, binary, skillsSrc string, dryRun, ski
 func uninstallForAgent(kind setup.AgentKind, dryRun bool) setupResult {
 	a, err := setup.ResolveAgent(kind)
 	if err != nil {
-		return setupResult{Agent: string(kind), Action: "uninstall", Error: err.Error()}
+		return setupResult{Agent: string(kind), Action: "uninstall", Errors: []string{err.Error()}}
 	}
 	res := setupResult{Agent: string(kind), Action: "uninstall"}
 
@@ -421,8 +422,7 @@ func uninstallForAgent(kind setup.AgentKind, dryRun bool) setupResult {
 		}
 	}
 	if err := a.UnregisterMCP(royoLearnMCPServerName); err != nil {
-		res.Error = fmt.Sprintf("MCP unregister failed: %v", err)
-		return res
+		res.Errors = append(res.Errors, fmt.Sprintf("MCP unregister failed: %v", err))
 	}
 	res.MCP = true
 	res.Added = false
@@ -455,8 +455,8 @@ func printInstallSummary(w io.Writer, r setupResult) {
 	for _, note := range r.Notes {
 		_, _ = fmt.Fprintf(w, "  note:   %s\n", note)
 	}
-	if r.Error != "" {
-		_, _ = fmt.Fprintf(w, "  ERROR:  %s\n", r.Error)
+	for _, e := range r.Errors {
+		_, _ = fmt.Fprintf(w, "  ERROR:  %s\n", e)
 	}
 }
 
