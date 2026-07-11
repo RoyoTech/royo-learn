@@ -48,7 +48,7 @@ checksum:
 
 sboms:
   - id: default
-    artifacts: archive
+    artifacts: all
     documents:
       - "{{ .ProjectName }}-{{ .Version }}-spdx.sbom.json"
 
