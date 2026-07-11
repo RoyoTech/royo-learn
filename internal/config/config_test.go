@@ -20,7 +20,7 @@ func TestDefaultConfig(t *testing.T) {
 func TestLoad(t *testing.T) {
 	userDir, projectDir, emptyDir := t.TempDir(), t.TempDir(), t.TempDir()
 	withUserConfigDir(t, userDir)
-	writeFile(t, filepath.Join(userDir, "royo-learn", "config.yaml"), "database:\n  path: user.db\nlimits:\n  max_payload_bytes: 2000000\n")
+	writeFile(t, userConfigFile(t, userDir), "database:\n  path: user.db\nlimits:\n  max_payload_bytes: 2000000\n")
 	writeFile(t, filepath.Join(projectDir, ".royo-learn", "config.yaml"), "database:\n  path: project.db\nlimits:\n  max_payload_bytes: 3000000\n")
 
 	cases := []struct {
@@ -105,9 +105,10 @@ func TestValidatePaths(t *testing.T) {
 func TestUserConfigPath(t *testing.T) {
 	userDir := t.TempDir()
 	withUserConfigDir(t, userDir)
+	want := userConfigFile(t, userDir)
 	got, err := UserConfigPath()
-	if err != nil || got != filepath.Join(userDir, "royo-learn", "config.yaml") {
-		t.Fatalf("got %q err=%v", got, err)
+	if err != nil || got != want {
+		t.Fatalf("got %q want %q err=%v", got, want, err)
 	}
 }
 
@@ -121,15 +122,31 @@ func writeFile(t *testing.T, path, content string) {
 
 func withUserConfigDir(t *testing.T, dir string) {
 	t.Helper()
-	old := os.Getenv("XDG_CONFIG_HOME")
-	if runtime.GOOS == "windows" {
-		old = os.Getenv("AppData")
+	switch {
+	case runtime.GOOS == "windows":
+		old := os.Getenv("AppData")
 		t.Cleanup(func() { os.Setenv("AppData", old) })
 		os.Setenv("AppData", dir)
-		return
+	case runtime.GOOS == "darwin":
+		// os.UserConfigDir on macOS uses $HOME/Library/Application Support.
+		oldHome := os.Getenv("HOME")
+		t.Cleanup(func() { os.Setenv("HOME", oldHome) })
+		os.Setenv("HOME", dir)
+	default: // Linux, BSD, etc. honour XDG_CONFIG_HOME.
+		old := os.Getenv("XDG_CONFIG_HOME")
+		t.Cleanup(func() { os.Setenv("XDG_CONFIG_HOME", old) })
+		os.Setenv("XDG_CONFIG_HOME", dir)
 	}
-	t.Cleanup(func() { os.Setenv("XDG_CONFIG_HOME", old) })
-	os.Setenv("XDG_CONFIG_HOME", dir)
+}
+
+// userConfigFile returns the OS-specific config file path when the user config
+// directory has been overridden to dir via withUserConfigDir.
+func userConfigFile(t *testing.T, dir string) string {
+	t.Helper()
+	if runtime.GOOS == "darwin" {
+		return filepath.Join(dir, "Library", "Application Support", "royo-learn", "config.yaml")
+	}
+	return filepath.Join(dir, "royo-learn", "config.yaml")
 }
 
 func assertErrorCode(t *testing.T, err error, want string) {
@@ -390,7 +407,7 @@ func TestValidateResolvesSymlinks(t *testing.T) {
 func TestLoadDegradesMalformedUserConfig(t *testing.T) {
 	userDir := t.TempDir()
 	withUserConfigDir(t, userDir)
-	writeFile(t, filepath.Join(userDir, "royo-learn", "config.yaml"), "invalid yaml: [")
+	writeFile(t, userConfigFile(t, userDir), "invalid yaml: [")
 
 	cfg, err := Load(t.TempDir())
 	if err != nil {
@@ -410,7 +427,7 @@ func TestLoadDegradesMalformedUserConfig(t *testing.T) {
 func TestLoadAndValidate(t *testing.T) {
 	userDir, projectDir := t.TempDir(), t.TempDir()
 	withUserConfigDir(t, userDir)
-	writeFile(t, filepath.Join(userDir, "royo-learn", "config.yaml"), "limits:\n  max_payload_bytes: 2000000\n")
+	writeFile(t, userConfigFile(t, userDir), "limits:\n  max_payload_bytes: 2000000\n")
 	writeFile(t, filepath.Join(projectDir, ".royo-learn", "config.yaml"), "limits:\n  max_payload_bytes: 3000000\n")
 
 	cfg, err := LoadAndValidate(projectDir, []string{projectDir})

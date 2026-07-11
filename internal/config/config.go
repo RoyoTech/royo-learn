@@ -486,12 +486,20 @@ func validatePathInsideRoots(field, value, projectRoot string, trustedRoots []st
 		return err
 	}
 
-	for _, root := range trustedRoots {
-		rootClean := filepath.Clean(root)
-		if resolved == rootClean {
+	resolvedRoots := make([]string, len(trustedRoots))
+	for i, r := range trustedRoots {
+		rr, rootErr := resolveExistingSymlinks(filepath.Clean(r))
+		if rootErr != nil {
+			return &Error{Code: ErrInvalidConfig, Message: fmt.Sprintf("cannot resolve trusted root: %s", r), Err: rootErr}
+		}
+		resolvedRoots[i] = rr
+	}
+
+	for _, root := range resolvedRoots {
+		if resolved == root {
 			return nil
 		}
-		prefix := rootClean
+		prefix := root
 		if !strings.HasSuffix(prefix, string(filepath.Separator)) {
 			prefix += string(filepath.Separator)
 		}
