@@ -197,3 +197,21 @@ Aceptación: segunda recurrencia visible en status.
 - [x] security suite.
 - [x] final report.
 - [x] cero TODO crítico.
+
+## T15 Multi-agent setup CLI
+
+- [x] Agent interface + registry (`internal/setup/agents.go`).
+- [x] Claude Code configurator (JSON `mcpServers` key, `~/.claude/mcp.json`).
+- [x] Codex configurator (`codex mcp add` + backup + header verify).
+- [x] OpenCode configurator (JSON `mcp` key con `command` array).
+- [x] `setup install --agent all|claude-code|codex|opencode` con `--dry-run`.
+- [x] `setup uninstall --agent ...`.
+- [x] `setup status --json` detecta binario, config y registro MCP.
+- [x] Backup automático antes de mutar configs.
+- [x] Idempotente (no duplicados).
+- [x] Skills instaladas desde `skills/` del repo.
+- [x] Tests por agente + tests del comando `setup`.
+
+Aceptación: `royo-learn setup install --agent all --dry-run` reporta los tres
+agentes sin escribir nada; `royo-learn setup status --json` lista los tres con
+`mcp_registered` correcto.

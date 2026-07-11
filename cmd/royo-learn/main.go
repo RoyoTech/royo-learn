@@ -80,6 +80,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runMetrics(args[1:], stdout, stderr)
 	case "e2e":
 		return runE2E(args[1:], stdout, stderr)
+	case "setup":
+		return runSetup(args[1:], stdout, stderr)
 	default:
 		return writeUnknownCommandError(stderr)
 	}

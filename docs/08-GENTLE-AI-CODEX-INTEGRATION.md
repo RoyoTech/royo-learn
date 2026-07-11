@@ -128,3 +128,55 @@ Codex/Gentle-AI deben usar descripciones que indiquen triggers. No confiar únic
 ## Compatibilidad con otros agentes
 
 El proyecto no debe contener lógica Codex-only. Proveer ejemplos para OpenCode y configuración MCP genérica.
+
+## Instalación unificada: `royo-learn setup`
+
+El binario incluye un comando `setup` que registra royo-learn como servidor MCP
+e instala las Skills del proyecto en los tres agentes soportados:
+
+- **Claude Code** (`~/.claude/mcp.json`, clave `mcpServers`, Skills en `~/.claude/skills/`)
+- **Codex CLI** (`~/.codex/config.toml` vía `codex mcp add`, Skills en `~/.codex/skills/`)
+- **OpenCode** (`~/.config/opencode/opencode.json`, clave `mcp` con `command` como array, Skills en `~/.config/opencode/skills/`)
+
+### Uso
+
+```bash
+# Ver qué agentes están instalados y si royo-learn ya está registrado
+royo-learn setup status --json
+
+# Instalar en los tres agentes (desde el repo con skills/)
+royo-learn setup install --agent all
+
+# Instalar solo en Claude Code
+royo-learn setup install --agent claude-code
+
+# Dry-run: reportar qué haría sin tocar nada
+royo-learn setup install --agent all --dry-run --json
+
+# Solo MCP, sin Skills
+royo-learn setup install --agent codex --skip-skills
+
+# Desinstalar
+royo-learn setup uninstall --agent all
+```
+
+### Flags
+
+| Flag | Descripción |
+|---|---|
+| `--agent` | `claude-code` \| `codex` \| `opencode` \| `all` (default: `all`) |
+| `--binary` | Ruta absoluta al binario `royo-learn` (default: auto-detect) |
+| `--project-root` | Raíz que contiene `skills/` (default: buscar desde CWD hacia arriba) |
+| `--dry-run` | Reportar sin escribir |
+| `--skip-mcp` | No registrar servidor MCP |
+| `--skip-skills` | No instalar Skills |
+| `--json` | Salida JSON estable |
+
+### Garantías
+
+- **Idempotente**: registrar dos veces con el mismo nombre es no-op (skip, no duplicado).
+- **Backup**: antes de mutar un config existente se crea `.backup-YYYYMMDDHHMMSS`.
+- **Preservación**: las entradas existentes en el config no se tocan; solo se añade `royo-learn`.
+- **Detección**: `setup status` detecta si el binario del agente está en PATH y si el config existe.
+- **Codex**: prefiere `codex mcp add` (CLI nativa) sobre edición manual del TOML; hace backup de `config.toml` antes.
+- **Sin red**: todo es filesystem local; no descarga nada.
