@@ -46,6 +46,30 @@ function Get-Arch {
     }
 }
 
+function Add-ToUserPath {
+    param([string]$Dir)
+
+    $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+    if ($null -eq $userPath) { $userPath = "" }
+
+    $target = $Dir.TrimEnd('\')
+    $already = $userPath -split ';' | Where-Object { $_.TrimEnd('\') -ieq $target }
+    if ($already) {
+        Write-Info "$Dir already on your PATH"
+        return
+    }
+
+    $trimmed = $userPath.TrimEnd(';')
+    $newPath = if ($trimmed -eq "") { $Dir } else { "$trimmed;$Dir" }
+    [Environment]::SetEnvironmentVariable("PATH", $newPath, "User")
+
+    # Make it usable in the current session too.
+    $env:PATH = "$env:PATH;$Dir"
+
+    Write-Info "added $Dir to your user PATH"
+    Write-Info "open a NEW terminal for 'royo-learn' to be found (this session already has it)"
+}
+
 function Uninstall-RoyoLearn {
     $target = Join-Path $BinDir $BinaryName
     if (Test-Path $target) {
@@ -141,13 +165,9 @@ function Install-RoyoLearn {
             Write-Info "version check skipped"
         }
 
-        # PATH guidance.
-        $currentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
-        if ($currentPath -notlike "*$BinDir*") {
-            Write-Info "NOTE: add $BinDir to your PATH:"
-            Write-Info "  setx PATH `"%PATH%;$BinDir`""
-            Write-Info "  (or add manually via System Properties > Environment Variables)"
-        }
+        # Ensure BinDir is on the user PATH. Uses [Environment]::SetEnvironmentVariable
+        # (not setx, which truncates PATH at 1024 chars and expands %VAR% references).
+        Add-ToUserPath $BinDir
 
         Write-Info "install complete!"
     } finally {
