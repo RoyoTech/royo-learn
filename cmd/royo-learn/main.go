@@ -47,8 +47,8 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		return writeUnknownCommandError(stderr)
+	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
+		return printHelp(stdout)
 	}
 
 	switch args[0] {
@@ -85,6 +85,38 @@ func run(args []string, stdout, stderr io.Writer) int {
 	default:
 		return writeUnknownCommandError(stderr)
 	}
+}
+
+func printHelp(stdout io.Writer) int {
+	_, _ = fmt.Fprintf(stdout, `royo-learn — Capture, curate, and publish reusable learnings from AI-assisted development.
+
+Usage:
+  royo-learn <command> [flags]
+
+Commands:
+  init           Initialize a new royo-learn project
+  mcp-serve      Start the MCP server over stdio
+  capture        Capture a new learning
+  curate         Curate an existing learning
+  preview        Preview publication of a learning
+  publish        Publish a curated learning
+  rollback       Rollback a published learning
+  doctor         Run system diagnostics
+  search         Search captured learnings
+  engram-health  Check Engram connection health
+  engram-search  Search Engram memory
+  recurrences    List recurrence records
+  metrics        Show learning metrics
+  e2e            Run end-to-end tests
+  setup          Configure the tool for first use
+  version        Print version information
+
+Global flags:
+  --project-root string   Explicit project root (most commands)
+
+Run "royo-learn <command> --help" for command-specific flags.
+`)
+	return exitSuccess
 }
 
 func writeUnknownCommandError(stderr io.Writer) int {
