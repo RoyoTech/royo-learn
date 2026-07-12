@@ -44,7 +44,7 @@ resolution. No MCP server or SQLite database is started by this bootstrap.
 
 The resolved dependencies require the `go 1.25.0` module language version.
 The T00 environment uses Go 1.26.5, which satisfies the project requirement
-for Go 1.24 or newer.
+for Go 1.25 or newer.
 
 ### CI provenance
 
