@@ -53,7 +53,7 @@ La ausencia de Gentle-AI o Engram no bloquea la construcción. Debe registrarse 
 
 ## Dependencias elegidas
 
-- Go 1.24+
+- Go 1.25+
 - SDK oficial MCP para Go
 - `database/sql`
 - SQLite sin CGO

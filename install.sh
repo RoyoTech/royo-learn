@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # install.sh — royo-learn installer for Linux and macOS
 # Usage: curl -fsSL <url>/install.sh | bash
-#        ./install.sh --version v0.1.0
+#        ./install.sh --version v0.1.1
 #        ./install.sh --uninstall
 set -euo pipefail
 

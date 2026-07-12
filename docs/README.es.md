@@ -178,7 +178,7 @@ O manualmente:
 
 ```bash
 # Descargar e instalar
-./install.sh --version v0.1.0
+./install.sh --version v0.1.1
 # Desinstalar
 ./install.sh --uninstall
 ```
@@ -196,7 +196,7 @@ Invoke-WebRequest -Uri https://github.com/RoyoTech/royo-learn/releases/latest/do
 O manualmente:
 
 ```powershell
-.\install.ps1 -Version v0.1.0
+.\install.ps1 -Version v0.1.1
 .\install.ps1 -Uninstall
 ```
 
@@ -205,7 +205,7 @@ El binario se instala en `%LOCALAPPDATA%\royo-learn\bin\royo-learn.exe`.
 ### Compilar desde fuente
 
 ```bash
-# Requisito: Go 1.24+
+# Requisito: Go 1.25+
 git clone https://github.com/RoyoTech/royo-learn.git
 cd royo-learn
 make build       # Compilar para la plataforma actual

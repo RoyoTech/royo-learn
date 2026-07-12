@@ -31,7 +31,7 @@ Thanks for your interest in contributing.
 
 ## Conventions
 
-- **Language**: Go 1.24+. Code, comments, and docs in English.
+- **Language**: Go 1.25+. Code, comments, and docs in English.
 - **Dependencies**: prefer standard library. Register new dependencies with a
   reason in `docs/IMPLEMENTATION-NOTES.md`.
 - **Tests**: table-driven tests, meaningful names, one assertion per concept.

@@ -20,7 +20,7 @@ Cuando dos documentos parezcan incompatibles, detener la implementación de esa 
 
 ## Reglas no negociables
 
-1. Lenguaje: Go 1.24 o superior.
+1. Lenguaje: Go 1.25 o superior.
 2. Un solo binario: `royo-learn`.
 3. MCP principal por `stdio`.
 4. En modo MCP, `stdout` se reserva exclusivamente para mensajes MCP. Logs y diagnósticos van a `stderr`.

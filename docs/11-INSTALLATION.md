@@ -3,7 +3,7 @@
 ## Requisitos para construir
 
 - Git;
-- Go 1.24+;
+- Go 1.25+;
 - herramienta de release;
 - opcional: Codex CLI;
 - opcional: Gentle-AI;

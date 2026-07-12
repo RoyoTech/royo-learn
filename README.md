@@ -160,7 +160,7 @@ curl -fsSL https://github.com/RoyoTech/royo-learn/releases/latest/download/insta
 Or manually:
 
 ```bash
-./install.sh --version v0.1.0     # install specific version
+./install.sh --version v0.1.1     # install specific version
 ./install.sh --uninstall           # remove
 ```
 
@@ -177,7 +177,7 @@ Invoke-WebRequest -Uri https://github.com/RoyoTech/royo-learn/releases/latest/do
 Or with a version:
 
 ```powershell
-.\install.ps1 -Version v0.1.0     # install specific version
+.\install.ps1 -Version v0.1.1     # install specific version
 .\install.ps1 -Uninstall           # remove
 ```
 
@@ -189,7 +189,7 @@ The binary is installed to `%LOCALAPPDATA%\royo-learn\bin\royo-learn.exe`.
 ### Build from source
 
 ```bash
-# Prerequisites: Go 1.24+
+# Prerequisites: Go 1.25+
 git clone https://github.com/RoyoTech/royo-learn.git
 cd royo-learn
 make build       # Build for current platform

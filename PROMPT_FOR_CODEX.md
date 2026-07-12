@@ -6,7 +6,7 @@ Lee primero `AGENTS.md` y `CODEX_START_HERE.md`, luego todos los documentos all√
 
 Requisitos esenciales:
 
-- Go 1.24+;
+- Go 1.25+;
 - un solo binario `royo-learn`;
 - CLI y servidor MCP stdio;
 - SQLite + FTS5 sin CGO;
