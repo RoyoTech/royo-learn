@@ -3,6 +3,7 @@ package buildinfo
 
 import (
 	"encoding/json"
+	"fmt"
 	"runtime"
 	"runtime/debug"
 )
@@ -43,6 +44,16 @@ func Current() Metadata {
 		DatabaseMigrationLevel: MigrationLevel,
 		RecordFormatVersion:    RecordFormatVersion,
 	}
+}
+
+// HumanString returns a newline-terminated, human-readable version summary for
+// interactive CLI use. Machine clients should use VersionJSON instead.
+func HumanString() string {
+	m := Current()
+	return fmt.Sprintf(
+		"royo-learn %s\ncommit:  %s\nbuilt:   %s\ngo:      %s\n",
+		m.Version, m.Commit, m.BuildDate, m.GoVersion,
+	)
 }
 
 // VersionJSON returns one newline-terminated JSON document for machine clients.

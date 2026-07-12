@@ -45,6 +45,31 @@ func TestVersionJSON(t *testing.T) {
 	}
 }
 
+func TestHumanString(t *testing.T) {
+	t.Parallel()
+
+	output := HumanString()
+	if !strings.HasSuffix(output, "\n") {
+		t.Fatal("HumanString() output does not end with a newline")
+	}
+
+	metadata := Current()
+	for _, want := range []string{
+		"royo-learn",
+		metadata.Version,
+		metadata.Commit,
+		metadata.BuildDate,
+		metadata.GoVersion,
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("HumanString() = %q, missing %q", output, want)
+		}
+	}
+	if strings.Contains(output, "{") {
+		t.Errorf("HumanString() = %q, should not contain JSON braces", output)
+	}
+}
+
 func TestDevelopmentMetadataDefaults(t *testing.T) {
 	t.Parallel()
 

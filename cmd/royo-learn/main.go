@@ -117,17 +117,18 @@ func runVersion(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if !*jsonFlag {
-		_ = logging.WriteError(stderr, logging.ErrorEnvelope{
-			Code:        "invalid_argument",
-			Message:     invalidArgumentsMessage,
-			Recoverable: true,
-			Details:     map[string]any{},
-			NextAction:  invalidArgumentsNextAction,
-		})
-		return exitInvalidArguments
+		return writeVersionHuman(stdout, stderr)
 	}
 
 	return writeVersionJSON(stdout, stderr)
+}
+
+func writeVersionHuman(stdout, stderr io.Writer) int {
+	if _, err := fmt.Fprint(stdout, buildinfo.HumanString()); err != nil {
+		_ = logging.WriteDiagnostic(stderr, "could not write version summary")
+		return exitFailure
+	}
+	return exitSuccess
 }
 
 func writeVersionJSON(stdout, stderr io.Writer) int {

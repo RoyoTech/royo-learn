@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,6 +36,25 @@ func TestRunVersionJSON(t *testing.T) {
 	var document map[string]any
 	if err := json.Unmarshal(stdout.Bytes(), &document); err != nil {
 		t.Fatalf("stdout is not valid JSON: %v", err)
+	}
+}
+
+func TestRunVersionHuman(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr bytes.Buffer
+	if got := run([]string{"version"}, &stdout, &stderr); got != exitSuccess {
+		t.Fatalf("run() exit code = %d, want %d (stderr=%q)", got, exitSuccess, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("successful stderr = %q, want empty", stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "royo-learn") {
+		t.Errorf("stdout = %q, want it to contain %q", out, "royo-learn")
+	}
+	if json.Valid(stdout.Bytes()) && strings.HasPrefix(strings.TrimSpace(out), "{") {
+		t.Errorf("stdout = %q, want human-readable text, not JSON", out)
 	}
 }
 
