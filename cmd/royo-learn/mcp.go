@@ -24,6 +24,7 @@ import (
 func runMCPServe(args []string, _ io.Writer, stderr io.Writer) int {
 	fs := flag.NewFlagSet("mcp-serve", flag.ContinueOnError)
 	profile := fs.String("profile", "standard", "tool profile: minimal, standard, full")
+	projectRoot := fs.String("project-root", "", "explicit project root (optional; overrides CWD)")
 	if err := fs.Parse(args); err != nil {
 		_ = logging.WriteError(stderr, logging.ErrorEnvelope{
 			Code:        "invalid_argument",
@@ -35,17 +36,23 @@ func runMCPServe(args []string, _ io.Writer, stderr io.Writer) int {
 		return exitInvalidArguments
 	}
 
-	// Resolve project root from CWD.
+	root := *projectRoot
+	if root == "" {
+		root = os.Getenv("ROYO_LEARN_PROJECT_ROOT")
+	}
+
+	// Resolve project root from CWD or explicit root.
 	cwd, _ := os.Getwd()
 	resolver := project.NewResolver()
 	proj, err := resolver.Resolve(context.Background(), &project.ResolveRequest{
-		CWD: cwd,
+		CWD:          cwd,
+		ExplicitRoot: root,
 	})
 	if err != nil {
 		return mapProjectError(stderr, err)
 	}
 
-	root := proj.Root
+	root = proj.Root
 
 	// Verify project marker.
 	markerPath := filepath.Join(root, ".royo-learn", "config.yaml")
