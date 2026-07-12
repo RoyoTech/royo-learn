@@ -15,6 +15,7 @@ import (
 
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/storage"
+	"agent-royo-learn/internal/storage/storagetest"
 
 	"github.com/google/uuid"
 )
@@ -1182,15 +1183,7 @@ func TestPublish_RollbackFailureObserved(t *testing.T) {
 	})
 
 	// --- Real SQLite DB ---
-	dbPath := filepath.Join(t.TempDir(), "test.db")
-	db, err := storage.Open(dbPath)
-	if err != nil {
-		t.Fatalf("storage.Open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := storage.Migrate(db); err != nil {
-		t.Fatalf("storage.Migrate: %v", err)
-	}
+	db := storagetest.OpenTemp(t)
 
 	// --- Seed ---
 	now := utcNowPublish()
@@ -1469,15 +1462,7 @@ func TestPublish_E2E(t *testing.T) {
 	}
 
 	// --- Real SQLite DB ---
-	dbPath := filepath.Join(t.TempDir(), "test.db")
-	db, err := storage.Open(dbPath)
-	if err != nil {
-		t.Fatalf("storage.Open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := storage.Migrate(db); err != nil {
-		t.Fatalf("storage.Migrate: %v", err)
-	}
+	db := storagetest.OpenTemp(t)
 
 	// --- Seed project, learning, curation, preview ---
 	now := utcNowPublish()
@@ -1645,15 +1630,7 @@ func seedPublishEnv(t *testing.T, skillPath string, precreateFile bool, initialC
 		}
 	}
 
-	dbPath := filepath.Join(t.TempDir(), "test.db")
-	db, err := storage.Open(dbPath)
-	if err != nil {
-		t.Fatalf("storage.Open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := storage.Migrate(db); err != nil {
-		t.Fatalf("storage.Migrate: %v", err)
-	}
+	db := storagetest.OpenTemp(t)
 
 	now := utcNowPublish()
 	projectID := domain.ProjectID(uuid.Must(uuid.NewV7()).String())

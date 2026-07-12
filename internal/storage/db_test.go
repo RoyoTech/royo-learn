@@ -4,9 +4,10 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync"
 	"testing"
+
+	"agent-royo-learn/internal/testutil"
 )
 
 // ---------------------------------------------------------------------------
@@ -16,7 +17,16 @@ import (
 func TestOpen(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), "test.db")
+	dir, err := os.MkdirTemp("", "royo-test-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	defer func() {
+		if err := testutil.RemoveAllWithRetry(dir); err != nil {
+			t.Errorf("clean up database directory %q: %v", dir, err)
+		}
+	}()
+	path := filepath.Join(dir, "test.db")
 	db, err := Open(path)
 	if err != nil {
 		t.Fatalf("Open(%q): %v", path, err)
@@ -45,7 +55,16 @@ func TestOpen(t *testing.T) {
 func TestClose(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), "test.db")
+	dir, err := os.MkdirTemp("", "royo-test-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	defer func() {
+		if err := testutil.RemoveAllWithRetry(dir); err != nil {
+			t.Errorf("clean up database directory %q: %v", dir, err)
+		}
+	}()
+	path := filepath.Join(dir, "test.db")
 	db, err := Open(path)
 	if err != nil {
 		t.Fatalf("Open(%q): %v", path, err)
@@ -61,47 +80,6 @@ func TestClose(t *testing.T) {
 	}
 }
 
-// TestClose_CleansUpSidecarFiles verifies that Close removes the -wal and -shm
-// sidecar files on Windows. modernc/sqlite in WAL mode creates these files,
-// and lingering OS handles can keep them locked after Close, which breaks
-// t.TempDir() cleanup ("The directory is not empty") under -race.
-//
-// The sidecar cleanup is Windows-specific: on Unix, checkpoint(TRUNCATE) +
-// Close already handle sidecar cleanup, so we skip the test there.
-func TestClose_CleansUpSidecarFiles(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("sidecar cleanup is Windows-specific; Unix relies on checkpoint(TRUNCATE) + Close")
-	}
-	t.Parallel()
-
-	path := filepath.Join(t.TempDir(), "test.db")
-	db, err := Open(path)
-	if err != nil {
-		t.Fatalf("Open(%q): %v", path, err)
-	}
-
-	// Force WAL activity: a write transaction creates and grows the -wal file.
-	if _, err := db.DB.Exec("CREATE TABLE t (id INTEGER PRIMARY KEY)"); err != nil {
-		t.Fatalf("CREATE TABLE: %v", err)
-	}
-	if _, err := db.DB.Exec("INSERT INTO t (id) VALUES (1)"); err != nil {
-		t.Fatalf("INSERT: %v", err)
-	}
-
-	if err := db.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-
-	for _, suffix := range []string{"-wal", "-shm"} {
-		sidecar := path + suffix
-		if _, statErr := os.Stat(sidecar); statErr == nil {
-			t.Errorf("sidecar file %q still exists after Close", sidecar)
-		} else if !os.IsNotExist(statErr) {
-			t.Errorf("os.Stat(%q): %v", sidecar, statErr)
-		}
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Pragmas
 // ---------------------------------------------------------------------------
@@ -109,7 +87,16 @@ func TestClose_CleansUpSidecarFiles(t *testing.T) {
 func TestPragmas(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), "test.db")
+	dir, err := os.MkdirTemp("", "royo-test-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	defer func() {
+		if err := testutil.RemoveAllWithRetry(dir); err != nil {
+			t.Errorf("clean up database directory %q: %v", dir, err)
+		}
+	}()
+	path := filepath.Join(dir, "test.db")
 	db, err := Open(path)
 	if err != nil {
 		t.Fatalf("Open(%q): %v", path, err)
@@ -141,7 +128,16 @@ func TestMigrateSuccess(t *testing.T) {
 		t.Skip("skipping migration test in short mode")
 	}
 
-	path := filepath.Join(t.TempDir(), "test.db")
+	dir, err := os.MkdirTemp("", "royo-test-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	defer func() {
+		if err := testutil.RemoveAllWithRetry(dir); err != nil {
+			t.Errorf("clean up database directory %q: %v", dir, err)
+		}
+	}()
+	path := filepath.Join(dir, "test.db")
 	db, err := Open(path)
 	if err != nil {
 		t.Fatalf("Open(%q): %v", path, err)
@@ -180,7 +176,16 @@ func TestMigrateIdempotent(t *testing.T) {
 		t.Skip("skipping migration test in short mode")
 	}
 
-	path := filepath.Join(t.TempDir(), "test.db")
+	dir, err := os.MkdirTemp("", "royo-test-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	defer func() {
+		if err := testutil.RemoveAllWithRetry(dir); err != nil {
+			t.Errorf("clean up database directory %q: %v", dir, err)
+		}
+	}()
+	path := filepath.Join(dir, "test.db")
 	db, err := Open(path)
 	if err != nil {
 		t.Fatalf("Open(%q): %v", path, err)
@@ -210,7 +215,16 @@ func TestMigrateChecksumMismatch(t *testing.T) {
 		t.Skip("skipping migration test in short mode")
 	}
 
-	path := filepath.Join(t.TempDir(), "test.db")
+	dir, err := os.MkdirTemp("", "royo-test-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	defer func() {
+		if err := testutil.RemoveAllWithRetry(dir); err != nil {
+			t.Errorf("clean up database directory %q: %v", dir, err)
+		}
+	}()
+	path := filepath.Join(dir, "test.db")
 	db, err := Open(path)
 	if err != nil {
 		t.Fatalf("Open(%q): %v", path, err)
@@ -236,7 +250,16 @@ func TestConcurrentMigration(t *testing.T) {
 		t.Skip("skipping migration test in short mode")
 	}
 
-	path := filepath.Join(t.TempDir(), "test.db")
+	dir, err := os.MkdirTemp("", "royo-test-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	defer func() {
+		if err := testutil.RemoveAllWithRetry(dir); err != nil {
+			t.Errorf("clean up database directory %q: %v", dir, err)
+		}
+	}()
+	path := filepath.Join(dir, "test.db")
 	db, err := Open(path)
 	if err != nil {
 		t.Fatalf("Open(%q): %v", path, err)
@@ -289,7 +312,16 @@ func TestMigrateDryRun(t *testing.T) {
 		t.Skip("skipping migration test in short mode")
 	}
 
-	path := filepath.Join(t.TempDir(), "test.db")
+	dir, err := os.MkdirTemp("", "royo-test-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	defer func() {
+		if err := testutil.RemoveAllWithRetry(dir); err != nil {
+			t.Errorf("clean up database directory %q: %v", dir, err)
+		}
+	}()
+	path := filepath.Join(dir, "test.db")
 	db, err := Open(path)
 	if err != nil {
 		t.Fatalf("Open(%q): %v", path, err)

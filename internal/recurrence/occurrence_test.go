@@ -3,27 +3,19 @@ package recurrence
 import (
 	"context"
 	"database/sql"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/storage"
+	"agent-royo-learn/internal/storage/storagetest"
 
 	"github.com/google/uuid"
 )
 
 func setupRecurrenceDB(t *testing.T) (*storage.DB, *domain.Project) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "recurrence.db")
-	db, err := storage.Open(path)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := storage.Migrate(db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := storagetest.OpenTemp(t)
 
 	proj := &domain.Project{
 		ID:            domain.ProjectID(uuid.Must(uuid.NewV7()).String()),

@@ -8,6 +8,7 @@ import (
 
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/storage"
+	"agent-royo-learn/internal/testutil"
 )
 
 // saveLearningForRelation saves a minimal learning for relation testing.
@@ -58,7 +59,7 @@ func TestRelateCreatesRelation(t *testing.T) {
 	src := saveLearningForRelation(t, db, proj, "Source Learning")
 	tgt := saveLearningForRelation(t, db, proj, "Target Learning")
 
-	recordsDir := t.TempDir()
+	recordsDir := testutil.TempDir(t)
 	svc := NewService(db, recordsDir)
 
 	input := &RelateInput{
@@ -110,7 +111,7 @@ func TestRelateSelfRelationFails(t *testing.T) {
 	db, proj := setupCurateDB(t)
 	src := saveLearningForRelation(t, db, proj, "Self-Relation Learning")
 
-	recordsDir := t.TempDir()
+	recordsDir := testutil.TempDir(t)
 	svc := NewService(db, recordsDir)
 
 	input := &RelateInput{
@@ -134,7 +135,7 @@ func TestRelateDuplicateFails(t *testing.T) {
 	src := saveLearningForRelation(t, db, proj, "Dup Source")
 	tgt := saveLearningForRelation(t, db, proj, "Dup Target")
 
-	recordsDir := t.TempDir()
+	recordsDir := testutil.TempDir(t)
 	svc := NewService(db, recordsDir)
 
 	input := &RelateInput{
@@ -164,7 +165,7 @@ func TestRelateNonexistentSource(t *testing.T) {
 	db, proj := setupCurateDB(t)
 	tgt := saveLearningForRelation(t, db, proj, "Valid Target")
 
-	recordsDir := t.TempDir()
+	recordsDir := testutil.TempDir(t)
 	svc := NewService(db, recordsDir)
 
 	input := &RelateInput{
@@ -187,7 +188,7 @@ func TestRelateNonexistentTarget(t *testing.T) {
 	db, proj := setupCurateDB(t)
 	src := saveLearningForRelation(t, db, proj, "Valid Source")
 
-	recordsDir := t.TempDir()
+	recordsDir := testutil.TempDir(t)
 	svc := NewService(db, recordsDir)
 
 	input := &RelateInput{
@@ -209,7 +210,7 @@ func TestRelateNilInput(t *testing.T) {
 
 	db, _ := setupCurateDB(t)
 
-	recordsDir := t.TempDir()
+	recordsDir := testutil.TempDir(t)
 	svc := NewService(db, recordsDir)
 
 	_, err := svc.Relate(context.Background(), nil)
@@ -224,7 +225,7 @@ func TestRelateEmptySourceID(t *testing.T) {
 	db, proj := setupCurateDB(t)
 	tgt := saveLearningForRelation(t, db, proj, "Target For Empty Source")
 
-	recordsDir := t.TempDir()
+	recordsDir := testutil.TempDir(t)
 	svc := NewService(db, recordsDir)
 
 	input := &RelateInput{
@@ -247,7 +248,7 @@ func TestRelateEmptyTargetID(t *testing.T) {
 	db, proj := setupCurateDB(t)
 	src := saveLearningForRelation(t, db, proj, "Source For Empty Target")
 
-	recordsDir := t.TempDir()
+	recordsDir := testutil.TempDir(t)
 	svc := NewService(db, recordsDir)
 
 	input := &RelateInput{

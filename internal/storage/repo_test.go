@@ -3,11 +3,13 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"agent-royo-learn/internal/domain"
+	"agent-royo-learn/internal/testutil"
 
 	"github.com/google/uuid"
 )
@@ -21,12 +23,24 @@ import (
 func setupTestDB(t *testing.T) (*DB, *domain.Project) {
 	t.Helper()
 
-	path := filepath.Join(t.TempDir(), "test.db")
+	dir, err := os.MkdirTemp("", "royo-test-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	path := filepath.Join(dir, "test.db")
 	db, err := Open(path)
 	if err != nil {
+		os.RemoveAll(dir)
 		t.Fatalf("Open: %v", err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("setupTestDB: close database %q: %v", path, err)
+		}
+		if err := testutil.RemoveAllWithRetry(dir); err != nil {
+			t.Errorf("setupTestDB: clean up database directory %q: %v", dir, err)
+		}
+	})
 
 	if err := Migrate(db); err != nil {
 		t.Fatalf("Migrate: %v", err)

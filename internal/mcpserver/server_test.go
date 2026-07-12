@@ -9,6 +9,8 @@ import (
 
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/storage"
+	"agent-royo-learn/internal/storage/storagetest"
+	"agent-royo-learn/internal/testutil"
 
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -28,19 +30,9 @@ type testServer struct {
 func newTestServer(t *testing.T, profile string) *testServer {
 	t.Helper()
 
-	// Create in-memory SQLite database. Use unique cache name per test for isolation.
-	dbName := "file:test-" + uuid.Must(uuid.NewV7()).String() + "?mode=memory&cache=shared"
-	db, err := storage.Open(dbName)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
+	db, dbName := storagetest.OpenMemory(t)
 
-	if err := storage.Migrate(db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-
-	root := t.TempDir()
+	root := testutil.TempDir(t)
 	recordsDir := filepath.Join(root, ".royo-learn", "records")
 
 	// Create a project in the database.
@@ -140,25 +132,16 @@ func (ts *testServer) callTool(ctx context.Context, name string, args map[string
 func TestNewServer_Success(t *testing.T) {
 	t.Parallel()
 
-	dbName := "file:test-" + uuid.Must(uuid.NewV7()).String() + "?mode=memory&cache=shared"
-	db, err := storage.Open(dbName)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	defer db.Close()
-
-	if err := storage.Migrate(db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db, dbName := storagetest.OpenMemory(t)
 
 	cfg := Config{
 		Profile:    "standard",
 		DBPath:     dbName,
-		RecordsDir: t.TempDir(),
+		RecordsDir: testutil.TempDir(t),
 	}
 
 	projectID := domain.ProjectID("proj-1")
-	root := t.TempDir()
+	root := testutil.TempDir(t)
 
 	srv, err := NewServer(cfg, db, projectID, root)
 	if err != nil {
@@ -175,24 +158,15 @@ func TestNewServer_Success(t *testing.T) {
 func TestNewServer_InvalidProfile_DefaultsToStandard(t *testing.T) {
 	t.Parallel()
 
-	dbName := "file:test-" + uuid.Must(uuid.NewV7()).String() + "?mode=memory&cache=shared"
-	db, err := storage.Open(dbName)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	defer db.Close()
-
-	if err := storage.Migrate(db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db, dbName := storagetest.OpenMemory(t)
 
 	cfg := Config{
 		Profile:    "invalid-profile",
 		DBPath:     dbName,
-		RecordsDir: t.TempDir(),
+		RecordsDir: testutil.TempDir(t),
 	}
 
-	srv, err := NewServer(cfg, db, domain.ProjectID("p1"), t.TempDir())
+	srv, err := NewServer(cfg, db, domain.ProjectID("p1"), testutil.TempDir(t))
 	if err != nil {
 		t.Fatalf("NewServer with invalid profile should not error, got: %v", err)
 	}
