@@ -72,17 +72,17 @@ func (s *publishSvc) Preview(ctx context.Context, projectID domain.ProjectID, in
 
 type captureLearningInput struct {
 	Title           string     `json:"title" jsonschema:"required,title of the learning (5-160 chars)"`
-	Type            string     `json:"type" jsonschema:"required,learning type"`
+	Type            string     `json:"type" jsonschema:"required,learning type: procedure, prevention, diagnostic, tooling, architecture, quality, security, hypothesis, preference"`
 	Context         string     `json:"context" jsonschema:"required,context where the learning occurred"`
 	Observation     string     `json:"observation" jsonschema:"required,what was observed"`
 	ReusableLesson  string     `json:"reusable_lesson" jsonschema:"required,reusable lesson learned"`
 	ScopeGuess      string     `json:"scope_guess" jsonschema:"required,scope: project, shared, personal, unknown"`
 	Confidence      string     `json:"confidence" jsonschema:"required,confidence: low, medium, high"`
-	EvidenceLevel   string     `json:"evidence_level" jsonschema:"required,evidence: observed, tested, reproduced, hypothesis"`
+	EvidenceLevel   string     `json:"evidence_level" jsonschema:"required,evidence level: strong, moderate, weak, insufficient"`
 	Actor           actorInput `json:"actor" jsonschema:"required,who performed the action"`
 	RecommendedProc []string   `json:"recommended_procedure,omitempty"`
 	Limits          string     `json:"limits,omitempty"`
-	ProposedDest    string     `json:"proposed_destination,omitempty"`
+	ProposedDest    string     `json:"proposed_destination,omitempty" jsonschema:"proposed destination: none, project, shared, skill, agents_rule"`
 	RetrievalTerms  []string   `json:"retrieval_terms,omitempty"`
 }
 
