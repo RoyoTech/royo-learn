@@ -16,9 +16,9 @@
 #>
 
 param(
-    [Alias("version")]
+    [Alias("v")]
     [string]$Version = "latest",
-    [Alias("uninstall")]
+    [Alias("remove")]
     [switch]$Uninstall
 )
 
