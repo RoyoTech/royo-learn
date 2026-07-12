@@ -322,6 +322,13 @@ func scanLearning(row interface{ Scan(...interface{}) error }) (*domain.Learning
 		l.ApprovedScope = &s
 	}
 
+	if approvedDestJSON != "" && approvedDestJSON != "{}" {
+		var dest domain.Destination
+		if err := json.Unmarshal([]byte(approvedDestJSON), &dest); err == nil {
+			l.ApprovedDestination = &dest
+		}
+	}
+
 	return l, nil
 }
 
@@ -379,6 +386,13 @@ func scanLearningFromRows(rows scanner) (*domain.Learning, error) {
 	if approvedScope != nil {
 		s := domain.Scope(*approvedScope)
 		l.ApprovedScope = &s
+	}
+
+	if approvedDestJSON != "" && approvedDestJSON != "{}" {
+		var dest domain.Destination
+		if err := json.Unmarshal([]byte(approvedDestJSON), &dest); err == nil {
+			l.ApprovedDestination = &dest
+		}
 	}
 
 	return l, nil

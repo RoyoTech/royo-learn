@@ -163,6 +163,12 @@ func TestCurateApproveCaptured(t *testing.T) {
 	if updated.Revision != 2 {
 		t.Errorf("Learning revision = %d, want 2", updated.Revision)
 	}
+	if updated.ApprovedDestination == nil {
+		t.Fatal("ApprovedDestination is nil after approve-project-knowledge decision")
+	}
+	if updated.ApprovedDestination.Type != domain.DestProject {
+		t.Errorf("ApprovedDestination.Type = %q, want %q", updated.ApprovedDestination.Type, domain.DestProject)
+	}
 
 	// Verify curation record was created.
 	curations, err := storage.ListCurationsByLearning(ctx, tx, learning.ID)
@@ -466,5 +472,128 @@ func TestCurateApproveNeedsEvidenceStatus(t *testing.T) {
 
 	if result.NewStatus != domain.StatusApproved {
 		t.Errorf("NewStatus = %q, want %q", result.NewStatus, domain.StatusApproved)
+	}
+}
+
+func TestDeriveDestination(t *testing.T) {
+	learningID := domain.LearningID("018f-safe-learning-id")
+	tests := []struct {
+		name     string
+		decision domain.CurationDecision
+		proposed domain.DestinationType
+		want     domain.Destination
+	}{
+		{
+			name:     "reject has no publication target",
+			decision: domain.CurationReject,
+			proposed: domain.DestSkill,
+			want:     domain.Destination{Type: domain.DestNone},
+		},
+		{
+			name:     "needs evidence has no publication target",
+			decision: domain.CurationNeedsEvidence,
+			proposed: domain.DestProject,
+			want:     domain.Destination{Type: domain.DestNone},
+		},
+		{
+			name:     "merge has no publication target",
+			decision: domain.CurationMerge,
+			proposed: domain.DestProject,
+			want:     domain.Destination{Type: domain.DestNone},
+		},
+		{
+			name:     "project knowledge",
+			decision: domain.CurationApproveProjectKnowledge,
+			proposed: domain.DestProject,
+			want: domain.Destination{
+				Type: domain.DestProject, Root: ".royo-learn",
+				Path: filepath.Join("knowledge", string(learningID)+".md"),
+			},
+		},
+		{
+			name:     "shared knowledge",
+			decision: domain.CurationApproveSharedKnowledge,
+			proposed: domain.DestShared,
+			want: domain.Destination{
+				Type: domain.DestShared, Root: "shared",
+				Path: filepath.Join("knowledge", string(learningID)+".md"), Required: true,
+			},
+		},
+		{
+			name:     "new skill",
+			decision: domain.CurationApproveNewSkill,
+			proposed: domain.DestSkill,
+			want: domain.Destination{
+				Type: domain.DestSkill, Root: "skills",
+				Path: filepath.Join(string(learningID), "SKILL.md"), Required: true,
+			},
+		},
+		{
+			name:     "skill update",
+			decision: domain.CurationApproveSkillUpdate,
+			proposed: domain.DestSkill,
+			want: domain.Destination{
+				Type: domain.DestSkill, Root: "skills",
+				Path: filepath.Join(string(learningID), "SKILL.md"), Required: true,
+			},
+		},
+		{
+			name:     "agents rule",
+			decision: domain.CurationApproveAgentsRule,
+			proposed: domain.DestAgentsRule,
+			want: domain.Destination{
+				Type: domain.DestAgentsRule, Root: ".", Path: "AGENTS.md", Required: true,
+			},
+		},
+		{
+			name:     "regression test",
+			decision: domain.CurationApproveTest,
+			proposed: domain.DestProject,
+			want: domain.Destination{
+				Type: domain.DestProject, Root: ".",
+				Path: filepath.Join("tests", string(learningID)+"_test.go"), Required: true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			learning := &domain.Learning{ID: learningID, ProposedDestination: tt.proposed}
+			got, err := deriveDestination(tt.decision, learning)
+			if err != nil {
+				t.Fatalf("deriveDestination: %v", err)
+			}
+			if *got != tt.want {
+				t.Errorf("destination = %+v, want %+v", *got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDeriveDestinationRejectsDecisionMismatch(t *testing.T) {
+	learning := &domain.Learning{
+		ID:                  "018f-safe-learning-id",
+		ProposedDestination: domain.DestProject,
+	}
+
+	_, err := deriveDestination(domain.CurationApproveNewSkill, learning)
+	if err == nil {
+		t.Fatal("expected destination mismatch error")
+	}
+}
+
+func TestDeriveDestinationRejectsUnsafeLearningID(t *testing.T) {
+	for _, learningID := range []domain.LearningID{"../escape", `..\escape`} {
+		t.Run(string(learningID), func(t *testing.T) {
+			learning := &domain.Learning{
+				ID:                  learningID,
+				ProposedDestination: domain.DestSkill,
+			}
+
+			_, err := deriveDestination(domain.CurationApproveNewSkill, learning)
+			if err == nil {
+				t.Fatal("expected unsafe learning ID error")
+			}
+		})
 	}
 }

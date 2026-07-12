@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"agent-royo-learn/internal/capture"
@@ -82,7 +84,7 @@ func (s *Service) Curate(ctx context.Context, projectID domain.ProjectID, input 
 				input.LearningID, learning.ProjectID, projectID))
 	}
 
-	// If approving, check evidence threshold.
+	// If approving, check evidence threshold first (before deriving destination).
 	if isApprovalDecision(input.Decision) {
 		if err := s.checkEvidenceThreshold(ctx, learning); err != nil {
 			return nil, err
@@ -95,14 +97,21 @@ func (s *Service) Curate(ctx context.Context, projectID domain.ProjectID, input 
 			fmt.Sprintf("cannot transition from %q to %q", learning.Status, targetStatus))
 	}
 
+	destination, err := deriveDestination(input.Decision, learning)
+	if err != nil {
+		return nil, err
+	}
+	learning.ApprovedDestination = destination
+
 	now := time.Now().UTC()
 	curation := &domain.Curation{
-		ID:         domain.CurationID(uuid.Must(uuid.NewV7()).String()),
-		LearningID: input.LearningID,
-		Decision:   input.Decision,
-		Rationale:  input.Rationale,
-		Actor:      input.Actor,
-		CreatedAt:  now,
+		ID:          domain.CurationID(uuid.Must(uuid.NewV7()).String()),
+		LearningID:  input.LearningID,
+		Decision:    input.Decision,
+		Rationale:   input.Rationale,
+		Destination: destination,
+		Actor:       input.Actor,
+		CreatedAt:   now,
 	}
 
 	// Apply transition and save in a write transaction.
@@ -222,6 +231,77 @@ func isApprovalDecision(d domain.CurationDecision) bool {
 		return true
 	}
 	return false
+}
+
+func deriveDestination(decision domain.CurationDecision, learning *domain.Learning) (*domain.Destination, error) {
+	if learning == nil {
+		return nil, domain.NewValidationError(domain.ErrInvalidArgument, "curate: learning is nil")
+	}
+
+	if decision == domain.CurationReject || decision == domain.CurationNeedsEvidence || decision == domain.CurationMerge {
+		return &domain.Destination{Type: domain.DestNone}, nil
+	}
+
+	id := string(learning.ID)
+	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, `/\`) {
+		return nil, domain.NewValidationError(domain.ErrInvalidArgument,
+			fmt.Sprintf("curate: learning id %q cannot be used in a destination path", learning.ID))
+	}
+
+	var expected domain.DestinationType
+	var destination domain.Destination
+	switch decision {
+	case domain.CurationApproveProjectKnowledge:
+		expected = domain.DestProject
+		destination = domain.Destination{
+			Type: domain.DestProject,
+			Root: ".royo-learn",
+			Path: filepath.Join("knowledge", id+".md"),
+		}
+	case domain.CurationApproveSharedKnowledge:
+		expected = domain.DestShared
+		destination = domain.Destination{
+			Type:     domain.DestShared,
+			Root:     "shared",
+			Path:     filepath.Join("knowledge", id+".md"),
+			Required: true,
+		}
+	case domain.CurationApproveNewSkill, domain.CurationApproveSkillUpdate:
+		expected = domain.DestSkill
+		destination = domain.Destination{
+			Type:     domain.DestSkill,
+			Root:     "skills",
+			Path:     filepath.Join(id, "SKILL.md"),
+			Required: true,
+		}
+	case domain.CurationApproveAgentsRule:
+		expected = domain.DestAgentsRule
+		destination = domain.Destination{
+			Type:     domain.DestAgentsRule,
+			Root:     ".",
+			Path:     "AGENTS.md",
+			Required: true,
+		}
+	case domain.CurationApproveTest:
+		expected = domain.DestProject
+		destination = domain.Destination{
+			Type:     domain.DestProject,
+			Root:     ".",
+			Path:     filepath.Join("tests", id+"_test.go"),
+			Required: true,
+		}
+	default:
+		return nil, domain.NewValidationError(domain.ErrInvalidArgument,
+			fmt.Sprintf("unknown curation decision: %q", decision))
+	}
+
+	if learning.ProposedDestination != expected {
+		return nil, domain.NewValidationError(domain.ErrInvalidArgument,
+			fmt.Sprintf("curate: decision %q requires proposed destination %q, got %q",
+				decision, expected, learning.ProposedDestination))
+	}
+
+	return &destination, nil
 }
 
 func stringPtr(s string) *string {
