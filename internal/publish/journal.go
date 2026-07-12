@@ -47,7 +47,8 @@ func (j *Journal) Append(entry JournalEntry) error {
 	}
 	data = append(data, '\n')
 
-	f, err := os.OpenFile(j.journalPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	// Journal is an audit trail; 0o600 prevents world-readable access on shared systems.
+	f, err := os.OpenFile(j.journalPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("Journal.Append: open: %w", err)
 	}

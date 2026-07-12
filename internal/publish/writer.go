@@ -54,6 +54,17 @@ func (w *Writer) WriteFile(targetPath string, content []byte, perm os.FileMode) 
 		return fmt.Errorf("WriteFile: sync temp: %w", err)
 	}
 
+	// Apply the caller's perm to the temp file before renaming. Rename preserves
+	// the inode mode, so chmod-before-rename is the atomic way to set the final
+	// file's mode. Caller-supplied perms (e.g. 0o644 in publish_op.go) now take
+	// effect instead of being silently ignored. On Windows the call is best-effort
+	// and may ignore some bits — the caller is responsible for choosing perms
+	// appropriate per platform.
+	if err := tmpFile.Chmod(perm); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("WriteFile: chmod temp: %w", err)
+	}
+
 	if err := tmpFile.Close(); err != nil {
 		return fmt.Errorf("WriteFile: close temp: %w", err)
 	}

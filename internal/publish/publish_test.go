@@ -859,6 +859,41 @@ func TestWriteFile_ReadOnlyDirectory(t *testing.T) {
 	}
 }
 
+func TestWriteFile_AppliesPerm(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping permission test on Windows (os.Chmod on files behaves differently)")
+	}
+
+	cases := []struct {
+		name string
+		mode os.FileMode
+	}{
+		{"caller-default-0o644", 0o644},
+		{"audit-0o600", 0o600},
+		{"executable-0o755", 0o755},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			writer := NewWriter(tmpDir)
+			relPath := "out/file.txt"
+
+			if err := writer.WriteFile(relPath, []byte("payload"), tt.mode); err != nil {
+				t.Fatalf("WriteFile(%o): %v", tt.mode, err)
+			}
+
+			info, err := os.Stat(filepath.Join(tmpDir, relPath))
+			if err != nil {
+				t.Fatalf("Stat: %v", err)
+			}
+			if got := info.Mode().Perm(); got != tt.mode {
+				t.Errorf("mode = %o, want %o", got, tt.mode)
+			}
+		})
+	}
+}
+
 func TestContentChanged_NonExistentFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	changed, err := ContentChanged(filepath.Join(tmpDir, "nonexistent.txt"), "abc123")
