@@ -5,12 +5,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"agent-royo-learn/internal/testutil"
 )
 
 func TestWriteRecord(t *testing.T) {
-	// Not parallel: Windows temp dir cleanup can race with file handles.
+	t.Parallel()
 
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	l := newTestCaptureLearning()
 	l.NormalizedHash = "abc123def456"
 
@@ -55,9 +57,9 @@ func TestWriteRecord(t *testing.T) {
 }
 
 func TestWriteRecordCreatesDir(t *testing.T) {
-	// Not parallel: see TestWriteRecord.
+	t.Parallel()
 
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	l := newTestCaptureLearning()
 	recordsDir := filepath.Join(dir, "new-records")
 

@@ -9,6 +9,7 @@ import (
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/storage"
 	"agent-royo-learn/internal/storage/storagetest"
+	"agent-royo-learn/internal/testutil"
 
 	"github.com/google/uuid"
 )
@@ -48,7 +49,7 @@ func TestCaptureNewLearning(t *testing.T) {
 	t.Parallel()
 
 	db, proj := setupCaptureDB(t)
-	recordsDir := t.TempDir()
+	recordsDir := testutil.TempDir(t)
 	svc := NewService(db, recordsDir)
 
 	input := &CaptureInput{
@@ -81,7 +82,7 @@ func TestCaptureDedupExact(t *testing.T) {
 	t.Parallel()
 
 	db, proj := setupCaptureDB(t)
-	recordsDir := t.TempDir()
+	recordsDir := testutil.TempDir(t)
 	svc := NewService(db, recordsDir)
 
 	input := &CaptureInput{
@@ -118,7 +119,7 @@ func TestCaptureWithDifferentInputDifferentID(t *testing.T) {
 	t.Parallel()
 
 	db, proj := setupCaptureDB(t)
-	recordsDir := t.TempDir()
+	recordsDir := testutil.TempDir(t)
 	svc := NewService(db, recordsDir)
 
 	input1 := &CaptureInput{
@@ -153,7 +154,7 @@ func TestCaptureMissingTitle(t *testing.T) {
 	t.Parallel()
 
 	db, proj := setupCaptureDB(t)
-	recordsDir := t.TempDir()
+	recordsDir := testutil.TempDir(t)
 	svc := NewService(db, recordsDir)
 
 	input := &CaptureInput{
@@ -176,7 +177,7 @@ func TestCaptureNilInput(t *testing.T) {
 	t.Parallel()
 
 	db, proj := setupCaptureDB(t)
-	recordsDir := t.TempDir()
+	recordsDir := testutil.TempDir(t)
 	svc := NewService(db, recordsDir)
 
 	_, err := svc.Capture(context.Background(), proj.ID, nil)
@@ -189,7 +190,7 @@ func TestCaptureRecordWritten(t *testing.T) {
 	t.Parallel()
 
 	db, proj := setupCaptureDB(t)
-	recordsDir := t.TempDir()
+	recordsDir := testutil.TempDir(t)
 	svc := NewService(db, recordsDir)
 
 	input := &CaptureInput{
