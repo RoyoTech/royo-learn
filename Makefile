@@ -6,7 +6,7 @@ ifeq ($(OS),Windows_NT)
 endif
 
 fmt:
-	go fmt ./...
+	go fmt ./... && git diff --exit-code
 
 tidy-check:
 	go mod tidy
@@ -16,7 +16,7 @@ verify:
 	go mod verify
 
 test:
-	go test ./...
+	go test -race ./...
 
 vet:
 	go vet ./...
