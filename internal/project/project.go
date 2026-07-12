@@ -178,11 +178,14 @@ func (r *Resolver) resolveFromCWD(cwd string) (*Project, error) {
 		return r.buildProject(gitRoot)
 	}
 
-	// Found a marker. Check for sibling ambiguity.
-	parent := filepath.Dir(markerRoot)
-	if parent != markerRoot {
-		if err := r.checkSiblingMarkers(parent, markerRoot); err != nil {
-			return nil, err
+	// Only check sibling ambiguity if the marker is NOT in the CWD itself.
+	// When CWD IS the project root, there is no possible ambiguity.
+	if markerRoot != canonCWD {
+		parent := filepath.Dir(markerRoot)
+		if parent != markerRoot {
+			if err := r.checkSiblingMarkers(parent, markerRoot); err != nil {
+				return nil, err
+			}
 		}
 	}
 

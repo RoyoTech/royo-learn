@@ -360,6 +360,35 @@ func TestResolveAmbiguousProject(t *testing.T) {
 	assertProjectErrorCode(t, err, "ambiguous_project")
 }
 
+func TestResolveCWDExactMarkerWithSibling(t *testing.T) {
+	parent := t.TempDir()
+
+	// Two sibling directories, both with .royo-learn/config.yaml markers.
+	// CWD is set to one of them EXACTLY (not a subdirectory).
+	// Resolution MUST succeed — there is no ambiguity when CWD is the project root.
+	for _, name := range []string{"a", "b"} {
+		sub := filepath.Join(parent, name)
+		os.MkdirAll(filepath.Join(sub, ".royo-learn"), 0o755)
+		os.WriteFile(filepath.Join(sub, ".royo-learn", "config.yaml"),
+			[]byte(fmt.Sprintf("project:\n  name: %s\n", name)), 0o644)
+	}
+
+	// CWD IS project "a" itself.
+	cwd := filepath.Join(parent, "a")
+
+	r := NewResolver(WithTrustedRoots([]string{parent}))
+	req := &ResolveRequest{CWD: cwd}
+
+	proj, err := r.Resolve(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Resolve with CWD at project root: %v", err)
+	}
+	want := canonicalDir(t, cwd)
+	if proj.Root != want {
+		t.Fatalf("got Root=%q want %q", proj.Root, want)
+	}
+}
+
 func TestResolveProjectNotFound(t *testing.T) {
 	dir := t.TempDir()
 
