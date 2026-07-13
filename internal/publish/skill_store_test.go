@@ -363,13 +363,19 @@ Only in dev.
 	if !strings.Contains(sections[0].Rule, "Always do X") {
 		t.Errorf("Rule missing: %q", sections[0].Rule)
 	}
-	// Procedure text is accumulated into rule body since the parser
-	// doesn't split into array — it captures raw text.
-	if !strings.Contains(sections[0].Rule, "Step 1") {
-		t.Errorf("Rule should contain procedure text: %q", sections[0].Rule)
+	// Procedure is now correctly parsed into the Procedure slice.
+	if len(sections[0].Procedure) != 2 {
+		t.Errorf("Procedure should have 2 steps, got %d: %v", len(sections[0].Procedure), sections[0].Procedure)
 	}
-	if !strings.Contains(sections[0].Rule, "Step 2") {
-		t.Errorf("Rule should contain procedure text: %q", sections[0].Rule)
+	if len(sections[0].Procedure) > 0 && sections[0].Procedure[0] != "Step 1" {
+		t.Errorf("Procedure[0] = %q, want %q", sections[0].Procedure[0], "Step 1")
+	}
+	if len(sections[0].Procedure) > 1 && sections[0].Procedure[1] != "Step 2" {
+		t.Errorf("Procedure[1] = %q, want %q", sections[0].Procedure[1], "Step 2")
+	}
+	// Rule must NOT contain procedure steps (they belong in Procedure).
+	if strings.Contains(sections[0].Rule, "Step 1") {
+		t.Errorf("Rule should not contain procedure step 'Step 1': %q", sections[0].Rule)
 	}
 	if !strings.Contains(sections[0].Limits, "Only in dev") {
 		t.Errorf("Limits missing: %q", sections[0].Limits)

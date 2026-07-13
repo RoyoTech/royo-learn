@@ -232,6 +232,20 @@ func MergeLearningIntoSections(existing []SkillSection, learning *domain.Learnin
 	return existing
 }
 
+// BuildSectionsFromLearnings builds skill sections from a list of existing
+// learnings (the DB source-of-truth path), then merges a new learning into
+// the list. This is the projection path used by buildPublishContents: the
+// skill file is regenerated from domain.Learning objects, not from parsing
+// the existing markdown body. Extracted as a standalone function for
+// testability without a DB.
+func BuildSectionsFromLearnings(existing []*domain.Learning, newLearning *domain.Learning) []SkillSection {
+	var sections []SkillSection
+	for _, l := range existing {
+		sections = append(sections, buildSkillSection(l))
+	}
+	return MergeLearningIntoSections(sections, newLearning)
+}
+
 // BuildDescription builds a skill description from learning triggers.
 func BuildDescription(projectKey, area string, learnings []*domain.Learning) string {
 	var triggers []string
@@ -430,6 +444,7 @@ func parseSkillSections(content string) []SkillSection {
 
 	var current *SkillSection
 	var currentField *string
+	var inProcedure bool
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -444,6 +459,7 @@ func parseSkillSections(content string) []SkillSection {
 				Title: strings.TrimPrefix(trimmed, "## "),
 			}
 			currentField = nil
+			inProcedure = false
 			continue
 		}
 
@@ -466,15 +482,26 @@ func parseSkillSections(content string) []SkillSection {
 		case strings.HasPrefix(trimmed, "### Regla"):
 			currentField = &current.Rule
 			current.Rule = ""
+			inProcedure = false
 		case strings.HasPrefix(trimmed, "### Procedimiento"):
 			currentField = nil
+			inProcedure = true
+			current.Procedure = nil
 		case strings.HasPrefix(trimmed, "### Ejemplo canónico"):
 			currentField = &current.CanonExample
 			current.CanonExample = ""
+			inProcedure = false
 		case strings.HasPrefix(trimmed, "### Límites"):
 			currentField = &current.Limits
 			current.Limits = ""
+			inProcedure = false
 		default:
+			if inProcedure {
+				if strings.HasPrefix(trimmed, "- ") {
+					current.Procedure = append(current.Procedure, strings.TrimPrefix(trimmed, "- "))
+				}
+				continue
+			}
 			if currentField != nil {
 				if *currentField != "" {
 					*currentField += "\n"

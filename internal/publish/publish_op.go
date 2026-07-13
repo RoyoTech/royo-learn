@@ -157,7 +157,7 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 	}
 
 	// 8. Build per-target content.
-	targetContents := s.buildPublishContents(targets, learning, curation, targetCtx)
+	targetContents := s.buildPublishContents(ctx, targets, learning, curation, targetCtx)
 
 	// 9. Write files atomically.
 	writer := NewWriter(s.projectRoot)
@@ -346,7 +346,9 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 }
 
 // buildPublishContents builds the content for each target during publish.
-func (s *Service) buildPublishContents(targets []TargetResolution, learning *domain.Learning, curation *domain.Curation, ctx *TargetContext) []TargetContent {
+// goCtx is the context.Context for DB operations; ctx is the target context
+// (project key, agents hook flag).
+func (s *Service) buildPublishContents(goCtx context.Context, targets []TargetResolution, learning *domain.Learning, curation *domain.Curation, ctx *TargetContext) []TargetContent {
 	var result []TargetContent
 
 	if ctx == nil || ctx.ProjectKey == "" {
@@ -369,7 +371,6 @@ func (s *Service) buildPublishContents(targets []TargetResolution, learning *dom
 			if err != nil {
 				entries = nil
 			}
-			// Add the current learning's area if new.
 			result = append(result, TargetContent{
 				Target:  target,
 				Content: GenerateIndexContent(ctx.ProjectKey, entries),
@@ -385,25 +386,58 @@ func (s *Service) buildPublishContents(targets []TargetResolution, learning *dom
 			continue
 		}
 
-		// Child skill: merge learning into existing skill content.
+		// Child skill: rebuild sections from DB (source of truth).
+		// The skill file is a PROJECTION of the learnings in the DB, not a
+		// round-trip of the markdown body. We read learning_ids from the
+		// existing frontmatter, load those learnings from the DB, and rebuild
+		// sections from domain.Learning objects. This preserves all fields
+		// (including Procedure) without relying on markdown parsing.
+		// Fallback: if DB load fails, parse the existing body (graceful degradation).
 		var sections []SkillSection
+		var existingLearnings []*domain.Learning
 
 		targetFullPath := filepath.Join(s.projectRoot, target.Root, target.Path)
-		if existing, err := os.ReadFile(targetFullPath); err == nil {
-			sections = parseSkillSections(string(existing))
+		var existingContent string
+		if data, err := os.ReadFile(targetFullPath); err == nil {
+			existingContent = string(data)
 		}
 
-		sections = MergeLearningIntoSections(sections, learning)
+		if existingContent != "" {
+			fm, parseErr := ParseFrontmatter(existingContent)
+			if parseErr == nil && len(fm.LearningIDs) > 0 {
+				readTx, txErr := s.db.DB.BeginTx(goCtx, &sql.TxOptions{ReadOnly: true})
+				if txErr == nil {
+					existingLearnings, _ = storage.ListLearningsByIDs(goCtx, readTx, fm.LearningIDs)
+					readTx.Rollback()
+				}
+			}
+		}
+
+		if len(existingLearnings) > 0 {
+			// DB projection path: rebuild from domain.Learning objects.
+			sections = BuildSectionsFromLearnings(existingLearnings, learning)
+		} else if existingContent != "" {
+			// Fallback: parse the existing body (handles DB failures gracefully).
+			sections = MergeLearningIntoSections(parseSkillSections(existingContent), learning)
+		} else {
+			// New skill: just the new learning.
+			sections = MergeLearningIntoSections(nil, learning)
+		}
 
 		ids := make([]domain.LearningID, 0, len(sections))
 		for _, sec := range sections {
 			ids = append(ids, sec.LearningID)
 		}
 
+		// Build description from ALL learnings in the skill (triggers from all).
+		allLearnings := make([]*domain.Learning, 0, len(existingLearnings)+1)
+		allLearnings = append(allLearnings, existingLearnings...)
+		allLearnings = append(allLearnings, learning)
+
 		area := SkillArea(learning)
 		fm := SkillFrontmatter{
 			Name:        SkillName(ctx.ProjectKey, area),
-			Description: BuildDescription(ctx.ProjectKey, area, []*domain.Learning{learning}),
+			Description: BuildDescription(ctx.ProjectKey, area, allLearnings),
 			Source:      "royo-learn",
 			Project:     ctx.ProjectKey,
 			LearningIDs: ids,

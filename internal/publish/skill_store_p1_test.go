@@ -181,3 +181,105 @@ func TestP1_ProcedureSurvivesRePublish(t *testing.T) {
 		}
 	}
 }
+
+// TestP1_ThreeLearningsRepublishedInDifferentOrder verifies that publishing
+// 3 learnings to the same area in different order preserves ALL procedures.
+// This tests the BuildSectionsFromLearnings projection path (no DB needed).
+func TestP1_ThreeLearningsRepublishedInDifferentOrder(t *testing.T) {
+	makeLearning := func(id, title, rule string, steps []string) *domain.Learning {
+		return &domain.Learning{
+			ID:                   domain.LearningID(id),
+			Title:                title,
+			ReusableLesson:       rule,
+			RecommendedProcedure: steps,
+			Context:              "ctx " + title,
+			Observation:          "obs " + title,
+			Limits:               "limits " + title,
+			RetrievalTerms:       []string{"dashboard", "datos"},
+		}
+	}
+
+	learningA := makeLearning("aaa-aaa", "Rule A", "Regla A.", []string{"Step A1", "Step A2", "Step A3"})
+	learningB := makeLearning("bbb-bbb", "Rule B", "Regla B.", []string{"Step B1", "Step B2"})
+	learningC := makeLearning("ccc-ccc", "Rule C", "Regla C.", []string{"Step C1", "Step C2", "Step C3", "Step C4"})
+
+	// Simulate publishing in order: A, then B, then C.
+	// Each publish rebuilds sections from the existing learnings + the new one.
+	// In the real code path, existing learnings come from the DB; here we
+	// simulate by accumulating the published learnings.
+	var published []*domain.Learning
+
+	// Publish A.
+	published = append(published, learningA)
+	sections := BuildSectionsFromLearnings(published[:0], learningA) // start fresh with A
+	if len(sections) != 1 {
+		t.Fatalf("after A: expected 1 section, got %d", len(sections))
+	}
+
+	// Publish B: rebuild from [A] + B.
+	published = append(published, learningB)
+	sections = BuildSectionsFromLearnings(published[:1], learningB)
+	if len(sections) != 2 {
+		t.Fatalf("after B: expected 2 sections, got %d", len(sections))
+	}
+
+	// Publish C: rebuild from [A, B] + C.
+	published = append(published, learningC)
+	sections = BuildSectionsFromLearnings(published[:2], learningC)
+	if len(sections) != 3 {
+		t.Fatalf("after C: expected 3 sections, got %d", len(sections))
+	}
+
+	// Now re-publish B: rebuild from [A, B, C] + B (update).
+	sections = BuildSectionsFromLearnings(published, learningB)
+	if len(sections) != 3 {
+		t.Fatalf("after re-publish B: expected 3 sections, got %d", len(sections))
+	}
+
+	// Verify ALL procedures are intact after all publishes.
+	want := map[string][]string{
+		"aaa-aaa": {"Step A1", "Step A2", "Step A3"},
+		"bbb-bbb": {"Step B1", "Step B2"},
+		"ccc-ccc": {"Step C1", "Step C2", "Step C3", "Step C4"},
+	}
+
+	for _, sec := range sections {
+		expectedSteps, ok := want[string(sec.LearningID)]
+		if !ok {
+			t.Errorf("unexpected section: %s", sec.LearningID)
+			continue
+		}
+		if len(sec.Procedure) != len(expectedSteps) {
+			t.Errorf("learning %s: got %d procedure steps, want %d (got %v, want %v)",
+				sec.LearningID, len(sec.Procedure), len(expectedSteps), sec.Procedure, expectedSteps)
+			continue
+		}
+		for i, step := range expectedSteps {
+			if sec.Procedure[i] != step {
+				t.Errorf("learning %s: Procedure[%d] = %q, want %q", sec.LearningID, i, sec.Procedure[i], step)
+			}
+		}
+	}
+
+	// Also verify the generated content round-trips correctly.
+	fm := SkillFrontmatter{
+		Name:        "test-three-learnings",
+		Description: "desc",
+		Source:      "royo-learn",
+		Project:     "test",
+		LearningIDs: []domain.LearningID{learningA.ID, learningB.ID, learningC.ID},
+		UpdatedAt:   "2026-07-12",
+	}
+	content := GenerateSkillContent(fm, sections)
+	parsed := parseSkillSections(content)
+
+	for _, sec := range parsed {
+		expectedSteps, ok := want[string(sec.LearningID)]
+		if !ok {
+			continue
+		}
+		if len(sec.Procedure) != len(expectedSteps) {
+			t.Errorf("round-trip: learning %s: got %d steps, want %d", sec.LearningID, len(sec.Procedure), len(expectedSteps))
+		}
+	}
+}

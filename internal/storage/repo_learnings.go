@@ -151,6 +151,46 @@ func ListLearnings(ctx context.Context, tx *sql.Tx, projectID domain.ProjectID, 
 	return out, rows.Err()
 }
 
+// ListLearningsByIDs loads multiple learnings by their IDs in a single query.
+// Learnings that are not found are omitted from the result (no error).
+// The returned slice is NOT guaranteed to be in the same order as the input IDs.
+func ListLearningsByIDs(ctx context.Context, tx *sql.Tx, ids []domain.LearningID) ([]*domain.Learning, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = string(id)
+	}
+	query := fmt.Sprintf(`
+		SELECT
+			id, project_id, status, type, title, context, observation,
+			reusable_lesson, recommended_procedure_json, limits_text,
+			scope_guess, approved_scope, confidence, evidence_level,
+			proposed_destination, approved_destination_json, retrieval_terms_text,
+			fingerprint, normalized_hash, idempotency_key,
+			actor_json, revision, created_at, updated_at
+		FROM learnings WHERE id IN (%s)
+	`, strings.Join(placeholders, ","))
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ListLearningsByIDs: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*domain.Learning
+	for rows.Next() {
+		l, scanErr := scanLearningFromRows(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("ListLearningsByIDs: scan: %w", scanErr)
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
 // UpdateLearning updates an existing learning.
 func UpdateLearning(ctx context.Context, tx *sql.Tx, l *domain.Learning) error {
 	recProcJSON := marshalStringSlice(l.RecommendedProcedure)
