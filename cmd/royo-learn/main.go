@@ -594,10 +594,11 @@ func writeCaptureError(stderr io.Writer, code, format string, args ...interface{
 func runCurate(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("curate", flag.ContinueOnError)
 	learningID := fs.String("learning-id", "", "learning ID to curate (required)")
-	action := fs.String("action", "", "curation action: approve, reject, needs_evidence, relate (required)")
+	action := fs.String("action", "", "curation action: approve, approve_new_skill, approve_skill_update, reject, needs_evidence, relate (required)")
 	targetID := fs.String("target-id", "", "target learning ID for relate action")
 	relation := fs.String("relation", "related", "relation type for relate action")
 	rationale := fs.String("rationale", "", "rationale for the curation decision")
+	area := fs.String("area", "", "explicit skill area (sanitized+lowercased); overrides automatic derivation from retrieval_terms for skill decisions")
 	projectRoot := fs.String("project-root", "", "project root directory")
 	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
 
@@ -721,6 +722,7 @@ func runCurate(args []string, stdout, stderr io.Writer) int {
 		Decision:   decision,
 		Rationale:  *rationale,
 		Actor:      actor,
+		Area:       *area,
 	}
 
 	result, curErr := svc.Curate(ctx, projectID, curateInput)
@@ -748,12 +750,16 @@ func parseCurateAction(action string) (domain.CurationDecision, error) {
 	switch action {
 	case "approve":
 		return domain.CurationApproveProjectKnowledge, nil
+	case "approve_new_skill":
+		return domain.CurationApproveNewSkill, nil
+	case "approve_skill_update":
+		return domain.CurationApproveSkillUpdate, nil
 	case "reject":
 		return domain.CurationReject, nil
 	case "needs_evidence":
 		return domain.CurationNeedsEvidence, nil
 	default:
-		return "", fmt.Errorf("unknown action %q: must be one of approve, reject, needs_evidence, relate", action)
+		return "", fmt.Errorf("unknown action %q: must be one of approve, approve_new_skill, approve_skill_update, reject, needs_evidence, relate", action)
 	}
 }
 

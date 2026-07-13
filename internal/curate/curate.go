@@ -36,6 +36,7 @@ type CurateInput struct {
 	Decision   domain.CurationDecision
 	Rationale  string
 	Actor      domain.Actor
+	Area       string
 }
 
 // CurateResult is the output of a curation action.
@@ -55,6 +56,14 @@ func (s *Service) Curate(ctx context.Context, projectID domain.ProjectID, input 
 	}
 	if input.Decision == "" {
 		return nil, domain.NewValidationError(domain.ErrInvalidArgument, "curate: decision is required")
+	}
+
+	// Validate optional explicit skill area (only meaningful for skill
+	// decisions, but validate format regardless so bad input is rejected
+	// early).
+	normalizedArea, err := domain.ValidateExplicitArea(input.Area)
+	if err != nil {
+		return nil, err
 	}
 
 	// Map decision to target status.
@@ -97,7 +106,7 @@ func (s *Service) Curate(ctx context.Context, projectID domain.ProjectID, input 
 			fmt.Sprintf("cannot transition from %q to %q", learning.Status, targetStatus))
 	}
 
-	destination, err := deriveDestination(input.Decision, learning)
+	destination, err := deriveDestination(input.Decision, learning, normalizedArea)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +242,7 @@ func isApprovalDecision(d domain.CurationDecision) bool {
 	return false
 }
 
-func deriveDestination(decision domain.CurationDecision, learning *domain.Learning) (*domain.Destination, error) {
+func deriveDestination(decision domain.CurationDecision, learning *domain.Learning, area string) (*domain.Destination, error) {
 	if learning == nil {
 		return nil, domain.NewValidationError(domain.ErrInvalidArgument, "curate: learning is nil")
 	}
@@ -273,6 +282,7 @@ func deriveDestination(decision domain.CurationDecision, learning *domain.Learni
 			Root:     "skills",
 			Path:     filepath.Join(id, "SKILL.md"),
 			Required: true,
+			Area:     area,
 		}
 	case domain.CurationApproveAgentsRule:
 		expected = domain.DestAgentsRule

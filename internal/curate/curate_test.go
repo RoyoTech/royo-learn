@@ -559,7 +559,7 @@ func TestDeriveDestination(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			learning := &domain.Learning{ID: learningID, ProposedDestination: tt.proposed}
-			got, err := deriveDestination(tt.decision, learning)
+			got, err := deriveDestination(tt.decision, learning, "")
 			if err != nil {
 				t.Fatalf("deriveDestination: %v", err)
 			}
@@ -576,7 +576,7 @@ func TestDeriveDestinationRejectsDecisionMismatch(t *testing.T) {
 		ProposedDestination: domain.DestProject,
 	}
 
-	_, err := deriveDestination(domain.CurationApproveNewSkill, learning)
+	_, err := deriveDestination(domain.CurationApproveNewSkill, learning, "")
 	if err == nil {
 		t.Fatal("expected destination mismatch error")
 	}
@@ -590,7 +590,7 @@ func TestDeriveDestinationRejectsUnsafeLearningID(t *testing.T) {
 				ProposedDestination: domain.DestSkill,
 			}
 
-			_, err := deriveDestination(domain.CurationApproveNewSkill, learning)
+			_, err := deriveDestination(domain.CurationApproveNewSkill, learning, "")
 			if err == nil {
 				t.Fatal("expected unsafe learning ID error")
 			}

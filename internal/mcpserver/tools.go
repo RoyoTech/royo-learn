@@ -104,6 +104,7 @@ type curateLearningInput struct {
 	Decision   string     `json:"decision" jsonschema:"required,curation decision"`
 	Rationale  string     `json:"rationale" jsonschema:"required,rationale (10-5000 chars)"`
 	Actor      actorInput `json:"actor" jsonschema:"required"`
+	Area       string     `json:"area,omitempty" jsonschema:"optional,área/skill temática destino explícita; si se omite, se deriva automáticamente de los retrieval_terms"`
 }
 
 type previewPublicationInput struct {
@@ -275,6 +276,7 @@ func handleCurateLearning(srv *Server) func(ctx context.Context, req *mcp.CallTo
 			Decision:   domain.CurationDecision(in.Decision),
 			Rationale:  in.Rationale,
 			Actor:      toActor(in.Actor),
+			Area:       in.Area,
 		}
 
 		result, err := srv.curateSvc.Curate(ctx, srv.projectID, curIn)
