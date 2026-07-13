@@ -12,6 +12,7 @@ import (
 type TargetContext struct {
 	ProjectKey     string
 	NeedAgentsHook bool
+	Area           string // resolved skill area (explicit or derived)
 }
 
 // ResolveTarget determines where a learning would be published based on its

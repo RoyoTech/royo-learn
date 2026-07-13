@@ -54,22 +54,33 @@ func (s *Service) Preview(ctx context.Context, projectID domain.ProjectID, input
 	curation := curations[0] // latest first
 
 	// Resolve target context for skill destinations.
-	// Only auto-derive when the destination path is generic.
+	// Mirror the Publish resolution exactly (preview == publish): the area
+	// is resolved once via ResolveSkillArea and stored in targetCtx.Area.
 	var targetCtx *TargetContext
 	if curation.Destination != nil && curation.Destination.Type == domain.DestSkill {
 		proj, projErr := s.loadProject(ctx, projectID)
 		if projErr == nil {
-			area := SkillArea(learning)
+			area, areaErr := ResolveSkillArea(learning, curation.Destination.Area)
+			if areaErr != nil {
+				return nil, areaErr
+			}
 			autoName := SkillName(proj.ProjectKey, area)
 			destDir := filepath.Dir(curation.Destination.Path)
+			explicitArea := curation.Destination.Area != ""
 
-			if destDir == "." || destDir == "" || destDir == autoName {
+			if explicitArea || destDir == "." || destDir == "" || destDir == autoName {
 				needHook, _ := s.needAgentsHook(proj.ProjectKey)
 				targetCtx = &TargetContext{
 					ProjectKey:     proj.ProjectKey,
 					NeedAgentsHook: needHook,
+					Area:           area,
 				}
-				curation.Destination.Path = autoName + "/SKILL.md"
+				// Match publish: store just the skill directory name;
+				// ResolveSkillPublishTargets appends "SKILL.md" via SkillPath().
+				// (Previously this set autoName + "/SKILL.md", which doubled the
+				// path because ResolveSkillPublishTargets appends "SKILL.md"
+				// again — producing autoName/SKILL.md/SKILL.md.)
+				curation.Destination.Path = autoName
 			}
 		}
 	}
@@ -194,7 +205,10 @@ func (s *Service) buildTargetContent(target TargetResolution, learning *domain.L
 		ids = append(ids, sec.LearningID)
 	}
 
-	area := SkillArea(learning)
+	area := ctx.Area
+	if area == "" {
+		area = SkillArea(learning)
+	}
 	fm := SkillFrontmatter{
 		Name:        SkillName(ctx.ProjectKey, area),
 		Description: BuildDescription(ctx.ProjectKey, area, []*domain.Learning{learning}),

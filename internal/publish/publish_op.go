@@ -94,20 +94,28 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 	if curation.Destination != nil && curation.Destination.Type == domain.DestSkill {
 		proj, projErr := s.loadProject(ctx, projectID)
 		if projErr == nil {
-			area := SkillArea(learning)
+			area, areaErr := ResolveSkillArea(learning, curation.Destination.Area)
+			if areaErr != nil {
+				return nil, areaErr
+			}
 			autoName := SkillName(proj.ProjectKey, area)
 			destDir := filepath.Dir(curation.Destination.Path)
+			explicitArea := curation.Destination.Area != ""
 
-			// Activate multi-target only when the destination path matches
-			// the auto-derived pattern or is generic.
-			if destDir == "." || destDir == "" || destDir == autoName {
+			// Multi-target activates when the curator set an explicit area
+			// (the chosen area drives the skill name regardless of the stored
+			// path), or when the stored path is generic / already matches the
+			// derived name.
+			if explicitArea || destDir == "." || destDir == "" || destDir == autoName {
 				needHook, _ := s.needAgentsHook(proj.ProjectKey)
 				targetCtx = &TargetContext{
 					ProjectKey:     proj.ProjectKey,
 					NeedAgentsHook: needHook,
+					Area:           area,
 				}
-				// Set path to just the skill directory name; ResolveSkillPublishTargets
-				// appends "SKILL.md" internally via SkillPath().
+				// Path holds just the skill directory name;
+				// ResolveSkillPublishTargets appends "SKILL.md" internally
+				// via SkillPath().
 				curation.Destination.Path = autoName
 			}
 		}
@@ -436,7 +444,10 @@ func (s *Service) buildPublishContents(goCtx context.Context, targets []TargetRe
 		allLearnings = append(allLearnings, existingLearnings...)
 		allLearnings = append(allLearnings, learning)
 
-		area := SkillArea(learning)
+		area := ctx.Area
+		if area == "" {
+			area = SkillArea(learning)
+		}
 		fm := SkillFrontmatter{
 			Name:        SkillName(ctx.ProjectKey, area),
 			Description: BuildDescription(ctx.ProjectKey, area, allLearnings),

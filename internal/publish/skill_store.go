@@ -81,19 +81,30 @@ func SkillArea(learning *domain.Learning) string {
 	return strings.ToLower(sanitized)
 }
 
-// sanitizeAreaName keeps alphanumeric, dash, underscore; replaces spaces with
-// dash; drops everything else.
-func sanitizeAreaName(s string) string {
-	return strings.Map(func(r rune) rune {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
-			return r
-		case r == ' ':
-			return '-'
-		default:
-			return -1
+// ResolveSkillArea returns the skill area for a learning, honoring an explicit
+// curator-provided area when present and falling back to deterministic
+// derivation from retrieval terms otherwise. The explicit area must already be
+// normalized (sanitized + lowercased); this helper re-validates defensively
+// and returns an invalid_argument error if it is non-empty but sanitizes to
+// empty.
+func ResolveSkillArea(learning *domain.Learning, explicitArea string) (string, error) {
+	if explicitArea != "" {
+		area, err := domain.ValidateExplicitArea(explicitArea)
+		if err != nil {
+			return "", err
 		}
-	}, s)
+		if area != "" {
+			return area, nil
+		}
+	}
+	return SkillArea(learning), nil
+}
+
+// sanitizeAreaName keeps alphanumeric, dash, underscore; replaces spaces with
+// dash; drops everything else. Delegates to the canonical domain helper so
+// curate and publish share one implementation.
+func sanitizeAreaName(s string) string {
+	return domain.SanitizeSkillArea(s)
 }
 
 // sanitizeProjectKey replaces dots with dashes in a project key for use in
