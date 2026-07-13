@@ -196,3 +196,37 @@ Strict TDD cycle followed: tests written first → build failed (RED) → produc
 code implemented → all tests pass (GREEN) → refactoring to remove dead code,
 simplify error handling, remove unused functions → all tests still pass.
 - **2026-07-11 rebuild scope**: Batch T02 rebuild repairs FTS transactionally from canonical SQLite tables; the broader `rebuild-index` CLI reconstruction from Markdown records remains deferred until a record parser exists.
+
+## P2 — Explicit skill area in curate_learning
+
+### Persistence decision (no migration)
+
+`Destination` is persisted as a JSON blob in the `curations.destination_json`
+column via `marshalAny(c.Destination)` (internal/storage/repo_curations.go) and
+deserialized via `json.Unmarshal` in `unmarshalDestination`. Adding the
+`Area string json:"area,omitempty"` field to `domain.Destination` therefore
+requires NO SQL migration: the field serializes/deserializes automatically.
+Existing curations without the field unmarshal to `Area: ""` (omitempty →
+automatic-derivation fallback), preserving backward compatibility.
+
+### Design
+
+- `domain.ValidateExplicitArea` + `domain.SanitizeSkillArea` (internal/domain/area.go)
+  centralize area sanitization (alphanumeric, dash, underscore; spaces→dash;
+  lowercase) and validation (max 64 chars; non-empty after sanitize). Shared by
+  curate and publish with no new cross-peer dependency.
+- `curate.CurateInput.Area` flows through `deriveDestination` into
+  `Destination.Area` for skill decisions only.
+- `publish.ResolveSkillArea(learning, explicitArea)` returns the explicit area
+  when present (re-validating defensively) or falls back to `SkillArea(learning)`
+  (the deterministic sorted-terms derivation, unchanged).
+- `TargetContext.Area` carries the resolved area into the content builders so
+  preview and publish use the SAME area for both path and frontmatter.
+- Multi-target (child skill + index + AGENTS.md) activates when the curator set
+  an explicit area OR the stored path is generic/matches the derived name. The
+  explicit area NEVER falls into the single-target legacy path.
+- Preview path-doubling fix: preview previously set `dest.Path = autoName +
+  "/SKILL.md"` while publish set `dest.Path = autoName`; since
+  `ResolveSkillPublishTargets` appends "SKILL.md" itself, preview doubled the
+  path to `autoName/SKILL.md/SKILL.md`. Unified to `autoName` in both so
+  preview == publish.
