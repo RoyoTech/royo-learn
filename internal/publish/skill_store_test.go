@@ -71,7 +71,6 @@ func TestGenerateSkillContent_Basic(t *testing.T) {
 			Rule:         "Always do X before Y.",
 			Procedure:    []string{"Step 1: Check X", "Step 2: Do Y"},
 			CanonExample: "Example context here.",
-			AntiPattern:  "Don't do Z.",
 			Limits:       "Only applies to A and B.",
 		},
 	}
@@ -125,9 +124,6 @@ func TestGenerateSkillContent_Basic(t *testing.T) {
 	}
 	if !strings.Contains(content, "### Ejemplo canónico") {
 		t.Error("body should contain Ejemplo canónico section")
-	}
-	if !strings.Contains(content, "### Anti-patrón") {
-		t.Error("body should contain Anti-patrón section")
 	}
 	if !strings.Contains(content, "### Límites") {
 		t.Error("body should contain Límites section")

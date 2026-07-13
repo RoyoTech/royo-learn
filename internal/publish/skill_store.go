@@ -39,7 +39,6 @@ type SkillSection struct {
 	Rule         string   // reusable_lesson
 	Procedure    []string // recommended_procedure
 	CanonExample string   // derived from context + observation
-	AntiPattern  string   // derived from limits
 	Limits       string
 }
 
@@ -175,13 +174,6 @@ func writeSkillSection(b *strings.Builder, sec SkillSection) {
 		b.WriteString("\n\n")
 	}
 
-	// Anti-pattern
-	if sec.AntiPattern != "" {
-		b.WriteString("### Anti-patrón\n\n")
-		b.WriteString(sec.AntiPattern)
-		b.WriteString("\n\n")
-	}
-
 	// Limits
 	if sec.Limits != "" {
 		b.WriteString("### Límites\n\n")
@@ -198,7 +190,6 @@ func buildSkillSection(learning *domain.Learning) SkillSection {
 		Rule:         learning.ReusableLesson,
 		Procedure:    learning.RecommendedProcedure,
 		CanonExample: fmt.Sprintf("Contexto: %s\n\nObservación: %s", learning.Context, learning.Observation),
-		AntiPattern:  "", // Will be populated from curation/learning analysis
 		Limits:       learning.Limits,
 	}
 }
@@ -463,9 +454,6 @@ func parseSkillSections(content string) []SkillSection {
 		case strings.HasPrefix(trimmed, "### Ejemplo canónico"):
 			currentField = &current.CanonExample
 			current.CanonExample = ""
-		case strings.HasPrefix(trimmed, "### Anti-patrón"):
-			currentField = &current.AntiPattern
-			current.AntiPattern = ""
 		case strings.HasPrefix(trimmed, "### Límites"):
 			currentField = &current.Limits
 			current.Limits = ""

@@ -7,20 +7,16 @@ import (
 	"agent-royo-learn/internal/domain"
 )
 
-// P3 — [MEDIUM] "### Anti-patrón" never populated (dead code).
+// P3 — [MEDIUM] "### Anti-patrón" section removed (dead code eliminated).
 //
-// buildSkillSection sets AntiPattern: "" with a TODO; writeSkillSection only
-// emits the section if non-empty. So it is dead code.
-//
-// This test documents the dead-code state: generates skill content from a
-// SkillSection and asserts the output does NOT contain the literal
-// "### Anti-patrón" (desired behavior after fix = section removed, OR section
-// populated from limits/curation).
-//
-// This test PASSES vacuously: it confirms the section is never emitted today,
-// which is the dead-code state to be removed/fixed.
-func TestP3_AntiPatternDeadCodeNotEmitted(t *testing.T) {
-	// buildSkillSection always sets AntiPattern: "" (skill_store.go:203).
+// buildSkillSection used to set AntiPattern: "" with a TODO; writeSkillSection
+// only emitted the section if non-empty. The field and section have been
+// removed from SkillSection, writeSkillSection, parseSkillSections, and
+// buildSkillSection. This test verifies the removal is complete: the generated
+// content must NOT contain "### Anti-patrón" and the SkillSection struct must
+// not have an AntiPattern field (enforced at compile time — if the field
+// existed, this test would reference it).
+func TestP3_AntiPatternSectionRemoved(t *testing.T) {
 	learning := &domain.Learning{
 		ID:              "019f588c-0861-7350-bf36-87d7b74d91d0",
 		Title:           "Test",
@@ -30,10 +26,6 @@ func TestP3_AntiPatternDeadCodeNotEmitted(t *testing.T) {
 		Observation:     "obs",
 	}
 	sec := buildSkillSection(learning)
-
-	if sec.AntiPattern != "" {
-		t.Errorf("P3: buildSkillSection should set AntiPattern to \"\" (dead code), got %q", sec.AntiPattern)
-	}
 
 	fm := SkillFrontmatter{
 		Name:        "test-area",
@@ -45,12 +37,13 @@ func TestP3_AntiPatternDeadCodeNotEmitted(t *testing.T) {
 	}
 	content := GenerateSkillContent(fm, []SkillSection{sec})
 
-	// Desired (after fix): section is removed OR populated. Today it is absent.
 	if strings.Contains(content, "### Anti-patrón") {
-		t.Errorf("P3: output should NOT contain ### Anti-patrón (dead code) — got:\n%s", content)
+		t.Errorf("P3: output should NOT contain ### Anti-patrón — section was removed:\n%s", content)
 	}
 
-	// Honest report: this test passes vacuously — it confirms the section is
-	// never emitted, which documents the dead-code state.
-	t.Log("P3 test passes vacuously; confirms section is never emitted — dead code to be removed.")
+	// Verify the Limits section IS still present (sanity check — we only
+	// removed Anti-patrón, not Límites).
+	if !strings.Contains(content, "### Límites") {
+		t.Errorf("P3: output should still contain ### Límites — we only removed Anti-patrón:\n%s", content)
+	}
 }
