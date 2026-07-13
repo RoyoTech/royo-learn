@@ -258,6 +258,7 @@ type Destination struct {
 	Root     string          `json:"root"`
 	Path     string          `json:"path"`
 	Required bool            `json:"required"`
+	Area     string          `json:"area,omitempty"`
 }
 
 // Evidence is a piece of supporting evidence attached to a learning.
