@@ -273,10 +273,19 @@ royo-learn metrics --learning-id "<learning-id>" --json
 royo-learn e2e --temp
 ```
 
+La inicialización es obligatoria una sola vez por cada raíz de proyecto
+independiente. Los comandos ejecutados en subdirectorios descubren
+`<root>/.royo-learn/config.yaml` recorriendo los directorios superiores, por lo
+que no se debe inicializar cada subdirectorio. Confirme el almacén con
+`royo-learn doctor --project-root /ruta/a/tu/proyecto --json`. Si MCP devuelve
+`project_not_found`, ejecute `royo-learn init --project-root <root>` para la raíz
+prevista y vuelva a ejecutar doctor.
+
 ## Configuración del servidor MCP
 
-El comando `setup` registra royo-learn como servidor MCP e instala las Skills
-del proyecto en Claude Code, Codex CLI y OpenCode — todo en un solo paso:
+Después de la inicialización obligatoria, el comando opcional `setup install`
+registra royo-learn como servidor MCP e instala las Skills del proyecto en Claude
+Code, Codex CLI y OpenCode. Este comando nunca crea el almacén del proyecto:
 
 ```bash
 # Ver estado actual
@@ -335,7 +344,10 @@ LLM + Skill → propuesta semántica
 royo-learn  → garantía operacional
 ```
 
-Las tres Skills que definen qué significa una experiencia:
+`royo-learn-onboarding` es la Skill operativa para inicializar, ejecutar doctor y
+configurar agentes de forma opcional. Después de confirmar que el proyecto está
+sano, transfiere el control a `capture-learning`. Es distinta de las tres Skills
+del ciclo semántico que definen qué significa una experiencia:
 
 1. `capture-learning`
 2. `curate-learning`

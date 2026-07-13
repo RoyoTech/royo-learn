@@ -9,10 +9,16 @@ Gentle-AI sigue siendo el configurador. Agent Royo Learn se instala como compañ
 Instalar:
 
 ```text
+skills/royo-learn-onboarding/SKILL.md
 skills/capture-learning/SKILL.md
 skills/curate-learning/SKILL.md
 skills/publish-learning/SKILL.md
 ```
+
+`royo-learn-onboarding` es una Skill operativa: localiza la raíz, exige una
+inicialización, ejecuta doctor y ofrece la instalación de integraciones. Después
+transfiere el control a `capture-learning`. No forma parte de las tres Skills del
+ciclo semántico: `capture-learning`, `curate-learning` y `publish-learning`.
 
 Después:
 
@@ -140,6 +146,20 @@ e instala las Skills del proyecto en los tres agentes soportados:
 
 ### Uso
 
+Cada raíz de proyecto independiente debe inicializarse una sola vez antes de
+usar MCP o instalar integraciones:
+
+```bash
+royo-learn init --project-root <root>
+royo-learn doctor --project-root <root> --json
+```
+
+El descubrimiento recorre directorios superiores desde el directorio de trabajo,
+por lo que una inicialización cubre todos los subdirectorios de esa raíz. Si MCP
+devuelve `project_not_found`, ejecute `init` para la raíz prevista y confirme el
+resultado con doctor. `setup install` es opcional después de `init`: registra MCP
+e instala Skills, pero nunca crea `<root>/.royo-learn/`.
+
 ```bash
 # Ver qué agentes están instalados y si royo-learn ya está registrado
 royo-learn setup status --json
@@ -180,3 +200,8 @@ royo-learn setup uninstall --agent all
 - **Detección**: `setup status` detecta si el binario del agente está en PATH y si el config existe.
 - **Codex**: prefiere `codex mcp add` (CLI nativa) sobre edición manual del TOML; hace backup de `config.toml` antes.
 - **Sin red**: todo es filesystem local; no descarga nada.
+
+La cobertura de instalación ejecuta `setup.InstallSkills` contra el árbol real
+`skills/` del repositorio y verifica el contenido instalado de
+`royo-learn-onboarding`, incluido el orden `init` obligatorio antes de `setup
+install` opcional.
