@@ -166,7 +166,7 @@ func TestGenerateSkillContent_NoProcedure(t *testing.T) {
 	}
 
 	fm := SkillFrontmatter{
-		Name:        "proj-area", Description: "desc",
+		Name: "proj-area", Description: "desc",
 		Source: "royo-learn", Project: "proj",
 		LearningIDs: []domain.LearningID{"id-1"}, UpdatedAt: "2026-07-12",
 	}
@@ -182,13 +182,13 @@ func TestGenerateSkillContent_NoProcedure(t *testing.T) {
 func TestMergeLearningIntoSections_NewSection(t *testing.T) {
 	existing := []SkillSection{}
 	learning := &domain.Learning{
-		ID:              "new-id",
-		Title:           "New Rule",
-		ReusableLesson:  "Always test first.",
+		ID:                   "new-id",
+		Title:                "New Rule",
+		ReusableLesson:       "Always test first.",
 		RecommendedProcedure: []string{"Run tests", "Fix bugs"},
-		Limits:          "Only in dev.",
-		Context:         "Test context",
-		Observation:     "Test observation",
+		Limits:               "Only in dev.",
+		Context:              "Test context",
+		Observation:          "Test observation",
 	}
 
 	merged := MergeLearningIntoSections(existing, learning)
@@ -208,12 +208,12 @@ func TestMergeLearningIntoSections_UpdateExisting(t *testing.T) {
 		{LearningID: "id-1", Title: "Old Title", Rule: "Old rule."},
 	}
 	learning := &domain.Learning{
-		ID:              "id-1",
-		Title:           "Updated Title",
-		ReusableLesson:  "Updated rule.",
+		ID:                   "id-1",
+		Title:                "Updated Title",
+		ReusableLesson:       "Updated rule.",
 		RecommendedProcedure: []string{"New step"},
-		Context:         "New context",
-		Observation:     "New observation",
+		Context:              "New context",
+		Observation:          "New observation",
 	}
 
 	merged := MergeLearningIntoSections(existing, learning)
@@ -234,12 +234,12 @@ func TestMergeLearningIntoSections_IdempotentRePublish(t *testing.T) {
 		{LearningID: "id-1", Title: "Rule A", Rule: "A body."},
 	}
 	learning := &domain.Learning{
-		ID:              "id-1",
-		Title:           "Rule A",
-		ReusableLesson:  "A body.",
+		ID:                   "id-1",
+		Title:                "Rule A",
+		ReusableLesson:       "A body.",
 		RecommendedProcedure: []string{},
-		Context:         "ctx",
-		Observation:     "obs",
+		Context:              "ctx",
+		Observation:          "obs",
 	}
 
 	merged := MergeLearningIntoSections(sections, learning)
@@ -444,13 +444,13 @@ Old rule.
 
 	// Now "re-publish" with updated learning.
 	learning := &domain.Learning{
-		ID:              "id-1",
-		Title:           "Updated Title",
-		ReusableLesson:  "Updated rule.",
+		ID:                   "id-1",
+		Title:                "Updated Title",
+		ReusableLesson:       "Updated rule.",
 		RecommendedProcedure: []string{"New step", "Extra step"},
-		Limits:          "New limits.",
-		Context:         "ctx",
-		Observation:     "obs",
+		Limits:               "New limits.",
+		Context:              "ctx",
+		Observation:          "obs",
 	}
 
 	merged := MergeLearningIntoSections(sections, learning)
@@ -639,13 +639,13 @@ func TestBuildDescription(t *testing.T) {
 
 func TestBuildSkillSection(t *testing.T) {
 	learning := &domain.Learning{
-		ID:              "test-id",
-		Title:           "Test Learning",
-		ReusableLesson:  "Always validate input.",
+		ID:                   "test-id",
+		Title:                "Test Learning",
+		ReusableLesson:       "Always validate input.",
 		RecommendedProcedure: []string{"Step 1", "Step 2"},
-		Limits:          "Only for web forms.",
-		Context:         "Web development",
-		Observation:     "Users submitted malformed data.",
+		Limits:               "Only for web forms.",
+		Context:              "Web development",
+		Observation:          "Users submitted malformed data.",
 	}
 
 	sec := buildSkillSection(learning)

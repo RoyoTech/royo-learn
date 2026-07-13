@@ -18,12 +18,12 @@ import (
 // existed, this test would reference it).
 func TestP3_AntiPatternSectionRemoved(t *testing.T) {
 	learning := &domain.Learning{
-		ID:              "019f588c-0861-7350-bf36-87d7b74d91d0",
-		Title:           "Test",
-		ReusableLesson:  "Rule.",
-		Limits:          "Some limits.",
-		Context:         "ctx",
-		Observation:     "obs",
+		ID:             "019f588c-0861-7350-bf36-87d7b74d91d0",
+		Title:          "Test",
+		ReusableLesson: "Rule.",
+		Limits:         "Some limits.",
+		Context:        "ctx",
+		Observation:    "obs",
 	}
 	sec := buildSkillSection(learning)
 
