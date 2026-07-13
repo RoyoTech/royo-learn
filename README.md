@@ -183,6 +183,15 @@ Or with a version:
 
 The binary is installed to `%LOCALAPPDATA%\royo-learn\bin\royo-learn.exe`.
 
+To update an existing installation, run:
+
+```bash
+royo-learn self-update              # upgrade to latest
+royo-learn self-update --check      # check for updates without downloading
+royo-learn self-update --check --json
+royo-learn self-update --version v0.1.9  # install a specific version
+```
+
 > **Note**: the PowerShell script requires **PowerShell**, not Git Bash or WSL bash.
 > On WSL, use the Linux instructions above.
 
@@ -204,6 +213,9 @@ make quality     # Run fmt, test, vet, build
 ```bash
 # Check version
 royo-learn version --json
+
+# Update to the latest release
+royo-learn self-update
 
 # Initialize a project
 royo-learn init --project-root /path/to/your/project
