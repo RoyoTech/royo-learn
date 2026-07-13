@@ -10,11 +10,16 @@ import (
 	"strings"
 	"testing"
 
+	"agent-royo-learn/internal/project"
 	"agent-royo-learn/internal/setup"
 )
 
 func TestMCPServe_UninitializedProjectRequiresInit(t *testing.T) {
 	root := t.TempDir()
+	canonicalRoot, err := project.Canonicalize(root)
+	if err != nil {
+		t.Fatalf("canonicalize temporary project root: %v", err)
+	}
 	var stdout, stderr bytes.Buffer
 
 	exitCode := run([]string{"mcp-serve", "--project-root", root}, &stdout, &stderr)
@@ -34,8 +39,8 @@ func TestMCPServe_UninitializedProjectRequiresInit(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		fmt.Sprintf("no project marker found at %s", root),
-		fmt.Sprintf("royo-learn init --project-root %s", root),
+		fmt.Sprintf("no project marker found at %s", canonicalRoot),
+		fmt.Sprintf("royo-learn init --project-root %s", canonicalRoot),
 	} {
 		if !strings.Contains(diagnostic.Message, want) {
 			t.Errorf("mcp-serve message missing %q; got: %s", want, diagnostic.Message)
