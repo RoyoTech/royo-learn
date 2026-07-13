@@ -27,8 +27,9 @@ import (
 //
 // This test uses a real SQLite DB, real capture/curate/publish services, and
 // real file I/O — no mocks. It mirrors the actual user flow:
-//   capture → curate (approve) → preview → publish (learning A)
-//   capture → curate (approve) → preview → publish (learning B, same skill)
+//
+//	capture → curate (approve) → preview → publish (learning A)
+//	capture → curate (approve) → preview → publish (learning B, same skill)
 //
 // The second publish triggers buildPublishContents, which (before the fix)
 // parsed the existing body with the defective parseSkillSections and lost A's
