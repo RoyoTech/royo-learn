@@ -50,15 +50,16 @@ func TestSkillArea_SpecialChars(t *testing.T) {
 
 func TestSkillName(t *testing.T) {
 	name := SkillName("padreseducadores.org", "dashboard-datos")
-	if name != "padreseducadores.org-dashboard-datos" {
-		t.Errorf("SkillName = %q", name)
+	// Dots in project key are replaced with dashes to avoid dots in folder names.
+	if name != "padreseducadores-org-dashboard-datos" {
+		t.Errorf("SkillName = %q, want %q", name, "padreseducadores-org-dashboard-datos")
 	}
 }
 
 func TestIndexSkillName(t *testing.T) {
 	name := IndexSkillName("padreseducadores.org")
-	if name != "padreseducadores.org-conocimiento" {
-		t.Errorf("IndexSkillName = %q, want padreseducadores.org-conocimiento", name)
+	if name != "padreseducadores-org-conocimiento" {
+		t.Errorf("IndexSkillName = %q, want padreseducadores-org-conocimiento", name)
 	}
 }
 

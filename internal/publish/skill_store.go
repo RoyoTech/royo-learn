@@ -20,8 +20,6 @@ const (
 	SkillsDir = "skills"
 	// SkillIndexSuffix is the suffix appended to the project key for the index skill.
 	SkillIndexSuffix = "-conocimiento"
-	// AgentsRefLine is the stable line inserted once into AGENTS.md/CLAUDE.md.
-	AgentsRefLine = "<!-- royo-learn:managed start -->\n<!-- royo-learn:managed end -->\n"
 	// agentsLineTemplate is the stable reference line injected into AGENTS.md.
 	agentsLineTemplate = "> 📚 **Conocimiento del proyecto**: cargá la skill `%s-conocimiento` para ver el catálogo de reglas y procedimientos capturados."
 	// managedRefBlockTemplate is the block injected via managed blocks.
@@ -98,14 +96,23 @@ func sanitizeAreaName(s string) string {
 	}, s)
 }
 
+// sanitizeProjectKey replaces dots with dashes in a project key for use in
+// skill names and directory names. This avoids dots in folder paths like
+// skills/padreseducadores.org-dashboard/ → skills/padreseducadores-org-dashboard/.
+func sanitizeProjectKey(projectKey string) string {
+	return strings.ReplaceAll(projectKey, ".", "-")
+}
+
 // SkillName builds a skill name from project key and area.
+// Dots in the project key are replaced with dashes to avoid dots in directory names.
 func SkillName(projectKey, area string) string {
-	return fmt.Sprintf("%s-%s", projectKey, area)
+	return fmt.Sprintf("%s-%s", sanitizeProjectKey(projectKey), area)
 }
 
 // IndexSkillName builds the index skill name from the project key.
+// Dots in the project key are replaced with dashes.
 func IndexSkillName(projectKey string) string {
-	return fmt.Sprintf("%s%s", projectKey, SkillIndexSuffix)
+	return fmt.Sprintf("%s%s", sanitizeProjectKey(projectKey), SkillIndexSuffix)
 }
 
 // SkillPath returns the relative path for a skill file from project root.
@@ -537,7 +544,8 @@ func DiscoverChildSkills(projectRoot, projectKey string) ([]IndexEntry, error) {
 		return nil, fmt.Errorf("DiscoverChildSkills: read dir: %w", err)
 	}
 
-	prefix := projectKey + "-"
+	safeKey := sanitizeProjectKey(projectKey)
+	prefix := safeKey + "-"
 	var result []IndexEntry
 
 	for _, entry := range entries {
@@ -549,7 +557,7 @@ func DiscoverChildSkills(projectRoot, projectKey string) ([]IndexEntry, error) {
 		if name == IndexSkillName(projectKey) {
 			continue
 		}
-		// Only match skills belonging to this project.
+		// Only match skills belonging to this project (sanitized key).
 		if !strings.HasPrefix(name, prefix) {
 			continue
 		}
