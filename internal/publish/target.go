@@ -8,10 +8,19 @@ import (
 	"agent-royo-learn/internal/domain"
 )
 
+// TargetContext holds additional context for skill target resolution.
+type TargetContext struct {
+	ProjectKey     string
+	NeedAgentsHook bool
+}
+
 // ResolveTarget determines where a learning would be published based on its
 // curation destination and scope. It returns the target root, relative path,
 // operation type, and whether the target file currently exists.
-func ResolveTarget(projectRoot string, curation *domain.Curation) ([]TargetResolution, error) {
+// For DestSkill, it optionally uses TargetContext to resolve all related targets
+// (child skill, index, agents hook). When ctx is nil, falls back to single-target
+// for backward compatibility.
+func ResolveTarget(projectRoot string, curation *domain.Curation, ctx *TargetContext) ([]TargetResolution, error) {
 	if curation == nil {
 		return nil, domain.NewValidationError(domain.ErrInvalidArgument, "curation is nil for target resolution")
 	}
@@ -25,7 +34,16 @@ func ResolveTarget(projectRoot string, curation *domain.Curation) ([]TargetResol
 
 	switch dest.Type {
 	case domain.DestSkill:
-		targets = append(targets, resolveSkillTarget(projectRoot, dest))
+		if ctx != nil && ctx.ProjectKey != "" {
+			// Multi-target resolution for skills.
+			skillTargets, err := ResolveSkillPublishTargets(projectRoot, dest, ctx.ProjectKey, ctx.NeedAgentsHook)
+			if err != nil {
+				return nil, err
+			}
+			targets = skillTargets.Flatten()
+		} else {
+			targets = append(targets, resolveSkillTarget(projectRoot, dest))
+		}
 	case domain.DestAgentsRule:
 		targets = append(targets, resolveAgentsTarget(projectRoot, dest))
 	case domain.DestProject:

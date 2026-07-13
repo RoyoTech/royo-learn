@@ -38,7 +38,7 @@ func TestResolveTarget_Skill(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	targets, err := ResolveTarget(tmpDir, curation)
+	targets, err := ResolveTarget(tmpDir, curation, nil)
 	if err != nil {
 		t.Fatalf("ResolveTarget: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestResolveTarget_AgentsRule(t *testing.T) {
 		},
 	}
 
-	targets, err := ResolveTarget(tmpDir, curation)
+	targets, err := ResolveTarget(tmpDir, curation, nil)
 	if err != nil {
 		t.Fatalf("ResolveTarget: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestResolveTarget_PathEscapesRoot(t *testing.T) {
 		},
 	}
 
-	_, err := ResolveTarget(tmpDir, curation)
+	_, err := ResolveTarget(tmpDir, curation, nil)
 	if err == nil {
 		t.Fatal("expected path escape error, got nil")
 	}
@@ -114,7 +114,7 @@ func TestResolveTarget_NilDestination(t *testing.T) {
 		Destination: nil,
 	}
 
-	_, err := ResolveTarget("/tmp", curation)
+	_, err := ResolveTarget("/tmp", curation, nil)
 	if err == nil {
 		t.Fatal("expected error for nil destination")
 	}
@@ -1292,7 +1292,7 @@ func TestResolveTarget_Project(t *testing.T) {
 		},
 	}
 
-	targets, err := ResolveTarget(tmpDir, curation)
+	targets, err := ResolveTarget(tmpDir, curation, nil)
 	if err != nil {
 		t.Fatalf("ResolveTarget: %v", err)
 	}
@@ -1318,7 +1318,7 @@ func TestResolveTarget_Shared(t *testing.T) {
 		},
 	}
 
-	targets, err := ResolveTarget(tmpDir, curation)
+	targets, err := ResolveTarget(tmpDir, curation, nil)
 	if err != nil {
 		t.Fatalf("ResolveTarget: %v", err)
 	}
@@ -1341,7 +1341,7 @@ func TestResolveTarget_UnknownType(t *testing.T) {
 		},
 	}
 
-	_, err := ResolveTarget(tmpDir, curation)
+	_, err := ResolveTarget(tmpDir, curation, nil)
 	if err == nil {
 		t.Fatal("expected error for unknown destination type")
 	}
@@ -1400,7 +1400,7 @@ func TestUTCNowPublish(t *testing.T) {
 // --- Target resolution edge cases ---------------------------------
 
 func TestResolveTarget_NilCuration(t *testing.T) {
-	_, err := ResolveTarget("/tmp", nil)
+	_, err := ResolveTarget("/tmp", nil, nil)
 	if err == nil {
 		t.Fatal("expected error for nil curation")
 	}
@@ -1422,7 +1422,7 @@ func TestResolveTarget_SkillWithExistingFile(t *testing.T) {
 		},
 	}
 
-	targets, err := ResolveTarget(tmpDir, curation)
+	targets, err := ResolveTarget(tmpDir, curation, nil)
 	if err != nil {
 		t.Fatalf("ResolveTarget: %v", err)
 	}
