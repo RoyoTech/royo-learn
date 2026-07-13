@@ -230,3 +230,70 @@ automatic-derivation fallback), preserving backward compatibility.
   `ResolveSkillPublishTargets` appends "SKILL.md" itself, preview doubled the
   path to `autoName/SKILL.md/SKILL.md`. Unified to `autoName` in both so
   preview == publish.
+
+## P3 — Curate auto-derives skill area from retrieval_terms
+
+### Commit
+
+`0b31931` — `feat(curate): auto-derive skill area from retrieval_terms when no explicit area`
+
+### What changed
+
+- `domain.DeriveSkillArea(learning)` (internal/domain/area.go) is now the
+  single source of truth for deterministic area derivation: sorts ALL
+  retrieval terms case-insensitively, takes the first, sanitizes and
+  lowercases it, falls back to `"general"` when nil/no terms/empty-after-sanitize.
+- `curate.Curate` derives and persists `Destination.Area` at curate time
+  when no explicit area is provided for skill decisions
+  (`CurationApproveNewSkill` / `CurationApproveSkillUpdate`). New helper
+  `isSkillDecision` identifies skill-targeted decisions.
+- `publish.SkillArea` now delegates to `domain.DeriveSkillArea` — one
+  implementation, no duplication.
+- Integration test `TestCaptureCuratePublishFlow` updated: publish now
+  writes to `skills/{projectKey}-{area}/SKILL.md` (multi-target) instead
+  of `skills/{learningID}/SKILL.md` (single-target).
+
+### Side effect (intentional)
+
+Persisting the derived area at curate time means `curation.Destination.Area`
+is non-empty when publish reads it. In `publish_op.go`, `explicitArea :=
+curation.Destination.Area != ""` therefore evaluates to `true`, activating
+multi-target publishing (child skill + index + AGENTS.md hook). Skills are
+now grouped by area, not one-per-learning. This aligns with P2's multi-target
+design.
+
+### Tests
+
+- 10 new `DeriveSkillArea` tests (internal/domain/area_test.go)
+- 4 new curate tests: derived area persisted, explicit area preserved,
+  non-skill decisions leave area empty (internal/curate/curate_test.go)
+- All existing publish tests pass unchanged (delegation preserves behavior)
+
+## Session handoff — 2026-07-13
+
+### State
+
+- `main` is at `0b31931`, pushed to `origin/main`.
+- All tests pass except `internal/buildinfo` (preexisting Windows AV issue:
+  "Access is denied" when executing the test binary from temp — unrelated
+  to any code change, fails on clean checkout too).
+- `go vet ./...` clean.
+- `.royo-learn/` in the repo root is untracked (local config + DB, gitignored
+  by `.royo-learn/.gitignore`).
+
+### Also done this session
+
+- **padreseducadores.org MCP activated**: created `.royo-learn/config.yaml`
+  + `.royo-learn/.gitignore` in the padreseducadores.org repo. Committed as
+  `9f49b74` and pushed to `origin/main`. `royo-learn doctor --json` returns
+  `ok: true`. The royo-learn MCP is registered globally in OpenCode's
+  `opencode.json` (line 338), so tools are available in any OpenCode session;
+  per-project activation only needed the config file.
+
+### Next steps
+
+- Consider `royo-learn setup install` in padreseducadores.org to also register
+  the MCP in Codex (`.codex/config.toml`) — currently only OpenCode has it.
+- Remaining TASKS.md items per the implementation plan.
+- The `internal/buildinfo` test failure on Windows should be investigated
+  separately (AV exclusions or a different test temp strategy).
