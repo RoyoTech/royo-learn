@@ -53,17 +53,40 @@ type SkillFrontmatter struct {
 }
 
 // SkillArea derives the skill area name from a learning's retrieval terms.
-// Uses the first retrieval term as the primary area indicator, sanitized for filenames.
+// The area is deterministic and stable: it sorts ALL retrieval terms
+// alphabetically (case-insensitive) and picks the first as the representative.
+// This guarantees that two learnings with the same terms in different order
+// resolve to the SAME area, satisfying the "one skill per area" rule from
+// the design plan (docs/PLAN-publicacion-skills.md).
+//
+// Future improvement (option a): accept an explicit area override from
+// curate_learning/publish, letting the curator decide the destination skill.
+// Until that field exists on Destination/Curation, deterministic derivation
+// from the complete term set is the safe default.
 func SkillArea(learning *domain.Learning) string {
 	if learning == nil || len(learning.RetrievalTerms) == 0 {
 		return "general"
 	}
 
-	// Use the first retrieval term as the primary area.
-	best := learning.RetrievalTerms[0]
+	// Copy and sort case-insensitively.
+	terms := make([]string, len(learning.RetrievalTerms))
+	copy(terms, learning.RetrievalTerms)
+	sort.Slice(terms, func(i, j int) bool {
+		return strings.ToLower(terms[i]) < strings.ToLower(terms[j])
+	})
 
-	// Sanitize: keep alphanumeric, dash, underscore; replace spaces with dash.
-	sanitized := strings.Map(func(r rune) rune {
+	best := terms[0]
+	sanitized := sanitizeAreaName(best)
+	if sanitized == "" {
+		return "general"
+	}
+	return strings.ToLower(sanitized)
+}
+
+// sanitizeAreaName keeps alphanumeric, dash, underscore; replaces spaces with
+// dash; drops everything else.
+func sanitizeAreaName(s string) string {
+	return strings.Map(func(r rune) rune {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
 			return r
@@ -72,13 +95,7 @@ func SkillArea(learning *domain.Learning) string {
 		default:
 			return -1
 		}
-	}, best)
-
-	if sanitized == "" {
-		return "general"
-	}
-
-	return strings.ToLower(sanitized)
+	}, s)
 }
 
 // SkillName builds a skill name from project key and area.
@@ -263,7 +280,7 @@ func GenerateIndexContent(projectKey string, entries []IndexEntry) string {
 	b.Write(yamlBytes)
 	b.WriteString("---\n\n")
 	b.WriteString(fmt.Sprintf("# %s — Catálogo de conocimiento\n\n", projectKey))
-	b.WriteString("Skills temáticas generadas automáticamente por royo-learn. Cada una contiene reglas, procedimientos, ejemplos y anti-patrones capturados del desarrollo.\n\n")
+	b.WriteString("Skills temáticas generadas automáticamente por royo-learn. Cada una contiene reglas, procedimientos, ejemplos y límites capturados del desarrollo.\n\n")
 
 	if len(entries) == 0 {
 		b.WriteString("_(sin skills hijas todavía — publicá tu primer learning con destino `skill`)_\n")

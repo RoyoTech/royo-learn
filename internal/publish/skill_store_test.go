@@ -16,9 +16,10 @@ func TestSkillArea_FromRetrievalTerms(t *testing.T) {
 		RetrievalTerms: []string{"dashboard_data_cursos", "distribución fechas", "cadena continua Unidad Test"},
 	}
 	area := SkillArea(learning)
-	// Should pick the longest/most specific term.
-	if area != "dashboard_data_cursos" {
-		t.Errorf("SkillArea = %q, want %q", area, "dashboard_data_cursos")
+	// Should pick the alphabetically-first term (case-insensitive sort),
+	// then sanitize: "cadena continua Unidad Test" → "cadena-continua-unidad-test".
+	if area != "cadena-continua-unidad-test" {
+		t.Errorf("SkillArea = %q, want %q", area, "cadena-continua-unidad-test")
 	}
 }
 
