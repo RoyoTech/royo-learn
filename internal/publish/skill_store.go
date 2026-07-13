@@ -62,23 +62,7 @@ type SkillFrontmatter struct {
 // Until that field exists on Destination/Curation, deterministic derivation
 // from the complete term set is the safe default.
 func SkillArea(learning *domain.Learning) string {
-	if learning == nil || len(learning.RetrievalTerms) == 0 {
-		return "general"
-	}
-
-	// Copy and sort case-insensitively.
-	terms := make([]string, len(learning.RetrievalTerms))
-	copy(terms, learning.RetrievalTerms)
-	sort.Slice(terms, func(i, j int) bool {
-		return strings.ToLower(terms[i]) < strings.ToLower(terms[j])
-	})
-
-	best := terms[0]
-	sanitized := sanitizeAreaName(best)
-	if sanitized == "" {
-		return "general"
-	}
-	return strings.ToLower(sanitized)
+	return domain.DeriveSkillArea(learning)
 }
 
 // ResolveSkillArea returns the skill area for a learning, honoring an explicit

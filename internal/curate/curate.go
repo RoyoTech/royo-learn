@@ -93,6 +93,14 @@ func (s *Service) Curate(ctx context.Context, projectID domain.ProjectID, input 
 				input.LearningID, learning.ProjectID, projectID))
 	}
 
+	// For skill decisions without an explicit curator-provided area, derive
+	// one deterministically from the learning's retrieval terms so the curated
+	// destination carries a concrete area instead of deferring derivation to
+	// publish time.
+	if normalizedArea == "" && isSkillDecision(input.Decision) {
+		normalizedArea = domain.DeriveSkillArea(learning)
+	}
+
 	// If approving, check evidence threshold first (before deriving destination).
 	if isApprovalDecision(input.Decision) {
 		if err := s.checkEvidenceThreshold(ctx, learning); err != nil {
@@ -226,6 +234,12 @@ func decisionToStatus(d domain.CurationDecision) (domain.LearningStatus, error) 
 		return "", domain.NewValidationError(domain.ErrInvalidArgument,
 			fmt.Sprintf("unknown curation decision: %q", d))
 	}
+}
+
+// isSkillDecision returns true if the decision targets a skill destination
+// (new skill or skill update), where an area is meaningful.
+func isSkillDecision(d domain.CurationDecision) bool {
+	return d == domain.CurationApproveNewSkill || d == domain.CurationApproveSkillUpdate
 }
 
 // isApprovalDecision returns true if the decision is an approval type.

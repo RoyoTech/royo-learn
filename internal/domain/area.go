@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -28,6 +29,27 @@ func SanitizeSkillArea(s string) string {
 // empty input is valid and returns "" (meaning: derive automatically). A
 // non-empty input that is empty after sanitizing, or longer than
 // MaxSkillAreaLength, is an invalid_argument error.
+// DeriveSkillArea deterministically derives a skill area from a learning's
+// retrieval terms. It sorts ALL terms case-insensitively, takes the first,
+// sanitizes and lowercases it, and falls back to "general" when the learning
+// is nil, has no retrieval terms, or the best term sanitizes to empty.
+func DeriveSkillArea(learning *Learning) string {
+	if learning == nil || len(learning.RetrievalTerms) == 0 {
+		return "general"
+	}
+	terms := make([]string, len(learning.RetrievalTerms))
+	copy(terms, learning.RetrievalTerms)
+	sort.Slice(terms, func(i, j int) bool {
+		return strings.ToLower(terms[i]) < strings.ToLower(terms[j])
+	})
+	best := terms[0]
+	sanitized := strings.ToLower(SanitizeSkillArea(best))
+	if sanitized == "" {
+		return "general"
+	}
+	return sanitized
+}
+
 func ValidateExplicitArea(area string) (string, error) {
 	if area == "" {
 		return "", nil

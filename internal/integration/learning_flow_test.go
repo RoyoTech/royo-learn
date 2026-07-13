@@ -130,7 +130,11 @@ func TestCaptureCuratePublishFlow(t *testing.T) {
 		t.Fatalf("publication status = %q, want %q", published.Publication.Status, domain.PubStatusCompleted)
 	}
 
-	targetPath := filepath.Join(projectRoot, destination.Root, destination.Path)
+	// After curate derives the area from retrieval terms, publish activates
+	// multi-target and writes the skill to skills/{projectKey}-{area}/SKILL.md
+	// instead of the learningID-based single-target path.
+	targetPath := filepath.Join(projectRoot,
+		publish.SkillPath(publish.SkillName(project.ProjectKey, destination.Area)))
 	if _, err := os.Stat(targetPath); err != nil {
 		t.Fatalf("published target %q: %v", targetPath, err)
 	}

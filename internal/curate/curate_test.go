@@ -475,6 +475,266 @@ func TestCurateApproveNeedsEvidenceStatus(t *testing.T) {
 	}
 }
 
+// saveTestSkillLearning inserts a learning destined for a skill, with
+// retrieval terms, so DeriveSkillArea has input to work with. Returns it.
+func saveTestSkillLearning(t *testing.T, db *storage.DB, proj *domain.Project, retrievalTerms []string) *domain.Learning {
+	t.Helper()
+
+	now := time.Now().UTC()
+	ctx := context.Background()
+	learning := &domain.Learning{
+		ID:                  domain.LearningID(uuid.Must(uuid.NewV7()).String()),
+		ProjectID:           proj.ID,
+		Status:              domain.StatusCaptured,
+		Type:                domain.TypeProcedure,
+		Title:               "Test Skill Learning for Curation",
+		Context:             "Testing skill area derivation at curate time",
+		Observation:         "The curated destination should carry a concrete area",
+		ReusableLesson:      "Derive the area deterministically from retrieval terms",
+		ScopeGuess:          domain.ScopeProject,
+		Confidence:          domain.ConfidenceHigh,
+		EvidenceLevel:       domain.EvidenceModerate,
+		ProposedDestination: domain.DestSkill,
+		RetrievalTerms:      retrievalTerms,
+		NormalizedHash:      "hash-skill-curate-test",
+		Fingerprint:         "fp-skill-curate-test",
+		Revision:            1,
+		CreatedAt:           now,
+		UpdatedAt:           now,
+	}
+
+	tx, err := db.DB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	if err := storage.SaveLearning(ctx, tx, learning); err != nil {
+		tx.Rollback()
+		t.Fatalf("SaveLearning: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	return learning
+}
+
+func TestCurateApproveNewSkillWithoutAreaDerives(t *testing.T) {
+	t.Parallel()
+
+	db, proj := setupCurateDB(t)
+	terms := []string{"go", "testing"}
+	learning := saveTestSkillLearning(t, db, proj, terms)
+	saveTestEvidence(t, db, learning.ID)
+
+	recordsDir := testutil.TempDir(t)
+	svc := NewService(db, recordsDir)
+
+	input := &CurateInput{
+		LearningID: learning.ID,
+		Decision:   domain.CurationApproveNewSkill,
+		Rationale:  "Skill decision without explicit area should derive one",
+		Actor:      domain.Actor{Kind: "agent", Name: "test-curator", Model: "test-model", SessionID: "sess-001"},
+		// Area left empty: derivation must kick in.
+	}
+
+	if _, err := svc.Curate(context.Background(), proj.ID, input); err != nil {
+		t.Fatalf("Curate: %v", err)
+	}
+
+	// Read back the persisted learning and verify the approved destination
+	// carries the derived area (not empty).
+	ctx := context.Background()
+	tx, err := db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatalf("BeginTx read: %v", err)
+	}
+	defer tx.Rollback()
+
+	updated, err := storage.GetLearning(ctx, tx, learning.ID)
+	if err != nil {
+		t.Fatalf("GetLearning: %v", err)
+	}
+	if updated.ApprovedDestination == nil {
+		t.Fatal("ApprovedDestination is nil after skill approval")
+	}
+	if updated.ApprovedDestination.Type != domain.DestSkill {
+		t.Errorf("ApprovedDestination.Type = %q, want %q", updated.ApprovedDestination.Type, domain.DestSkill)
+	}
+	wantArea := domain.DeriveSkillArea(&domain.Learning{RetrievalTerms: terms})
+	if wantArea == "" {
+		t.Fatalf("test setup: DeriveSkillArea returned empty for terms %v", terms)
+	}
+	if got := updated.ApprovedDestination.Area; got != wantArea {
+		t.Errorf("ApprovedDestination.Area = %q, want derived %q", got, wantArea)
+	}
+	if got := updated.ApprovedDestination.Area; got == "" {
+		t.Error("ApprovedDestination.Area should not be empty for skill decision without explicit area")
+	}
+
+	// The curation record must carry the same derived area.
+	curations, err := storage.ListCurationsByLearning(ctx, tx, learning.ID)
+	if err != nil {
+		t.Fatalf("ListCurationsByLearning: %v", err)
+	}
+	if len(curations) == 0 {
+		t.Fatal("No curation record found")
+	}
+	if curations[0].Destination.Area != wantArea {
+		t.Errorf("Curation.Destination.Area = %q, want %q", curations[0].Destination.Area, wantArea)
+	}
+}
+
+func TestCurateApproveSkillUpdateWithoutAreaDerives(t *testing.T) {
+	t.Parallel()
+
+	db, proj := setupCurateDB(t)
+	terms := []string{"refactor", "hexagonal"}
+	learning := saveTestSkillLearning(t, db, proj, terms)
+	saveTestEvidence(t, db, learning.ID)
+
+	recordsDir := testutil.TempDir(t)
+	svc := NewService(db, recordsDir)
+
+	input := &CurateInput{
+		LearningID: learning.ID,
+		Decision:   domain.CurationApproveSkillUpdate,
+		Rationale:  "Skill update without explicit area should derive one",
+		Actor:      domain.Actor{Kind: "agent", Name: "test-curator", Model: "test-model", SessionID: "sess-001"},
+	}
+
+	if _, err := svc.Curate(context.Background(), proj.ID, input); err != nil {
+		t.Fatalf("Curate: %v", err)
+	}
+
+	ctx := context.Background()
+	tx, err := db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatalf("BeginTx read: %v", err)
+	}
+	defer tx.Rollback()
+
+	updated, err := storage.GetLearning(ctx, tx, learning.ID)
+	if err != nil {
+		t.Fatalf("GetLearning: %v", err)
+	}
+	if updated.ApprovedDestination == nil {
+		t.Fatal("ApprovedDestination is nil after skill-update approval")
+	}
+	wantArea := domain.DeriveSkillArea(&domain.Learning{RetrievalTerms: terms})
+	if got := updated.ApprovedDestination.Area; got != wantArea {
+		t.Errorf("ApprovedDestination.Area = %q, want derived %q", got, wantArea)
+	}
+}
+
+func TestCurateApproveNewSkillWithExplicitAreaPreserved(t *testing.T) {
+	t.Parallel()
+
+	db, proj := setupCurateDB(t)
+	// Terms that would derive to something OTHER than the explicit area.
+	terms := []string{"zzz", "aaa"}
+	learning := saveTestSkillLearning(t, db, proj, terms)
+	saveTestEvidence(t, db, learning.ID)
+
+	recordsDir := testutil.TempDir(t)
+	svc := NewService(db, recordsDir)
+
+	const explicitArea = "custom-area"
+	input := &CurateInput{
+		LearningID: learning.ID,
+		Decision:   domain.CurationApproveNewSkill,
+		Rationale:  "Explicit area must win over derivation",
+		Actor:      domain.Actor{Kind: "agent", Name: "test-curator", Model: "test-model", SessionID: "sess-001"},
+		Area:       explicitArea,
+	}
+
+	if _, err := svc.Curate(context.Background(), proj.ID, input); err != nil {
+		t.Fatalf("Curate: %v", err)
+	}
+
+	ctx := context.Background()
+	tx, err := db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatalf("BeginTx read: %v", err)
+	}
+	defer tx.Rollback()
+
+	updated, err := storage.GetLearning(ctx, tx, learning.ID)
+	if err != nil {
+		t.Fatalf("GetLearning: %v", err)
+	}
+	if updated.ApprovedDestination == nil {
+		t.Fatal("ApprovedDestination is nil after skill approval")
+	}
+	// Explicit area must be preserved (not overridden by derivation).
+	if got := updated.ApprovedDestination.Area; got != explicitArea {
+		t.Errorf("ApprovedDestination.Area = %q, want explicit %q", got, explicitArea)
+	}
+	// Sanity: the derived area would differ, proving explicit won.
+	derived := domain.DeriveSkillArea(&domain.Learning{RetrievalTerms: terms})
+	if derived == explicitArea {
+		t.Fatalf("test setup invalid: derived area %q == explicit %q", derived, explicitArea)
+	}
+}
+
+func TestCurateApproveProjectKnowledgeAreaStaysEmpty(t *testing.T) {
+	t.Parallel()
+
+	db, proj := setupCurateDB(t)
+	// Non-skill decision: area derivation must NOT apply, even with terms.
+	learning := saveTestLearning(t, db, proj, domain.StatusCaptured, domain.EvidenceModerate)
+	learning.RetrievalTerms = []string{"go", "testing"}
+	// Persist the terms update so the loaded learning reflects them.
+	ctx0 := context.Background()
+	tx0, err := db.DB.BeginTx(ctx0, nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	if err := storage.UpdateLearning(ctx0, tx0, learning); err != nil {
+		tx0.Rollback()
+		t.Fatalf("UpdateLearning: %v", err)
+	}
+	if err := tx0.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	saveTestEvidence(t, db, learning.ID)
+
+	recordsDir := testutil.TempDir(t)
+	svc := NewService(db, recordsDir)
+
+	input := &CurateInput{
+		LearningID: learning.ID,
+		Decision:   domain.CurationApproveProjectKnowledge,
+		Rationale:  "Non-skill decision must not derive an area",
+		Actor:      domain.Actor{Kind: "agent", Name: "test-curator", Model: "test-model", SessionID: "sess-001"},
+		// Area left empty: derivation must NOT kick in for non-skill decisions.
+	}
+
+	if _, err := svc.Curate(context.Background(), proj.ID, input); err != nil {
+		t.Fatalf("Curate: %v", err)
+	}
+
+	ctx := context.Background()
+	tx, err := db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatalf("BeginTx read: %v", err)
+	}
+	defer tx.Rollback()
+
+	updated, err := storage.GetLearning(ctx, tx, learning.ID)
+	if err != nil {
+		t.Fatalf("GetLearning: %v", err)
+	}
+	if updated.ApprovedDestination == nil {
+		t.Fatal("ApprovedDestination is nil after project-knowledge approval")
+	}
+	if updated.ApprovedDestination.Type != domain.DestProject {
+		t.Errorf("ApprovedDestination.Type = %q, want %q", updated.ApprovedDestination.Type, domain.DestProject)
+	}
+	if got := updated.ApprovedDestination.Area; got != "" {
+		t.Errorf("ApprovedDestination.Area = %q, want empty (non-skill decision must not derive area)", got)
+	}
+}
+
 func TestDeriveDestination(t *testing.T) {
 	learningID := domain.LearningID("018f-safe-learning-id")
 	tests := []struct {
