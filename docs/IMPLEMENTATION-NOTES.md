@@ -297,3 +297,68 @@ design.
 - Remaining TASKS.md items per the implementation plan.
 - The `internal/buildinfo` test failure on Windows should be investigated
   separately (AV exclusions or a different test temp strategy).
+
+## Publication handoff — 2026-07-13
+
+### Preserved onboarding commits
+
+`main` remains three commits ahead of `origin/main` with the reviewed onboarding
+work unchanged:
+
+1. `3853f1d` — `feat(mcp): surface init/setup prerequisite in server instructions`
+2. `3253709` — `feat(skills): add royo-learn-onboarding skill`
+3. `270f4d3` — `test(mcp): cover project_not_found remediation message`
+
+The publication/documentation delta is uncommitted and unstaged. No push, pull
+request, tag, release, reset, amend, or other GitHub artifact has been created;
+publication remains pending maintainer action.
+
+### Final contract and coverage
+
+- Every independent project root requires one
+  `royo-learn init --project-root <root>` before MCP use. Discovery walks upward
+  from subdirectories.
+- `royo-learn setup install` is optional after initialization and never creates
+  the project store. `royo-learn doctor --project-root <root> --json` confirms
+  the initialized root.
+- `royo-learn-onboarding` owns the operational init/doctor/setup workflow and
+  hands off to `capture-learning`; it is separate from the capture, curate, and
+  publish semantic lifecycle Skills.
+- The real repository `skills/` tree is installed through `setup.InstallSkills`
+  in `TestOnboardingSkillInstallsFromRepository`.
+- The final MCP instructions place `Prerequisite:` at byte index 64 and Unicode
+  rune index 64, before the 512-character limit and before `All tool outputs...`.
+
+### Final gates
+
+All commands below completed with exit status 0 on Windows/amd64 with Go 1.26.5:
+
+```text
+go fmt ./...
+go test -v ./internal/mcpserver -run 'Test(ServerInstructions_ContainsUsageGuide|BuildInstructions_PrerequisiteWithinFirst512Characters)$'
+go test -v ./cmd/royo-learn -run 'Test(MCPServe_UninitializedProjectRequiresInit|OnboardingSkillInstallsFromRepository)$'
+go test ./internal/mcpserver
+go test ./cmd/royo-learn
+go test -race ./...
+go vet ./...
+go build ./cmd/royo-learn
+GOOS=windows GOARCH=amd64 go build -o <temporary-path>/royo-learn-windows-amd64.exe ./cmd/royo-learn
+GOOS=linux GOARCH=amd64 go build -o <temporary-path>/royo-learn-linux-amd64 ./cmd/royo-learn
+GOOS=darwin GOARCH=arm64 go build -o <temporary-path>/royo-learn-darwin-arm64 ./cmd/royo-learn
+royo-learn doctor --json
+royo-learn e2e --temp
+git diff --check
+```
+
+The focused MCP test logged `Prerequisite index: bytes=64 runes=64`. Doctor
+returned `ok: true` with six explicit degraded optional/stub checks. E2E passed
+all 9 steps. The known intermittent Windows Defender exception can block the
+`internal/buildinfo` test binary with `fork/exec ... Access is denied`; it is an
+accepted environmental exception and did not reproduce in this final run.
+
+### Proposed commit grouping
+
+1. `fix(mcp): keep init prerequisite within instruction limit` — MCP instruction
+   ordering, focused position test, and the corresponding MCP specification.
+2. `docs(onboarding): document project initialization workflow` — English and
+   Spanish onboarding guidance, integration guide, and this handoff.

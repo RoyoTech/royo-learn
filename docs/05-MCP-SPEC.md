@@ -11,6 +11,18 @@
 
 ## Instrucciones del servidor
 
+El bloque que comienza con `Prerequisite:` debe empezar antes del índice de
+carácter 512, medido desde cero en puntos de código Unicode, y debe aparecer
+antes de `All tool outputs...`. Ese bloque debe indicar que:
+
+- `royo-learn init --project-root <root>` es obligatorio una vez por cada raíz
+  de proyecto independiente;
+- el marcador se descubre recorriendo directorios superiores desde un
+  subdirectorio;
+- `royo-learn setup install` es opcional después de `init` y nunca crea el
+  almacén;
+- `project_not_found` se corrige ejecutando `init` para la raíz prevista.
+
 Texto base:
 
 > Use royo-learn to turn verified project experience into reusable learning. Search before capturing. Capture does not publish. Curate requires evidence. Preview before writes. AGENTS.md and shared changes always require human approval. Never include secrets or private chain-of-thought.
@@ -204,6 +216,7 @@ Siempre usar respuesta estructurada:
 ## Tests MCP
 
 - initialize/list tools;
+- `Prerequisite:` comienza antes del carácter 512 y precede a `All tool outputs...`;
 - esquemas válidos;
 - todas las tools invocables;
 - no stdout ajeno;

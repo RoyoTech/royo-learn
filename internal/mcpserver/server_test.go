@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/storage"
@@ -824,6 +826,52 @@ func TestServerInstructions_ContainsUsageGuide(t *testing.T) {
 	}
 	if !contains(instructions, "standard") {
 		t.Error("instructions should mention the profile 'standard'")
+	}
+
+	requiredOnboardingGuidance := `Prerequisite: each project must be initialized once before these tools work.
+If a call returns project_not_found, the project has no store yet. Run
+'royo-learn init --project-root <root>' first to create it. After initialization,
+optionally run 'royo-learn setup install' to register the MCP server and install
+the skills. The store lives at <root>/.royo-learn/ and is discovered by walking
+up from the working directory, so ONE init per project root covers every
+subfolder — not one per folder.`
+	if !contains(instructions, requiredOnboardingGuidance) {
+		t.Errorf("instructions should require init before optional setup; got:\n%s", instructions)
+	}
+}
+
+func TestMCPInitialize_ExposesOnboardingPrerequisite(t *testing.T) {
+	t.Parallel()
+	ts := newTestServer(t, "standard")
+
+	result := ts.session.InitializeResult()
+	if result == nil {
+		t.Fatal("expected initialize result")
+	}
+	const guidance = `Prerequisite: each project must be initialized once before these tools work.
+If a call returns project_not_found, the project has no store yet. Run
+'royo-learn init --project-root <root>' first to create it.`
+	if !contains(result.Instructions, guidance) {
+		t.Errorf("initialize instructions missing onboarding prerequisite; got:\n%s", result.Instructions)
+	}
+}
+
+func TestBuildInstructions_PrerequisiteWithinFirst512Characters(t *testing.T) {
+	t.Parallel()
+
+	instructions := buildInstructions("standard")
+	byteIndex := strings.Index(instructions, "Prerequisite:")
+	if byteIndex < 0 || byteIndex >= 512 {
+		t.Fatal("instructions missing Prerequisite marker")
+	}
+	runeIndex := utf8.RuneCountInString(instructions[:byteIndex])
+	t.Logf("Prerequisite index: bytes=%d runes=%d", byteIndex, runeIndex)
+	if runeIndex >= 512 {
+		t.Errorf("Prerequisite starts at character %d, want < 512", runeIndex)
+	}
+	allOutputsIndex := strings.Index(instructions, "All tool outputs")
+	if allOutputsIndex < 0 || byteIndex >= allOutputsIndex {
+		t.Errorf("Prerequisite must precede All tool outputs")
 	}
 }
 

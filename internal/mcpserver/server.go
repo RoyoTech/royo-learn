@@ -131,6 +131,14 @@ func buildInstructions(profile string) string {
 Profile: %s
 Schema version: %d
 
+Prerequisite: each project must be initialized once before these tools work.
+If a call returns project_not_found, the project has no store yet. Run
+'royo-learn init --project-root <root>' first to create it. After initialization,
+optionally run 'royo-learn setup install' to register the MCP server and install
+the skills. The store lives at <root>/.royo-learn/ and is discovered by walking
+up from the working directory, so ONE init per project root covers every
+subfolder — not one per folder.
+
 Use the listed tools to capture, search, curate, preview and publish learnings.
 
 - capture_learning: capture a new learning or return an existing one
