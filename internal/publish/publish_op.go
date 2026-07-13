@@ -106,7 +106,9 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 					ProjectKey:     proj.ProjectKey,
 					NeedAgentsHook: needHook,
 				}
-				curation.Destination.Path = autoName + "/SKILL.md"
+				// Set path to just the skill directory name; ResolveSkillPublishTargets
+				// appends "SKILL.md" internally via SkillPath().
+				curation.Destination.Path = autoName
 			}
 		}
 	}
