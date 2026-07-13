@@ -1,0 +1,126 @@
+package selfupdate
+
+import (
+	"os"
+	"path/filepath"
+	"runtime"
+	"testing"
+)
+
+func writeFileOrFatal(t *testing.T, path string, content []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readFileOrFatal(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func TestReplaceUnixStyle(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "royo-learn")
+	writeFileOrFatal(t, target, []byte("old binary"))
+
+	stagingDir := t.TempDir() // deliberately a different directory
+	newBinary := filepath.Join(stagingDir, "royo-learn.new")
+	writeFileOrFatal(t, newBinary, []byte("new binary"))
+
+	if err := Replace(target, newBinary, false); err != nil {
+		t.Fatalf("Replace returned error: %v", err)
+	}
+
+	if got := string(readFileOrFatal(t, target)); got != "new binary" {
+		t.Fatalf("target content = %q, want %q", got, "new binary")
+	}
+	if _, err := os.Stat(target + oldBinarySuffix); !os.IsNotExist(err) {
+		t.Fatalf("unix-style replace must not leave a %s file, stat err = %v", oldBinarySuffix, err)
+	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm()&0o111 == 0 {
+			t.Fatalf("replaced binary is not executable: mode %v", info.Mode())
+		}
+	}
+}
+
+func TestReplaceWindowsStyle(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "royo-learn.exe")
+	writeFileOrFatal(t, target, []byte("old binary"))
+
+	stagingDir := t.TempDir()
+	newBinary := filepath.Join(stagingDir, "royo-learn.exe.new")
+	writeFileOrFatal(t, newBinary, []byte("new binary"))
+
+	if err := Replace(target, newBinary, true); err != nil {
+		t.Fatalf("Replace returned error: %v", err)
+	}
+
+	if got := string(readFileOrFatal(t, target)); got != "new binary" {
+		t.Fatalf("target content = %q, want %q", got, "new binary")
+	}
+	// The previous binary is parked next to the target so a running
+	// executable can be swapped out; it is removed on the next run.
+	if got := string(readFileOrFatal(t, target+oldBinarySuffix)); got != "old binary" {
+		t.Fatalf("%s content = %q, want %q", oldBinarySuffix, got, "old binary")
+	}
+}
+
+func TestReplaceWindowsStyleOverwritesStaleOld(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "royo-learn.exe")
+	writeFileOrFatal(t, target, []byte("old binary"))
+	writeFileOrFatal(t, target+oldBinarySuffix, []byte("stale leftover"))
+
+	stagingDir := t.TempDir()
+	newBinary := filepath.Join(stagingDir, "royo-learn.exe.new")
+	writeFileOrFatal(t, newBinary, []byte("new binary"))
+
+	if err := Replace(target, newBinary, true); err != nil {
+		t.Fatalf("Replace returned error: %v", err)
+	}
+	if got := string(readFileOrFatal(t, target)); got != "new binary" {
+		t.Fatalf("target content = %q, want %q", got, "new binary")
+	}
+	if got := string(readFileOrFatal(t, target+oldBinarySuffix)); got != "old binary" {
+		t.Fatalf("%s content = %q, want the just-replaced binary", oldBinarySuffix, got)
+	}
+}
+
+func TestCleanupOldBinaryRemovesLeftover(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "royo-learn.exe")
+	writeFileOrFatal(t, target, []byte("current"))
+	writeFileOrFatal(t, target+oldBinarySuffix, []byte("leftover"))
+
+	CleanupOldBinary(target)
+
+	if _, err := os.Stat(target + oldBinarySuffix); !os.IsNotExist(err) {
+		t.Fatalf("leftover %s file still present, stat err = %v", oldBinarySuffix, err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("current binary must remain, stat err = %v", err)
+	}
+}
+
+func TestCleanupOldBinaryNoLeftoverIsNoop(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "royo-learn.exe")
+	writeFileOrFatal(t, target, []byte("current"))
+
+	CleanupOldBinary(target) // must not panic or touch the binary
+
+	if got := string(readFileOrFatal(t, target)); got != "current" {
+		t.Fatalf("current binary changed: %q", got)
+	}
+}
