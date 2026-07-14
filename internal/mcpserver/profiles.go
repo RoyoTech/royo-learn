@@ -243,6 +243,16 @@ var allTools = []profileTool{
 		},
 	},
 	{
+		name:        "learning_add_evidence",
+		aliases:     []string{"add_evidence"},
+		description: "Attach evidence records to an existing learning so it can satisfy the approval threshold. Redaction runs before persistence.",
+		access:      accessWrite,
+		profiles:    map[string]bool{profileAgent: true, profileAdmin: true},
+		register: func(ms *mcp.Server, srv *Server, t profileTool) {
+			bind(ms, t, handleAddEvidence(srv))
+		},
+	},
+	{
 		name:        "learning_publication_preview",
 		aliases:     []string{"preview_publication"},
 		description: "Generate a publication preview showing what files would be created or modified. Persists the preview and returns its hash.",

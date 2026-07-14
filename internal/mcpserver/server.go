@@ -32,6 +32,10 @@ type Config struct {
 	// MaxRequestBytes is the maximum size of a single JSON-RPC request.
 	// Default: 1MB.
 	MaxRequestBytes int64
+
+	// AllowedCommands is the allowlist for command evidence collection. A nil
+	// or empty list permits only git, which is the CommandRunner default.
+	AllowedCommands []string
 }
 
 // Server wraps the MCP server with royo-learn business logic.
@@ -64,7 +68,10 @@ func NewServer(cfg Config, db *storage.DB, projectID domain.ProjectID, projectRo
 	instructions := buildInstructions(cfg.Profile)
 
 	// Create service wrappers.
-	capSvc := newCaptureSvc(db, cfg.RecordsDir)
+	capSvc, err := newCaptureSvc(db, cfg.RecordsDir, projectRoot, cfg.AllowedCommands)
+	if err != nil {
+		return nil, fmt.Errorf("mcpserver: init capture service: %w", err)
+	}
 	curateSvc := newCurateSvc(db, cfg.RecordsDir)
 	publishSvc := newPublishSvc(db, projectRoot, projectRoot)
 

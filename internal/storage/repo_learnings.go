@@ -255,6 +255,35 @@ func FindByHash(ctx context.Context, tx *sql.Tx, projectID domain.ProjectID, has
 	return l, nil
 }
 
+// FindByIdempotencyKey looks up a learning by its idempotency key (D5).
+//
+// A hit means the caller is retrying a request that already succeeded: it is a
+// technical retry, not a new learning and not a recurrence. Not found is not an
+// error.
+func FindByIdempotencyKey(ctx context.Context, tx *sql.Tx, projectID domain.ProjectID, key string) (*domain.Learning, error) {
+	if key == "" {
+		return nil, nil
+	}
+	row := tx.QueryRowContext(ctx, `
+		SELECT
+			id, project_id, status, type, title, context, observation,
+			reusable_lesson, recommended_procedure_json, limits_text,
+			scope_guess, approved_scope, confidence, evidence_level,
+			proposed_destination, approved_destination_json, retrieval_terms_text,
+			fingerprint, normalized_hash, idempotency_key,
+			actor_json, revision, created_at, updated_at
+		FROM learnings WHERE project_id = ? AND idempotency_key = ?
+	`, string(projectID), key)
+	l, err := scanLearning(row)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("FindByIdempotencyKey: %w", err)
+	}
+	return l, nil
+}
+
 // SaveRevision inserts a point-in-time snapshot of a learning payload.
 func SaveRevision(ctx context.Context, db *sql.DB, learningID domain.LearningID, revision int, payload domain.Learning, sha256 string) error {
 	payloadJSON := marshalAny(payload)

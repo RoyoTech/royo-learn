@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"agent-royo-learn/internal/buildinfo"
@@ -19,6 +20,7 @@ import (
 	"agent-royo-learn/internal/doctor"
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/engram"
+	"agent-royo-learn/internal/evidence"
 	"agent-royo-learn/internal/logging"
 	"agent-royo-learn/internal/project"
 	"agent-royo-learn/internal/publish"
@@ -64,6 +66,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runCapture(args[1:], stdout, stderr)
 	case "curate":
 		return runCurate(args[1:], stdout, stderr)
+	case "evidence":
+		return runEvidence(args[1:], stdout, stderr)
 	case "preview":
 		return runPreview(args[1:], stdout, stderr)
 	case "publish":
@@ -464,8 +468,24 @@ func runCapture(args []string, stdout, stderr io.Writer) int {
 	lesson := fs.String("lesson", "", "reusable lesson (required)")
 	learningType := fs.String("type", "procedure", "learning type")
 	pScope := fs.String("scope", "project", "scope guess")
+	destination := fs.String("destination", "project", "proposed destination: none, project, shared, skill, agents_rule")
+	evidenceLevel := fs.String("evidence-level", "insufficient", "declared evidence level: strong, moderate, weak, insufficient")
+	confidence := fs.String("confidence", "medium", "confidence: low, medium, high")
+	idempotencyKey := fs.String("idempotency-key", "", "the same key on a retry returns the existing learning without duplicating its evidence (D5)")
 	projectRoot := fs.String("project-root", "", "project root directory")
 	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
+
+	// Evidence flags. Collectors are limited to supplied evidence, git status,
+	// git diff, and an explicitly allowed command — not an open taxonomy.
+	evidenceFile := fs.String("evidence-file", "", "path to a JSON array of evidence records {kind,summary,source,content}")
+	evidenceSummary := fs.String("evidence-summary", "", "summary of a single inline evidence record")
+	evidenceContent := fs.String("evidence-content", "", "literal content of a single inline evidence record")
+	evidenceSource := fs.String("evidence-source", "", "origin of a single inline evidence record")
+	evidenceKind := fs.String("evidence-kind", "text", "kind of a single inline evidence record")
+	file := fs.String("file", "", "attach the contents of this file as an evidence record")
+	stdinFlag := fs.Bool("stdin", false, "attach the content read from stdin as an evidence record")
+	collectGitStatus := fs.Bool("collect-git-status", false, "attach `git status --porcelain` as evidence")
+	collectGitDiff := fs.Bool("collect-git-diff", false, "attach the working-tree `git diff` as evidence")
 
 	if err := fs.Parse(args); err != nil {
 		return writeCaptureError(stderr, "invalid_argument", "capture: %v", err)
@@ -540,15 +560,39 @@ func runCapture(args []string, stdout, stderr io.Writer) int {
 	}
 
 	recordsDir := filepath.Join(root, ".royo-learn", "records")
-	svc := capture.NewService(db, recordsDir)
+	evidenceSvc, err := evidence.NewService(root, nil)
+	if err != nil {
+		return writeCaptureError(stderr, "invalid_argument", "capture: init evidence: %v", err)
+	}
+	svc := capture.NewServiceWithEvidence(db, recordsDir, evidenceSvc)
+
+	items, err := collectCaptureEvidence(ctx, evidenceSvc, root, captureEvidenceFlags{
+		evidenceFile:     *evidenceFile,
+		evidenceSummary:  *evidenceSummary,
+		evidenceContent:  *evidenceContent,
+		evidenceSource:   *evidenceSource,
+		evidenceKind:     *evidenceKind,
+		file:             *file,
+		stdin:            *stdinFlag,
+		collectGitStatus: *collectGitStatus,
+		collectGitDiff:   *collectGitDiff,
+	})
+	if err != nil {
+		return writeCaptureError(stderr, "invalid_argument", "capture: %v", err)
+	}
 
 	input := &capture.CaptureInput{
-		Title:       *title,
-		Context:     *contextStr,
-		Observation: *observation,
-		Lesson:      *lesson,
-		Type:        domain.LearningType(*learningType),
-		Scope:       domain.Scope(*pScope),
+		Title:          *title,
+		Context:        *contextStr,
+		Observation:    *observation,
+		Lesson:         *lesson,
+		Type:           domain.LearningType(*learningType),
+		Scope:          domain.Scope(*pScope),
+		Destination:    domain.DestinationType(*destination),
+		Confidence:     domain.Confidence(*confidence),
+		EvidenceLevel:  domain.EvidenceLevel(*evidenceLevel),
+		IdempotencyKey: *idempotencyKey,
+		Evidence:       items,
 		Actor: domain.Actor{
 			Kind:      "human",
 			Name:      "cli-user",
@@ -564,9 +608,12 @@ func runCapture(args []string, stdout, stderr io.Writer) int {
 
 	if *jsonFlag {
 		data, _ := json.MarshalIndent(map[string]interface{}{
-			"learning_id": result.LearningID,
-			"status":      result.Status,
-			"new":         result.New,
+			"learning_id":    result.LearningID,
+			"status":         result.Status,
+			"new":            result.New,
+			"evidence_count": len(result.EvidenceIDs),
+			"evidence_ids":   evidenceIDStrings(result.EvidenceIDs),
+			"redacted":       result.Redacted,
 		}, "", "  ")
 		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
 	} else {
@@ -574,10 +621,144 @@ func runCapture(args []string, stdout, stderr io.Writer) int {
 		if !result.New {
 			statusLabel = "deduplicated (existing)"
 		}
-		_, _ = fmt.Fprintf(stdout, "captured %s learning %s (status: %s)\n", statusLabel, result.LearningID, result.Status)
+		_, _ = fmt.Fprintf(stdout, "captured %s learning %s (status: %s, evidence: %d)\n",
+			statusLabel, result.LearningID, result.Status, len(result.EvidenceIDs))
 	}
 
 	return exitSuccess
+}
+
+// captureEvidenceFlags carries the evidence-related capture flags.
+type captureEvidenceFlags struct {
+	evidenceFile     string
+	evidenceSummary  string
+	evidenceContent  string
+	evidenceSource   string
+	evidenceKind     string
+	file             string
+	stdin            bool
+	collectGitStatus bool
+	collectGitDiff   bool
+}
+
+// collectCaptureEvidence assembles evidence items from the supplied flags. The
+// only sources are: an evidence JSON file, a single inline record, a file, stdin,
+// `git status` and `git diff`. Redaction happens later, inside the evidence
+// service, before any write.
+func collectCaptureEvidence(ctx context.Context, svc *evidence.Service, root string, f captureEvidenceFlags) ([]evidence.Item, error) {
+	var items []evidence.Item
+
+	if f.evidenceFile != "" {
+		fileItems, err := readEvidenceFile(f.evidenceFile)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, fileItems...)
+	}
+
+	if f.evidenceSummary != "" || f.evidenceContent != "" {
+		if f.evidenceSummary == "" {
+			return nil, fmt.Errorf("--evidence-summary is required when --evidence-content is set")
+		}
+		items = append(items, evidence.Item{
+			Kind:    domain.EvidenceKind(f.evidenceKind),
+			Summary: f.evidenceSummary,
+			Source:  f.evidenceSource,
+			Content: f.evidenceContent,
+		})
+	}
+
+	if f.file != "" {
+		data, err := os.ReadFile(f.file)
+		if err != nil {
+			return nil, fmt.Errorf("read --file: %w", err)
+		}
+		items = append(items, evidence.Item{
+			Kind:    domain.KindFile,
+			Summary: fmt.Sprintf("contents of %s", filepath.Base(f.file)),
+			Source:  f.file,
+			Content: string(data),
+		})
+	}
+
+	if f.stdin {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return nil, fmt.Errorf("read --stdin: %w", err)
+		}
+		items = append(items, evidence.Item{
+			Kind:    domain.KindText,
+			Summary: "content read from stdin",
+			Content: string(data),
+		})
+	}
+
+	if f.collectGitStatus {
+		item, err := svc.CollectGitStatus(ctx, root)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+
+	if f.collectGitDiff {
+		item, err := svc.CollectGitDiff(ctx, root)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+
+	return items, nil
+}
+
+// evidenceFileRecord is the wire form of one record in an --evidence-file array.
+type evidenceFileRecord struct {
+	Kind    string `json:"kind"`
+	Type    string `json:"type"`
+	Summary string `json:"summary"`
+	Source  string `json:"source"`
+	Content string `json:"content"`
+}
+
+func readEvidenceFile(path string) ([]evidence.Item, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read --evidence-file: %w", err)
+	}
+	var records []evidenceFileRecord
+	if err := json.Unmarshal(data, &records); err != nil {
+		return nil, fmt.Errorf("parse --evidence-file: %w", err)
+	}
+	items := make([]evidence.Item, 0, len(records))
+	for i, r := range records {
+		kind := r.Kind
+		if kind == "" {
+			kind = r.Type
+		}
+		if kind == "" {
+			kind = string(domain.KindText)
+		}
+		if r.Summary == "" {
+			return nil, fmt.Errorf("--evidence-file[%d]: summary is required", i)
+		}
+		items = append(items, evidence.Item{
+			Kind:    domain.EvidenceKind(kind),
+			Summary: r.Summary,
+			Source:  r.Source,
+			Content: r.Content,
+		})
+	}
+	return items, nil
+}
+
+// evidenceIDStrings converts evidence IDs to their string form for JSON output.
+func evidenceIDStrings(ids []domain.EvidenceID) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, string(id))
+	}
+	return out
 }
 
 func writeCaptureError(stderr io.Writer, code, format string, args ...interface{}) int {
@@ -776,6 +957,196 @@ func writeCurateError(stderr io.Writer, code, format string, args ...interface{}
 		Recoverable: true,
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn curate --help"`,
+	})
+	return exitFailure
+}
+
+// ---------------------------------------------------------------------------
+// evidence (add / list)
+// ---------------------------------------------------------------------------
+
+func runEvidence(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		return writeEvidenceError(stderr, "invalid_argument", "evidence: a subcommand is required: add, list")
+	}
+	switch args[0] {
+	case "add":
+		return runEvidenceAdd(args[1:], stdout, stderr)
+	case "list":
+		return runEvidenceList(args[1:], stdout, stderr)
+	default:
+		return writeEvidenceError(stderr, "invalid_argument", "evidence: unknown subcommand %q: must be add or list", args[0])
+	}
+}
+
+// runEvidenceAdd attaches evidence to an existing learning through the public
+// capture service. The learning ID is the first positional argument.
+func runEvidenceAdd(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return writeEvidenceError(stderr, "invalid_argument", "evidence add: a learning id is required as the first argument")
+	}
+	learningID := args[0]
+
+	fs := flag.NewFlagSet("evidence add", flag.ContinueOnError)
+	kind := fs.String("kind", "text", "evidence kind")
+	summary := fs.String("summary", "", "human-readable summary (required)")
+	source := fs.String("source", "", "origin: a path, a command or a URL")
+	content := fs.String("content", "", "literal content; stored in the blob store after redaction")
+	evidenceFile := fs.String("evidence-file", "", "path to a JSON array of evidence records")
+	evidenceLevel := fs.String("evidence-level", "", "optionally raise the declared evidence level")
+	projectRoot := fs.String("project-root", "", "project root directory")
+	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
+
+	if err := fs.Parse(args[1:]); err != nil {
+		return writeEvidenceError(stderr, "invalid_argument", "evidence add: %v", err)
+	}
+
+	var items []evidence.Item
+	if *evidenceFile != "" {
+		fileItems, err := readEvidenceFile(*evidenceFile)
+		if err != nil {
+			return writeEvidenceError(stderr, "invalid_argument", "evidence add: %v", err)
+		}
+		items = append(items, fileItems...)
+	}
+	if *summary != "" || *content != "" {
+		if *summary == "" {
+			return writeEvidenceError(stderr, "invalid_argument", "evidence add: --summary is required")
+		}
+		items = append(items, evidence.Item{
+			Kind:    domain.EvidenceKind(*kind),
+			Summary: *summary,
+			Source:  *source,
+			Content: *content,
+		})
+	}
+	if len(items) == 0 {
+		return writeEvidenceError(stderr, "invalid_argument", "evidence add: at least one evidence record is required")
+	}
+
+	root, db, projectID, exitCode := resolvePublishContext(*projectRoot, stderr)
+	if exitCode != exitSuccess {
+		return exitCode
+	}
+	defer db.Close()
+
+	ctx := context.Background()
+	svc, err := newEvidenceCaptureSvc(root, db)
+	if err != nil {
+		return writeEvidenceError(stderr, "invalid_argument", "evidence add: %v", err)
+	}
+
+	result, err := svc.AddEvidence(ctx, projectID, &capture.AddEvidenceInput{
+		LearningID:    domain.LearningID(learningID),
+		Items:         items,
+		EvidenceLevel: domain.EvidenceLevel(*evidenceLevel),
+		Actor:         domain.Actor{Kind: "human", Name: "cli-user"},
+	})
+	if err != nil {
+		return writeEvidenceError(stderr, "invalid_argument", "evidence add: %v", err)
+	}
+
+	if *jsonFlag {
+		data, _ := json.MarshalIndent(map[string]interface{}{
+			"learning_id":    string(result.LearningID),
+			"evidence_count": result.Count,
+			"evidence_ids":   evidenceIDStrings(result.EvidenceIDs),
+			"evidence_level": string(result.EvidenceLevel),
+			"redacted":       result.Redacted,
+		}, "", "  ")
+		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+	} else {
+		_, _ = fmt.Fprintf(stdout, "attached %d evidence record(s) to learning %s\n", result.Count, result.LearningID)
+	}
+
+	return exitSuccess
+}
+
+// runEvidenceList lists the evidence attached to a learning. Every field it
+// prints was redacted before it was persisted.
+func runEvidenceList(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return writeEvidenceError(stderr, "invalid_argument", "evidence list: a learning id is required as the first argument")
+	}
+	learningID := args[0]
+
+	fs := flag.NewFlagSet("evidence list", flag.ContinueOnError)
+	projectRoot := fs.String("project-root", "", "project root directory")
+	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
+
+	if err := fs.Parse(args[1:]); err != nil {
+		return writeEvidenceError(stderr, "invalid_argument", "evidence list: %v", err)
+	}
+
+	root, db, _, exitCode := resolvePublishContext(*projectRoot, stderr)
+	if exitCode != exitSuccess {
+		return exitCode
+	}
+	defer db.Close()
+
+	ctx := context.Background()
+	svc, err := newEvidenceCaptureSvc(root, db)
+	if err != nil {
+		return writeEvidenceError(stderr, "invalid_argument", "evidence list: %v", err)
+	}
+
+	records, err := svc.ListEvidence(ctx, domain.LearningID(learningID))
+	if err != nil {
+		return writeEvidenceError(stderr, "invalid_argument", "evidence list: %v", err)
+	}
+
+	if *jsonFlag {
+		items := make([]map[string]any, 0, len(records))
+		for _, r := range records {
+			items = append(items, map[string]any{
+				"id":           string(r.ID),
+				"learning_id":  string(r.LearningID),
+				"kind":         string(r.Kind),
+				"summary":      r.Summary,
+				"source":       r.URI,
+				"sha256":       r.SHA256,
+				"redacted":     r.Redacted,
+				"size_bytes":   r.SizeBytes,
+				"collected_at": r.CollectedAt.Format(time.RFC3339),
+			})
+		}
+		data, _ := json.MarshalIndent(map[string]interface{}{
+			"learning_id":    learningID,
+			"evidence_count": len(records),
+			"evidence":       items,
+		}, "", "  ")
+		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+	} else {
+		_, _ = fmt.Fprintf(stdout, "Evidence for learning %s (%d record(s)):\n", learningID, len(records))
+		for _, r := range records {
+			_, _ = fmt.Fprintf(stdout, "  [%s] %s\n", r.Kind, r.Summary)
+		}
+		if len(records) == 0 {
+			_, _ = fmt.Fprintf(stdout, "  (none)\n")
+		}
+	}
+
+	return exitSuccess
+}
+
+// newEvidenceCaptureSvc builds a capture service wired to the evidence layer.
+func newEvidenceCaptureSvc(root string, db *storage.DB) (*capture.Service, error) {
+	evidenceSvc, err := evidence.NewService(root, nil)
+	if err != nil {
+		return nil, fmt.Errorf("init evidence: %w", err)
+	}
+	recordsDir := filepath.Join(root, ".royo-learn", "records")
+	return capture.NewServiceWithEvidence(db, recordsDir, evidenceSvc), nil
+}
+
+func writeEvidenceError(stderr io.Writer, code, format string, args ...interface{}) int {
+	msg := fmt.Sprintf(format, args...)
+	_ = logging.WriteError(stderr, logging.ErrorEnvelope{
+		Code:        code,
+		Message:     msg,
+		Recoverable: true,
+		Details:     map[string]any{},
+		NextAction:  `run "royo-learn evidence add <learning-id> --summary <text>"`,
 	})
 	return exitFailure
 }

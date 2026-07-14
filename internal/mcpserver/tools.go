@@ -11,6 +11,7 @@ import (
 	"agent-royo-learn/internal/capture"
 	"agent-royo-learn/internal/curate"
 	"agent-royo-learn/internal/domain"
+	"agent-royo-learn/internal/evidence"
 	"agent-royo-learn/internal/publish"
 	"agent-royo-learn/internal/recurrence"
 	"agent-royo-learn/internal/storage"
@@ -25,15 +26,30 @@ import (
 type captureSvc struct {
 	db         *storage.DB
 	recordsDir string
+	evidence   *evidence.Service
 }
 
-func newCaptureSvc(db *storage.DB, recordsDir string) *captureSvc {
-	return &captureSvc{db: db, recordsDir: recordsDir}
+// newCaptureSvc wires capture to the evidence layer. Both are needed: a capture
+// service without evidence cannot produce a learning that satisfies the D3
+// approval threshold, which is the root defect Recorrido B repairs.
+func newCaptureSvc(db *storage.DB, recordsDir, projectRoot string, allowedCommands []string) (*captureSvc, error) {
+	ev, err := evidence.NewService(projectRoot, allowedCommands)
+	if err != nil {
+		return nil, err
+	}
+	return &captureSvc{db: db, recordsDir: recordsDir, evidence: ev}, nil
+}
+
+func (s *captureSvc) service() *capture.Service {
+	return capture.NewServiceWithEvidence(s.db, s.recordsDir, s.evidence)
 }
 
 func (s *captureSvc) Capture(ctx context.Context, projectID domain.ProjectID, input *capture.CaptureInput) (*capture.CaptureResult, error) {
-	svc := capture.NewService(s.db, s.recordsDir)
-	return svc.Capture(ctx, projectID, input)
+	return s.service().Capture(ctx, projectID, input)
+}
+
+func (s *captureSvc) AddEvidence(ctx context.Context, projectID domain.ProjectID, input *capture.AddEvidenceInput) (*capture.AddEvidenceResult, error) {
+	return s.service().AddEvidence(ctx, projectID, input)
 }
 
 type curateSvc struct {
@@ -71,19 +87,80 @@ func (s *publishSvc) Preview(ctx context.Context, projectID domain.ProjectID, in
 // ---------------------------------------------------------------------------
 
 type captureLearningInput struct {
-	Title           string     `json:"title" jsonschema:"required,title of the learning (5-160 chars)"`
-	Type            string     `json:"type" jsonschema:"required,learning type: procedure, prevention, diagnostic, tooling, architecture, quality, security, hypothesis, preference"`
-	Context         string     `json:"context" jsonschema:"required,context where the learning occurred"`
-	Observation     string     `json:"observation" jsonschema:"required,what was observed"`
-	ReusableLesson  string     `json:"reusable_lesson" jsonschema:"required,reusable lesson learned"`
-	ScopeGuess      string     `json:"scope_guess" jsonschema:"required,scope: project, shared, personal, unknown"`
-	Confidence      string     `json:"confidence" jsonschema:"required,confidence: low, medium, high"`
-	EvidenceLevel   string     `json:"evidence_level" jsonschema:"required,evidence level: strong, moderate, weak, insufficient"`
-	Actor           actorInput `json:"actor" jsonschema:"required,who performed the action"`
-	RecommendedProc []string   `json:"recommended_procedure,omitempty"`
-	Limits          string     `json:"limits,omitempty"`
-	ProposedDest    string     `json:"proposed_destination,omitempty" jsonschema:"proposed destination: none, project, shared, skill, agents_rule"`
-	RetrievalTerms  []string   `json:"retrieval_terms,omitempty"`
+	Title           string              `json:"title" jsonschema:"required,title of the learning (5-160 chars)"`
+	Type            string              `json:"type" jsonschema:"required,learning type: procedure, prevention, diagnostic, tooling, architecture, quality, security, hypothesis, preference"`
+	Context         string              `json:"context" jsonschema:"required,context where the learning occurred"`
+	Observation     string              `json:"observation" jsonschema:"required,what was observed"`
+	ReusableLesson  string              `json:"reusable_lesson" jsonschema:"required,reusable lesson learned"`
+	ScopeGuess      string              `json:"scope_guess" jsonschema:"required,scope: project, shared, personal, unknown"`
+	Confidence      string              `json:"confidence" jsonschema:"required,confidence: low, medium, high"`
+	EvidenceLevel   string              `json:"evidence_level" jsonschema:"required,evidence level: strong, moderate, weak, insufficient"`
+	Actor           actorInput          `json:"actor" jsonschema:"required,who performed the action"`
+	RecommendedProc []string            `json:"recommended_procedure,omitempty"`
+	Limits          string              `json:"limits,omitempty"`
+	ProposedDest    string              `json:"proposed_destination,omitempty" jsonschema:"proposed destination: none, project, shared, skill, agents_rule"`
+	RetrievalTerms  []string            `json:"retrieval_terms,omitempty"`
+	Evidence        []evidenceItemInput `json:"evidence,omitempty" jsonschema:"evidence records persisted together with the learning; approval requires at least one"`
+	IdempotencyKey  string              `json:"idempotency_key,omitempty" jsonschema:"the same key on a retry returns the existing learning and does not duplicate its evidence"`
+}
+
+// evidenceItemInput is one element of an evidence[] array.
+//
+// `kind` is canonical (docs/03). `type` is accepted as an input alias because
+// the recovery plan writes the payload that way; both map to the same domain
+// EvidenceKind.
+type evidenceItemInput struct {
+	Kind    string `json:"kind,omitempty" jsonschema:"evidence kind: file, git_diff, git_commit, command, test, engram_observation, issue, pull_request, text, external_reference"`
+	Type    string `json:"type,omitempty" jsonschema:"alias of kind"`
+	Summary string `json:"summary" jsonschema:"required,human-readable summary of the record"`
+	Source  string `json:"source,omitempty" jsonschema:"origin of the record: a path, a command or a URL"`
+	Content string `json:"content,omitempty" jsonschema:"literal content; stored in the content-addressed blob store after redaction"`
+}
+
+type addEvidenceInput struct {
+	LearningID    string              `json:"learning_id" jsonschema:"required,learning to attach the evidence to"`
+	Evidence      []evidenceItemInput `json:"evidence" jsonschema:"required,evidence records to attach; at least one"`
+	EvidenceLevel string              `json:"evidence_level,omitempty" jsonschema:"optionally raise the declared evidence level: strong, moderate, weak, insufficient"`
+	Actor         actorInput          `json:"actor" jsonschema:"required"`
+}
+
+// toEvidenceItems maps the wire form onto domain evidence items, rejecting any
+// unknown kind rather than silently coercing it.
+func toEvidenceItems(in []evidenceItemInput) ([]evidence.Item, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	items := make([]evidence.Item, 0, len(in))
+	for i, raw := range in {
+		kind := raw.Kind
+		if kind == "" {
+			kind = raw.Type
+		}
+		if kind == "" {
+			kind = string(domain.KindText)
+		}
+		if !domain.IsValidEvidenceKind(domain.EvidenceKind(kind)) {
+			return nil, fmt.Errorf("evidence[%d]: unknown kind %q", i, kind)
+		}
+		if raw.Summary == "" {
+			return nil, fmt.Errorf("evidence[%d]: summary is required", i)
+		}
+		items = append(items, evidence.Item{
+			Kind:    domain.EvidenceKind(kind),
+			Summary: raw.Summary,
+			Source:  raw.Source,
+			Content: raw.Content,
+		})
+	}
+	return items, nil
+}
+
+func evidenceIDStrings(ids []domain.EvidenceID) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, string(id))
+	}
+	return out
 }
 
 type actorInput struct {
@@ -193,6 +270,11 @@ func handleCaptureLearning(srv *Server) func(ctx context.Context, req *mcp.CallT
 			dest = domain.DestProject
 		}
 
+		items, err := toEvidenceItems(in.Evidence)
+		if err != nil {
+			return toolError("invalid_argument", err.Error())
+		}
+
 		capIn := &capture.CaptureInput{
 			Title:          in.Title,
 			Context:        in.Context,
@@ -207,6 +289,8 @@ func handleCaptureLearning(srv *Server) func(ctx context.Context, req *mcp.CallT
 			Limits:         in.Limits,
 			RetrievalTerms: in.RetrievalTerms,
 			Actor:          toActor(in.Actor),
+			IdempotencyKey: in.IdempotencyKey,
+			Evidence:       items,
 		}
 
 		result, err := srv.capSvc.Capture(ctx, srv.projectID, capIn)
@@ -215,9 +299,47 @@ func handleCaptureLearning(srv *Server) func(ctx context.Context, req *mcp.CallT
 		}
 
 		return toolResultJSON(map[string]any{
-			"learning_id": string(result.LearningID),
-			"status":      string(result.Status),
-			"new":         result.New,
+			"learning_id":    string(result.LearningID),
+			"status":         string(result.Status),
+			"new":            result.New,
+			"evidence_count": len(result.EvidenceIDs),
+			"evidence_ids":   evidenceIDStrings(result.EvidenceIDs),
+			"redacted":       result.Redacted,
+		})
+	}
+}
+
+func handleAddEvidence(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in addEvidenceInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in addEvidenceInput) (*mcp.CallToolResult, any, error) {
+		if in.LearningID == "" {
+			return toolError("invalid_argument", "learning_id is required")
+		}
+		items, err := toEvidenceItems(in.Evidence)
+		if err != nil {
+			return toolError("invalid_argument", err.Error())
+		}
+		if len(items) == 0 {
+			return toolError("invalid_argument", "at least one evidence record is required")
+		}
+
+		addIn := &capture.AddEvidenceInput{
+			LearningID:    domain.LearningID(in.LearningID),
+			Items:         items,
+			Actor:         toActor(in.Actor),
+			EvidenceLevel: domain.EvidenceLevel(in.EvidenceLevel),
+		}
+
+		result, err := srv.capSvc.AddEvidence(ctx, srv.projectID, addIn)
+		if err != nil {
+			return toolError("add_evidence_failed", err.Error())
+		}
+
+		return toolResultJSON(map[string]any{
+			"learning_id":    string(result.LearningID),
+			"evidence_count": result.Count,
+			"evidence_ids":   evidenceIDStrings(result.EvidenceIDs),
+			"evidence_level": string(result.EvidenceLevel),
+			"redacted":       result.Redacted,
 		})
 	}
 }
