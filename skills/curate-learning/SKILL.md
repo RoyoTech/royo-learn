@@ -4,7 +4,8 @@ description: Review captured learning, compare it with existing knowledge and En
 license: MIT
 metadata:
   author: RoyoTech
-  version: "2.0.0"
+  version: "3.0.0"
+  mcp_profile: agent
 ---
 
 # Curate Learning

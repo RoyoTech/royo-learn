@@ -180,34 +180,10 @@ func toActor(a actorInput) domain.Actor {
 }
 
 // ---------------------------------------------------------------------------
-// Tool registration types (used by profiles.go and server.go)
-// ---------------------------------------------------------------------------
-
-// profileTool represents a tool enabled for specific profile sets.
-type profileTool struct {
-	name        string
-	description string
-	profiles    map[string]bool
-	register    func(*mcp.Server, *Server)
-}
-
-func (t profileTool) enabled(profile string) bool {
-	return t.profiles[profile]
-}
-
-// profileTools returns the tools enabled for a given profile.
-func profileTools(profile string) []profileTool {
-	var out []profileTool
-	for _, t := range allTools {
-		if t.enabled(profile) {
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
-// ---------------------------------------------------------------------------
 // Tool handler functions
+//
+// The registry that binds these handlers to canonical names, deprecated
+// aliases, profiles and annotations lives in profiles.go.
 // ---------------------------------------------------------------------------
 
 func handleCaptureLearning(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in captureLearningInput) (*mcp.CallToolResult, any, error) {

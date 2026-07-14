@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	"agent-royo-learn/internal/buildinfo"
 	"agent-royo-learn/internal/domain"
@@ -16,8 +17,10 @@ import (
 
 // Config holds configuration for the MCP server.
 type Config struct {
-	// Profile selects which tool set to expose: minimal, standard, full.
-	// Default: "standard".
+	// Profile selects which tool set to expose: read, agent, admin (D2).
+	// The v0.1.9 names minimal, standard and full are accepted as deprecated
+	// aliases and mapped onto read, agent and admin respectively.
+	// Default: "agent".
 	Profile string
 
 	// DBPath is the path to the SQLite database file (for diagnostic logging).
@@ -46,10 +49,13 @@ type Server struct {
 
 // NewServer creates a new Server with the given configuration.
 func NewServer(cfg Config, db *storage.DB, projectID domain.ProjectID, projectRoot string) (*Server, error) {
-	// Validate and default profile.
-	if !validProfile(cfg.Profile) {
-		cfg.Profile = "standard"
+	// Resolve the profile to its canonical form, accepting deprecated names.
+	canonical, _, ok := resolveProfile(cfg.Profile)
+	if !ok {
+		canonical = defaultProfile
 	}
+	cfg.Profile = canonical
+
 	if cfg.MaxRequestBytes <= 0 {
 		cfg.MaxRequestBytes = 1 << 20 // 1MB
 	}
@@ -88,9 +94,10 @@ func NewServer(cfg Config, db *storage.DB, projectID domain.ProjectID, projectRo
 
 	srv.mcpServer = mcpServer
 
-	// Register tools for the profile.
+	// Register tools for the profile. Each entry binds its canonical name and
+	// its deprecated aliases to the same handler.
 	for _, tool := range profileTools(cfg.Profile) {
-		tool.register(mcpServer, srv)
+		tool.register(mcpServer, srv, tool)
 	}
 
 	// Register middleware.
@@ -114,18 +121,26 @@ func (s *Server) Close() error {
 	return s.db.Close()
 }
 
-// validProfile checks if the given profile name is recognized.
-func validProfile(profile string) bool {
-	switch profile {
-	case "minimal", "standard", "full":
-		return true
-	}
-	return false
-}
-
 // buildInstructions creates the MCP server instructions text.
+//
+// D14: the tool list is DERIVED from the registry of the active profile. It is
+// never written by hand. A tool that is not registered in this profile cannot
+// appear here, and a tool that is registered cannot be omitted. Deprecated
+// aliases keep working but are not advertised: advertising them would perpetuate
+// their use.
 func buildInstructions(profile string) string {
 	meta := buildinfo.Current()
+
+	canonical, _, ok := resolveProfile(profile)
+	if !ok {
+		canonical = defaultProfile
+	}
+
+	var toolList strings.Builder
+	for _, tool := range profileTools(canonical) {
+		fmt.Fprintf(&toolList, "\n- %s: %s", tool.name, tool.description)
+	}
+
 	return fmt.Sprintf(
 		`royo-learn MCP Server v%s
 Profile: %s
@@ -139,20 +154,10 @@ the skills. The store lives at <root>/.royo-learn/ and is discovered by walking
 up from the working directory, so ONE init per project root covers every
 subfolder — not one per folder.
 
-Use the listed tools to capture, search, curate, preview and publish learnings.
-
-- capture_learning: capture a new learning or return an existing one
-- search_learnings: full-text search across learnings
-- list_learnings: list learnings with optional filters
-- get_learning: retrieve a single learning by ID
-- curate_learning: approve, reject, or relate a learning
-- preview_publication: preview what would be published
-- publish_learning: publish an approved learning
-- doctor: health check and diagnostics
-- list_recurrences: list recurrence records for learning patterns
-- compute_metrics: compute recurrence metrics and trend analysis
+The tools below are exactly the tools this profile serves.
+%s
 
 All tool outputs are structured JSON. Errors are returned in the response content with IsError=true.`,
-		meta.Version, profile, meta.SchemaVersion,
+		meta.Version, canonical, meta.SchemaVersion, toolList.String(),
 	)
 }

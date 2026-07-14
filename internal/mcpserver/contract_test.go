@@ -49,6 +49,28 @@ var skillProfileDecl = regexp.MustCompile(`(?m)^\s*mcp_profile:\s*"?([a-z]+)"?\s
 // docsToolHeading matches a tool section heading in docs/05-MCP-SPEC.md.
 var docsToolHeading = regexp.MustCompile("(?m)^###\\s+`([a-z0-9_]+)`\\s*$")
 
+// instructionsToolLine matches one advertised tool in the server instructions.
+// The instructions are generated from the registry, one "- name: description"
+// line per served tool.
+var instructionsToolLine = regexp.MustCompile(`(?m)^- ([a-z0-9_]+): `)
+
+// announcedTools returns the exact set of tool names the instructions advertise.
+// It parses the tool lines rather than substring-matching, because a substring
+// match cannot tell the alias "doctor" apart from the canonical "learning_doctor"
+// that contains it.
+func announcedTools(t *testing.T, instructions string) map[string]bool {
+	t.Helper()
+
+	out := make(map[string]bool)
+	for _, m := range instructionsToolLine.FindAllStringSubmatch(instructions, -1) {
+		out[m[1]] = true
+	}
+	if len(out) == 0 {
+		t.Fatalf("no tool lines found in server instructions; the extractor is broken:\n%s", instructions)
+	}
+	return out
+}
+
 // citedTool is a tool name found in a Skill, with its provenance.
 type citedTool struct {
 	name  string
@@ -335,10 +357,18 @@ func TestContract_InstructionsAgreeWithToolsList(t *testing.T) {
 			sort.Strings(served)
 
 			instructions := ts.server.Instructions()
+			announced := announcedTools(t, instructions)
 
-			// Every served canonical tool must be announced.
+			// The set announced in the instructions and the set served by
+			// tools/list must be identical, modulo the deprecated aliases, which
+			// are callable but deliberately unadvertised (D1/D14).
+			servedSet := make(map[string]bool, len(served))
 			for _, name := range served {
-				if !strings.Contains(instructions, name) {
+				servedSet[name] = true
+			}
+
+			for _, name := range served {
+				if !announced[name] {
 					t.Errorf("profile %q: tool %q is served by tools/list but missing from initialize instructions",
 						profile, name)
 				}
@@ -346,25 +376,16 @@ func TestContract_InstructionsAgreeWithToolsList(t *testing.T) {
 
 			// No tool may be announced that this profile does not serve. This is
 			// the defect D14 names: minimal registered 3 tools and promised 10.
-			servedSet := make(map[string]bool, len(served))
-			for _, name := range served {
-				servedSet[name] = true
-			}
-			for name := range canonical {
+			for name := range announced {
 				if servedSet[name] {
 					continue
 				}
-				if strings.Contains(instructions, name) {
-					t.Errorf("profile %q: initialize instructions announce %q, which is NOT registered in this profile",
-						profile, name)
+				if _, isAlias := aliases[name]; isAlias {
+					t.Errorf("profile %q: initialize instructions advertise deprecated alias %q", profile, name)
+					continue
 				}
-			}
-
-			// Deprecated aliases work but are never advertised (D1/D14).
-			for alias := range aliases {
-				if strings.Contains(instructions, alias) {
-					t.Errorf("profile %q: initialize instructions advertise deprecated alias %q", profile, alias)
-				}
+				t.Errorf("profile %q: initialize instructions announce %q, which is NOT registered in this profile",
+					profile, name)
 			}
 		})
 	}

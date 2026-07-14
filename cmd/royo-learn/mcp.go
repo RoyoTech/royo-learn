@@ -20,21 +20,111 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// canonicalToolProfiles are the profiles the contract defines (D2).
+var canonicalToolProfiles = map[string]string{
+	"read":  "read",
+	"agent": "agent",
+	"admin": "admin",
+}
+
+// deprecatedToolProfiles are the v0.1.9 profile values, kept working and mapped
+// onto the canonical profiles (D2, D8).
+var deprecatedToolProfiles = map[string]string{
+	"minimal":  "read",
+	"standard": "agent",
+	"full":     "admin",
+}
+
+// mcpFlagSet parses the flags of the MCP server command. It exists as a distinct
+// type so that profile resolution — the part carrying the compatibility contract
+// — is testable without starting a server.
+type mcpFlagSet struct {
+	fs          *flag.FlagSet
+	tools       *string
+	profile     *string
+	projectRoot *string
+}
+
+func newMCPFlagSet() *mcpFlagSet {
+	fs := flag.NewFlagSet("mcp-serve", flag.ContinueOnError)
+	return &mcpFlagSet{
+		fs:          fs,
+		tools:       fs.String("tools", "", "tool profile: read, agent, admin (default: agent)"),
+		profile:     fs.String("profile", "", "DEPRECATED alias of --tools; removed in v0.2.0"),
+		projectRoot: fs.String("project-root", "", "explicit project root (optional; overrides CWD)"),
+	}
+}
+
+func (m *mcpFlagSet) parse(args []string) error {
+	return m.fs.Parse(args)
+}
+
+// resolveProfile returns the canonical tool profile requested by the flags,
+// together with the deprecation warnings the caller must surface. Deprecation is
+// never silent (D8).
+func (m *mcpFlagSet) resolveProfile() (profile string, warnings []string, err error) {
+	toolsValue, profileValue := *m.tools, *m.profile
+
+	if toolsValue != "" && profileValue != "" {
+		return "", nil, fmt.Errorf("--tools and --profile are mutually exclusive; use --tools")
+	}
+
+	value := toolsValue
+	if profileValue != "" {
+		value = profileValue
+		warnings = append(warnings,
+			"--profile is deprecated and will be removed in v0.2.0; use --tools read|agent|admin")
+	}
+
+	if value == "" {
+		return "agent", warnings, nil
+	}
+
+	if canonical, ok := canonicalToolProfiles[value]; ok {
+		return canonical, warnings, nil
+	}
+	if canonical, ok := deprecatedToolProfiles[value]; ok {
+		warnings = append(warnings, fmt.Sprintf(
+			"tool profile %q is deprecated and will be removed in v0.2.0; use %q", value, canonical))
+		return canonical, warnings, nil
+	}
+
+	return "", nil, fmt.Errorf("unknown tool profile %q: expected read, agent or admin", value)
+}
+
 // runMCPServe starts the royo-learn MCP server over stdio.
 func runMCPServe(args []string, _ io.Writer, stderr io.Writer) int {
-	fs := flag.NewFlagSet("mcp-serve", flag.ContinueOnError)
-	profile := fs.String("profile", "standard", "tool profile: minimal, standard, full")
-	projectRoot := fs.String("project-root", "", "explicit project root (optional; overrides CWD)")
-	if err := fs.Parse(args); err != nil {
+	fs := newMCPFlagSet()
+	if err := fs.parse(args); err != nil {
 		_ = logging.WriteError(stderr, logging.ErrorEnvelope{
 			Code:        "invalid_argument",
 			Message:     fmt.Sprintf("mcp-serve: %v", err),
 			Recoverable: true,
 			Details:     map[string]any{},
-			NextAction:  `run "royo-learn mcp-serve [--profile minimal|standard|full]"`,
+			NextAction:  `run "royo-learn mcp-serve [--tools read|agent|admin]"`,
 		})
 		return exitInvalidArguments
 	}
+
+	resolvedProfile, warnings, err := fs.resolveProfile()
+	if err != nil {
+		_ = logging.WriteError(stderr, logging.ErrorEnvelope{
+			Code:        "invalid_argument",
+			Message:     fmt.Sprintf("mcp-serve: %v", err),
+			Recoverable: true,
+			Details:     map[string]any{},
+			NextAction:  `run "royo-learn mcp-serve [--tools read|agent|admin]"`,
+		})
+		return exitInvalidArguments
+	}
+	// Deprecation warnings go to stderr so they never contaminate stdout, which
+	// carries MCP JSON-RPC exclusively.
+	for _, warning := range warnings {
+		_, _ = fmt.Fprintf(stderr, "royo-learn: warning: %s\n", warning)
+	}
+
+	profile := &resolvedProfile
+	projectRoot := fs.projectRoot
 
 	root := *projectRoot
 	if root == "" {
