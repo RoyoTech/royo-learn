@@ -192,6 +192,10 @@ royo-learn self-update --check --json
 royo-learn self-update --version v0.1.9  # install a specific version
 ```
 
+`--check` cannot be combined with `--version`: check first, then install the
+release you want. When `GITHUB_TOKEN` is set, self-update sends it as a
+Bearer token to avoid GitHub API rate limits.
+
 > **Note**: the PowerShell script requires **PowerShell**, not Git Bash or WSL bash.
 > On WSL, use the Linux instructions above.
 

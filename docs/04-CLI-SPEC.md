@@ -245,6 +245,29 @@ Profiles:
 
 Ejecuta una demostración aislada y devuelve no-cero ante cualquier fallo.
 
+### `royo-learn self-update`
+
+Replaces the running binary with an official GitHub release after verifying its SHA-256 checksum against the published `checksums.txt`.
+
+```text
+--check     report whether an update is available, without downloading
+--version   install a specific release (explicit downgrades allowed)
+--json
+```
+
+Behavior:
+
+- development builds (`version` = `dev`) refuse implicit updates; pass `--version` to install a release explicitly;
+- implicit downgrades are refused; installing an older release requires `--version`;
+- `--check` cannot be combined with `--version` (`invalid_argument`);
+- release download URLs must use HTTPS (redirects included) and downloads are size-capped before extraction;
+- when `GITHUB_TOKEN` is set it is sent as an `Authorization: Bearer` header to raise GitHub API rate limits;
+- on Windows the previous binary is parked as `<binary>.old` and removed on the next run; a `<binary>.update-lock` file blocks concurrent updates.
+
+Error codes (JSON envelope on `stderr`): `invalid_argument`, `development_build`, `self_update_failed`.
+
+Exit codes: `0` on success (including "already up to date"); `1` on any error envelope.
+
 ## Exit codes
 
 ```text
