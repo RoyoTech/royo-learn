@@ -300,3 +300,182 @@ Tramo 2, Recorrido A (Skills ↔ MCP). **Advertencia derivada de D11:** el orden
 dependencia raíz de todo el Hito 1**, no una etapa más. Sin entrada pública de
 evidencia, ningún aprendizaje alcanza `approved` y los Recorridos C, D y E no
 tienen sobre qué operar.
+
+---
+
+## Tramo 2 — Recorrido A: Skills y MCP hablan el mismo idioma
+
+**Fecha:** 2026-07-14
+**Rama:** `fix/v019-contract-recovery`
+**Commit de partida:** `a2cc98d` (cierre del Tramo 1)
+
+Primer tramo que toca código. Los Tramos 0 y 1 fueron exclusivamente documentales.
+
+### Commits
+
+| Hash | Mensaje | Rol |
+|------|---------|-----|
+| `32def99` | `test: expose Skills-MCP contract mismatch and hardcoded instructions` | **Prueba roja.** Único commit del recorrido que no compila contra el código de producción. |
+| `4797388` | `feat(mcp): add canonical learning_* tools with deprecated aliases` | Implementación mínima que la pone en verde. |
+| *(este)* | `docs: record D15, D16 and Recorrido A in the recovery log` | Documentación. |
+
+### Punto de partida verificado
+
+La intersección entre las tools que citan las Skills y las que registra el
+servidor MCP era **vacía**: 0 aciertos de 7 (`docs/BASELINE-GAP-REPORT.md:325`).
+Ninguna Skill del repositorio podía invocar el servidor.
+
+### Las dos pruebas obligatorias
+
+Ambas viven en `internal/mcpserver/contract_test.go` y son permanentes (Tramo 5).
+
+1. **`TestContract_SkillsCiteOnlyRegisteredCanonicalTools`** — recorre
+   `skills/**/SKILL.md`, extrae cada nombre de tool MCP citado, consulta el
+   registro real y verifica que cada nombre (a) existe, (b) pertenece al perfil
+   que la Skill declara en su frontmatter (`mcp_profile`), y (c) **no** es un
+   alias deprecated. Sin excepciones, sin lista de pendientes.
+2. **`TestContract_DocsRegistrySkillsTripleMatch`** — triple coincidencia entre
+   `docs/05-MCP-SPEC.md`, el registro y las Skills. La lista `pendingTools` de
+   tools documentadas y aún no registradas es **exacta y autoinvalidante**:
+   registrar una sin retirarla de la lista rompe la build, y añadir a la lista un
+   nombre que docs/05 no documenta también. Solo puede encogerse.
+
+Seis pruebas de contrato adicionales cubren D1, D2, D8 y D14.
+
+### Verificación de que las pruebas no son vacuas
+
+Se mutó el código deliberadamente para comprobar que las pruebas **fallan** cuando
+deben. Una prueba que no falla ante su propia violación no prueba nada (D11 §11.4).
+
+| Mutación | Resultado |
+|----------|-----------|
+| La Skill vuelve a citar `learning_approve` | **FALLA** — `skill "publish-learning" cites MCP tool "learning_approve", which is NOT registered by the server` |
+| La Skill cita el alias `capture_learning` | **FALLA** — `cites deprecated alias "capture_learning"; it must cite the canonical name "learning_capture"` |
+| Las instrucciones prometen `learning_publish` en todos los perfiles (el defecto D14) | **FALLA** — `profile "agent": initialize instructions announce "learning_publish", which is NOT registered in this profile` |
+
+### Matriz final de tools y perfiles
+
+10 tools canónicas, 10 aliases deprecated. Cada alias es una **vinculación de
+nombre** al MISMO handler (`bind()` en `internal/mcpserver/profiles.go`); la ruta
+del alias solo decora la respuesta con el aviso de deprecación de D8. Cero
+duplicación de lógica.
+
+| Tool canónica | Alias deprecated (v0.1.9) | Anotación | `read` | `agent` | `admin` |
+|---------------|---------------------------|-----------|:------:|:-------:|:-------:|
+| `learning_search` | `search_learnings` | read | ✅ | ✅ | ✅ |
+| `learning_get` | `get_learning` | read | ✅ | ✅ | ✅ |
+| `learning_list` | `list_learnings` | read | ✅ | ✅ | ✅ |
+| `learning_doctor` | `doctor` | read | ✅ | ✅ | ✅ |
+| `learning_capture` | `capture_learning` | write | — | ✅ | ✅ |
+| `learning_curate` | `curate_learning` | write | — | ✅ | ✅ |
+| `learning_publication_preview` | `preview_publication` | write | — | ✅ | ✅ |
+| `learning_list_recurrences` | `list_recurrences` | read | — | ✅ | ✅ |
+| `learning_compute_metrics` | `compute_metrics` | read | — | ✅ | ✅ |
+| `learning_publish` | `publish_learning` | write | — | — | ✅ |
+
+Perfil por defecto: `agent` — mismo conjunto de tools que el `standard` de v0.1.9.
+Flag canónico `--tools read|agent|admin`; `--profile` y los valores
+`minimal|standard|full` siguen funcionando y **avisan en stderr**, nunca en
+silencio (D8).
+
+### Decisiones tomadas
+
+- **D15 — `learning_approve` no se registra a medias.** Las Skills citaban
+  `learning_approve`; el handler **no existe**. `publish.Service.Approve`
+  (`internal/publish/approval.go:16`) es código muerto sin llamadores, y el
+  contrato real de la aprobación (vinculación al `preview_hash`, expiración,
+  invalidación ante las seis condiciones) es trabajo del Recorrido C.
+  **Se retiró el paso de la Skill** en lugar de registrar una tool de fachada.
+  Registrar un `approve` a medio construir es exactamente el defecto que esta
+  recuperación repara: declarar que una capacidad existe antes de que funcione.
+  El Recorrido C restituye el paso **y** la tool en la misma entrega.
+- **D16 — Aclaración de una contradicción interna de D14.** D14 exige a la vez
+  que los aliases «no se anuncien» y que el conjunto anunciado sea «exactamente
+  igual al que devuelve `tools/list`». Un alias registrado **aparece** en
+  `tools/list`; ninguna implementación satisface ambas reglas. Se documentó y se
+  resolvió: la igualdad se lee sobre las tools **canónicas**. No se resolvió en
+  silencio.
+
+### Consecuencias registradas (no accidentales)
+
+- **`learning_publish` permanece en `admin`.** D2 lo sitúa en `agent`, pero su
+  cláusula vinculante lo prohíbe hasta que existan las políticas por destino y
+  `learning_approve` (D11), que son el Recorrido C. Se aplica la rama que D2
+  previó.
+- **El perfil `read` (ex `minimal`) estrecha su conjunto.** `minimal` servía
+  `capture_learning`, una **escritura**, y ocultaba `get` y `list`, que son
+  lecturas. `docs/04-CLI-SPEC.md:234-242` define `read` como «búsqueda y get». La
+  compatibilidad que D8 garantiza es que el nombre `minimal` siga funcionando —y
+  sigue—, no que su conjunto de tools sea inmutable.
+
+### Fuera de alcance, deliberadamente
+
+No se tocó `internal/evidence`, `SaveEvidence`, las tautologías de
+`internal/publish/policy.go`, ni los soft-passes del E2E. Son los Recorridos B, C,
+D y E. Siguen rotos y siguen documentados.
+
+### Comandos ejecutados — resultados reales
+
+```text
+$ go build ./...
+exit=0
+
+$ go vet ./...
+exit=0
+
+$ go test -count=1 -p 1 ./...          # serie: elimina la contención del antivirus
+ok  	agent-royo-learn/cmd/royo-learn	20.966s
+ok  	agent-royo-learn/internal/capture, config, curate, doctor, domain, engram,
+    evidence, integration, logging, mcpserver, project, publish, recurrence,
+    selfupdate, setup, storage, testutil       (todos ok)
+FAIL	agent-royo-learn/internal/buildinfo [build failed]
+     └─ open C:\go-tmp\...\buildinfo.test.exe: Access is denied.
+
+$ go test -race ./...
+todos los paquetes ok (incluido internal/buildinfo)
+
+$ gofmt -l ./cmd ./internal
+(vacío)
+```
+
+**Sobre el fallo ambiental de esta máquina Windows — caracterización precisa.**
+El informe de partida lo describe como un fallo fijo de `internal/buildinfo`. La
+observación real es más amplia y conviene registrarla, porque una lectura ingenua
+de un `FAIL` rojo puede confundirse con una regresión:
+
+- En ejecución **paralela** (`go test ./...`, por defecto), el antivirus bloquea
+  binarios de prueba y directorios temporales de forma **no determinista**, y la
+  víctima **cambia en cada ejecución**: se observaron `internal/buildinfo`
+  (`Access is denied`), `internal/selfupdate` y `internal/setup`
+  (`TempDir RemoveAll cleanup: the directory is not empty`), e `internal/doctor`
+  (`build failed`).
+- **El commit de partida `a2cc98d` falla igual.** Ejecutando `go test -count=1 ./...`
+  sobre él, la víctima fue `internal/doctor [build failed]` — un paquete que este
+  recorrido no toca. Verificado en un worktree limpio del commit base.
+- Ejecutando **en serie** (`-p 1`) o **con `-race`**, todo pasa salvo, como mucho,
+  `internal/buildinfo`.
+- Los paquetes afectados (`selfupdate`, `setup`, `doctor`, `buildinfo`) **no los
+  modifica este recorrido**, y aprobados en aislamiento pasan. Los fallos son de
+  *cleanup* y de *build*, nunca de aserción: ninguna prueba de negocio falla.
+
+Conclusión: es contención de antivirus, no un defecto de código, y **no lo
+introduce este recorrido**. Queda registrado con su evidencia en lugar de
+despacharse como «fallo conocido».
+
+### Puerta de salida del Recorrido A
+
+| # | Criterio | Estado |
+|---|----------|--------|
+| 1 | Una Skill nunca puede citar una tool inexistente | **PASS** — `TestContract_SkillsCiteOnlyRegisteredCanonicalTools`, verificada por mutación |
+| 2 | Prueba Skills ↔ registro real (existe, perfil, no-alias) | **PASS** |
+| 3 | Prueba de triple coincidencia docs/05 ↔ registro ↔ Skills | **PASS** |
+| 4 | `go test ./...` limpio | **PASS** — salvo la contención de antivirus de esta máquina, que también afecta al commit de partida y no toca ningún paquete de este recorrido |
+| 5 | `go vet ./...` limpio | **PASS** |
+
+**Resultado del Recorrido A: PASS en los 5 ítems. Sin FAIL.**
+
+### Siguiente paso
+
+Recorrido B — captura con evidencia real. Es la **dependencia raíz** de todo el
+Hito 1 (D11 §11.5): sin entrada pública de evidencia, ningún aprendizaje alcanza
+`approved`, y los Recorridos C, D y E no tienen sobre qué operar.

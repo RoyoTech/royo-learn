@@ -29,6 +29,8 @@
 | D12 | El comando fantasma `search` | Tramo 0 — Hallazgo 15 |
 | D13 | `internal/evidence` huérfano | Tramo 0 — Hallazgo 16 |
 | D14 | Las instrucciones de `initialize` mienten sobre el perfil | Tramo 0 — Hallazgo 18 |
+| D15 | **Una Skill no cita `learning_approve` hasta que exista** | Tramo 2 — Recorrido A |
+| D16 | Los aliases deprecated no se anuncian: aclaración de D14 | Tramo 2 — Recorrido A |
 
 ---
 
@@ -1277,6 +1279,165 @@ consumidor principal del producto.**
 
 ---
 
+## D15 — Una Skill no cita `learning_approve` hasta que exista
+
+### Contexto
+
+- La Skill `publish-learning` incluye en su flujo de trabajo, paso 4:
+  «call `learning_approve` only after explicit human approval»
+  (`skills/publish-learning/SKILL.md:26`, versión 2.0.0).
+- **`learning_approve` no existe.** No hay handler, ni entrada en el registro MCP,
+  ni comando CLI equivalente. Es una de las tres tools que `docs/05-MCP-SPEC.md`
+  especifica (`:140`) y que el servidor no registra.
+- La única pieza interna relacionada, `publish.Service.Approve`
+  (`internal/publish/approval.go:16`), es **código muerto**: cero llamadores en
+  todo el repositorio, pruebas incluidas (D11, cerrojo 3).
+- El contrato real de la aprobación —vinculación al `preview_hash`, expiración e
+  invalidación ante las seis condiciones de D11 §11.1— **no está construido**. Es
+  el trabajo del Recorrido C.
+- El criterio de aceptación del Recorrido A es: **«una Skill nunca puede citar una
+  tool inexistente»**. La Skill lo incumple hoy.
+
+### Opciones consideradas
+
+1. **Registrar `learning_approve` ahora**, con la implementación mínima que
+   satisfaga la prueba de contrato, apoyándose en `publish.Service.Approve`.
+2. **Retirar el paso de aprobación de la Skill** en este recorrido, con una nota
+   explícita de que vuelve en el Recorrido C junto con la tool.
+3. **Dejar la Skill como está** y aceptar que la prueba de contrato falle, o
+   excluir `learning_approve` de la prueba mediante una excepción.
+
+### Decisión
+
+**Opción 2. El paso `learning_approve` se retira de `skills/publish-learning/SKILL.md`
+en el Recorrido A y se restituye en el Recorrido C, junto con la tool.**
+
+Reglas vinculantes:
+
+- El invariante **«una Skill nunca cita una tool inexistente» se cumple en TODOS
+  los commits**, no solo al final de un hito. La prueba de contrato
+  `TestContract_SkillsCiteOnlyRegisteredCanonicalTools` no admite excepciones,
+  lista de pendientes ni aprobación blanda.
+- En su lugar, la Skill incorpora una sección **«Approval step»** que declara sin
+  ambigüedad: la tool de aprobación no existe todavía; la aprobación se obtiene del
+  usuario en conversación; **royo-learn no la exige aún**, de modo que la
+  responsabilidad recae por completo en el agente; y un preview **no** es una
+  autorización.
+- **El Recorrido C restituye el paso y la tool en la misma entrega.** No se admite
+  restituir el texto de la Skill antes que el handler.
+
+### Justificación
+
+La Opción 1 es la tentación directa y es exactamente el defecto que todo este
+proyecto de recuperación existe para reparar: **declarar que una capacidad existe
+antes de que funcione.** Registrar un `learning_approve` a medio construir —sin
+vinculación al `preview_hash`, sin expiración, sin invalidación— produciría una
+tool que *parece* gobernar la publicación y no gobierna nada. Sería peor que su
+ausencia: hoy el agente sabe que no tiene aprobación; con un `approve` de fachada
+creería que sí la tiene. Es la misma clase de artefacto que `publish.Service.Approve`,
+`storage.SaveEvidence` y `domain.ValidateLearning`: código correcto, probado y
+muerto, que aporta cero garantías al producto (D13, «Patrón común»).
+
+Además, el Recorrido A no puede construir la aprobación real aunque quisiera:
+depende del Recorrido B (evidencia pública), que es la dependencia raíz de todo el
+Hito 1 (D11 §11.5). Sin evidencia no hay `approved`, sin `approved` no hay preview,
+y sin preview no hay nada que aprobar. Una aprobación construida antes que su
+cadena causal es una aprobación sobre el vacío.
+
+La Opción 3 es la peor de las tres. Aceptar una prueba de contrato en rojo
+normaliza el rojo. Excluir `learning_approve` mediante una excepción convierte la
+prueba en un adorno: una prueba con una excepción para el único caso que hoy la
+rompe no prueba nada. Es el mismo mecanismo de los *soft-passes* del E2E
+(`cmd/royo-learn/e2e.go:151,157`) que el Recorrido E debe eliminar.
+
+**Coste asumido explícitamente.** Entre el Recorrido A y el Recorrido C, la Skill
+`publish-learning` no dirige al agente hacia ninguna aprobación mecánica. Esto **no
+introduce ningún riesgo nuevo**: hoy la publicación en `AGENTS.md` ya ocurre sin
+aprobación humana, porque las políticas que deberían exigirla son tautologías
+inalcanzables (D4, D11 cerrojo 2). La Skill prometía una aprobación que el sistema
+nunca pidió. Retirar la promesa no debilita la gobernanza; **hace visible que la
+gobernanza no existe todavía**, que es la condición previa para repararla.
+
+### Fecha
+
+2026-07-14
+
+---
+
+## D16 — Los aliases deprecated no se anuncian: aclaración de D14
+
+### Contexto
+
+D14 fija dos reglas que, leídas literalmente, **son incompatibles entre sí**:
+
+1. «Las instrucciones enumeran **solo nombres canónicos** (D1). Los aliases
+   deprecated funcionan pero **no se anuncian**» (`docs/CONTRACT-DECISIONS.md:1249-1251`).
+2. «Para **cada** perfil, el conjunto de tools mencionadas en `instructions` es
+   **exactamente igual** al conjunto que devuelve `tools/list`»
+   (`docs/CONTRACT-DECISIONS.md:1253-1255`).
+
+Un alias deprecated **es una tool registrada**: aparece en `tools/list`, porque un
+cliente MCP no puede invocar un nombre que el servidor no lista. Por tanto, si los
+aliases no se anuncian (regla 1), el conjunto anunciado **nunca** puede ser igual al
+que devuelve `tools/list` (regla 2). No existe implementación que satisfaga ambas.
+
+La contradicción es interna a D14 y no se detectó al redactarlo porque D14 se
+escribió antes de fijar la mecánica de registro de los aliases de D1.
+
+### Opciones consideradas
+
+1. **Anunciar los aliases** en las instrucciones, para lograr la igualdad literal
+   con `tools/list`.
+2. **No registrar los aliases como tools listables**, para que no aparezcan en
+   `tools/list`.
+3. **Leer la igualdad de la regla 2 módulo los aliases**: el conjunto anunciado es
+   exactamente igual al conjunto de tools **canónicas** que sirve el perfil.
+
+### Decisión
+
+**Opción 3.** La regla 2 de D14 se interpreta y se reformula así:
+
+> Para cada perfil, el conjunto de tools anunciadas en `instructions` es exactamente
+> igual al conjunto de tools **canónicas** que devuelve `tools/list` para ese perfil.
+> Ninguna tool canónica servida puede faltar en las instrucciones; ninguna tool no
+> servida puede aparecer en ellas; **y ningún alias deprecated puede aparecer en
+> ellas**.
+
+Las tres condiciones se verifican en `TestContract_InstructionsAgreeWithToolsList`,
+por perfil, comparando conjuntos: no por coincidencia de subcadenas. La distinción
+importa: `doctor` es subcadena de `learning_doctor`, y una comprobación por
+subcadena daría por anunciado un alias que no lo está.
+
+### Justificación
+
+La regla 1 es la que expresa la **intención** de D14 y está justificada en el propio
+D14: anunciar los aliases «perpetuaría su uso». La regla 2 expresa el **mecanismo**
+—derivar del registro en lugar de escribir a mano— y su redacción («exactamente
+igual al conjunto que devuelve `tools/list`») fue una formulación imprecisa del
+propósito real, que es impedir que la lista anunciada se desincronice de lo que el
+servidor realmente sirve. La Opción 3 preserva ese propósito íntegro y respeta la
+regla 1.
+
+La Opción 1 contradice frontalmente el objetivo declarado de D1 y D14: llevaría a
+un cliente en perfil `agent` a leer 18 nombres para 9 capacidades, y a un LLM a
+elegir con la misma probabilidad el nombre deprecated que el canónico. Duplicaría la
+superficie que este recorrido existe para reducir.
+
+La Opción 2 es inviable con el SDK oficial de Go: `mcp.AddTool` registra e inscribe
+la tool en `tools/list` en la misma operación. No existe la noción de «tool invocable
+pero no listada». Aunque existiera, sería hostil: un cliente de `v0.1.9` no podría
+descubrir que su nombre sigue siendo válido.
+
+**Regla general que se extrae**, coherente con D14: una superficie declarativa se
+deriva del registro, y cuando se filtra (aquí, excluyendo aliases) **el filtro se
+declara y se prueba**, nunca se aplica en silencio.
+
+### Fecha
+
+2026-07-14
+
+---
+
 ## Coherencia entre decisiones
 
 Verificación explícita exigida por el Tramo 1.
@@ -1352,6 +1513,8 @@ avisos explícitos. Por tanto la condición de §2 del plan se cumple y **el Hit
 | D12 | Tramo 4 §4.1 (Hito 2) | **Adelantada al Hito 1** | El motor existe y ya está expuesto por MCP; D9 depende de que `search` exista. Ver D12 §Justificación. |
 | — | Hallazgo 14: las políticas de `shared`/`AGENTS.md` marcan `requires_approval` | **Corregido** | Son tautologías inalcanzables. El defecto real es de signo contrario: `AGENTS.md` se publica **sin** aprobación. Ver D11, cerrojo 2. |
 | — | Hallazgo 14: el bloqueo empieza en `Approve` | **Corregido** | El cerrojo raíz está una etapa antes: la puerta de evidencia es insatisfacible porque `storage.SaveEvidence` no tiene llamadores de producción. Ver D11, cerrojo 0. |
+| D2 | `learning_publish` en `agent` | **Diferida al Recorrido C** | Aplicación literal de la cláusula vinculante de D2: «Si por cualquier razón hubiera que separarlas, `learning_publish` permanece en `admin` hasta que D11 esté completo». El Recorrido A no incluye D11. No es una desviación de D2: es la rama que D2 previó. |
+| D2 | Perfil `read` (ex `minimal`) | **Estrecha su conjunto de tools** | `minimal` servía `capture_learning`, que es una **escritura**, y ocultaba `get` y `list`, que son lecturas. `docs/04-CLI-SPEC.md:234-242` define `read` como «búsqueda y get». Un perfil llamado `read` que escribe es una contradicción. La compatibilidad que D8 garantiza es que el **nombre** `minimal` siga funcionando —y sigue—, no que su conjunto de tools sea inmutable. Consecuencia registrada, no accidental. |
 
 ---
 
