@@ -1377,6 +1377,10 @@ func runSelfUpdate(args []string, stdout, stderr io.Writer) int {
 		return writeSelfUpdateError(stderr, "invalid_argument", "self-update: %v", err)
 	}
 
+	if *checkOnly && *versionFlag != "" {
+		return writeSelfUpdateError(stderr, "invalid_argument", "self-update: --check cannot be combined with --version")
+	}
+
 	execPath, err := os.Executable()
 	if err != nil {
 		return writeSelfUpdateError(stderr, "invalid_argument", "self-update: cannot determine executable path: %v", err)
