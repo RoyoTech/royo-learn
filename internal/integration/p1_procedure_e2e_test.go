@@ -13,6 +13,7 @@ import (
 	"agent-royo-learn/internal/capture"
 	"agent-royo-learn/internal/curate"
 	"agent-royo-learn/internal/domain"
+	"agent-royo-learn/internal/evidence"
 	"agent-royo-learn/internal/publish"
 	"agent-royo-learn/internal/storage"
 	"agent-royo-learn/internal/storage/storagetest"
@@ -59,7 +60,11 @@ func TestP1_E2E_ProcedurePreservedOnRepublish(t *testing.T) {
 	}
 
 	actor := domain.Actor{Kind: "agent", Name: "e2e-demo"}
-	captureService := capture.NewService(db, filepath.Join(projectRoot, ".royo-learn", "records"))
+	evidenceSvc, err := evidence.NewService(projectRoot, nil)
+	if err != nil {
+		t.Fatalf("evidence service: %v", err)
+	}
+	captureService := capture.NewServiceWithEvidence(db, filepath.Join(projectRoot, ".royo-learn", "records"), evidenceSvc)
 
 	// Shared retrieval terms — both learnings must resolve to the SAME skill.
 	// The order is intentionally different to also verify P2 (deterministic area).
@@ -86,20 +91,19 @@ func TestP1_E2E_ProcedurePreservedOnRepublish(t *testing.T) {
 	}
 	t.Logf("Captured learning A: %s (status: %s)", learningA.LearningID, learningA.Status)
 
-	// Evidence for learning A (required for curation approval).
-	evA := &domain.Evidence{
-		ID:          domain.EvidenceID(uuid.Must(uuid.NewV7()).String()),
-		LearningID:  learningA.LearningID,
-		Kind:        domain.KindTest,
-		URI:         "test://dashboard-cadena-continua",
-		Summary:     "Integration test verifies the Unidad→Test chain has no gaps",
-		SHA256:      "evidence-a-dashboard",
-		CollectedAt: now,
-	}
-	if err := storage.WithTx(ctx, db, func(tx *sql.Tx) error {
-		return storage.SaveEvidence(ctx, tx, evA)
+	// Evidence for learning A (required for curation approval), attached through
+	// the public capture path rather than by writing SQL.
+	if _, err := captureService.AddEvidence(ctx, project.ID, &capture.AddEvidenceInput{
+		LearningID: learningA.LearningID,
+		Items: []evidence.Item{{
+			Kind:    domain.KindTest,
+			Summary: "Integration test verifies the Unidad→Test chain has no gaps",
+			Source:  "test://dashboard-cadena-continua",
+			Content: "--- PASS: chain has no gaps",
+		}},
+		Actor: actor,
 	}); err != nil {
-		t.Fatalf("save evidence A: %v", err)
+		t.Fatalf("add evidence A: %v", err)
 	}
 
 	// --- Learning B: a related rule about test duration, same area ---
@@ -123,20 +127,19 @@ func TestP1_E2E_ProcedurePreservedOnRepublish(t *testing.T) {
 	}
 	t.Logf("Captured learning B: %s (status: %s)", learningB.LearningID, learningB.Status)
 
-	// Evidence for learning B (required for curation approval).
-	evB := &domain.Evidence{
-		ID:          domain.EvidenceID(uuid.Must(uuid.NewV7()).String()),
-		LearningID:  learningB.LearningID,
-		Kind:        domain.KindTest,
-		URI:         "test://dashboard-test-duracion",
-		Summary:     "Integration test verifies each test lasts 7 days",
-		SHA256:      "evidence-b-dashboard",
-		CollectedAt: now,
-	}
-	if err := storage.WithTx(ctx, db, func(tx *sql.Tx) error {
-		return storage.SaveEvidence(ctx, tx, evB)
+	// Evidence for learning B (required for curation approval), attached through
+	// the public capture path rather than by writing SQL.
+	if _, err := captureService.AddEvidence(ctx, project.ID, &capture.AddEvidenceInput{
+		LearningID: learningB.LearningID,
+		Items: []evidence.Item{{
+			Kind:    domain.KindTest,
+			Summary: "Integration test verifies each test lasts 7 days",
+			Source:  "test://dashboard-test-duracion",
+			Content: "--- PASS: each test lasts 7 days",
+		}},
+		Actor: actor,
 	}); err != nil {
-		t.Fatalf("save evidence B: %v", err)
+		t.Fatalf("add evidence B: %v", err)
 	}
 
 	// --- Curate (approve) both learnings ---
