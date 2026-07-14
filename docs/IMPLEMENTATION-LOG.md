@@ -19,12 +19,18 @@ documentos nuevos.
 
 | Hash | Mensaje |
 |------|---------|
-| `53c0f630389002f6c6f50a7fbc1872555c951e36` | `docs: add baseline gap report and implementation log for tramo 0` |
+| `d68b29c0e37f1ee83a7b6abdb798460459401925` | `docs: add baseline gap report and implementation log for tramo 0` |
 
 Archivos añadidos por ese commit:
 
 - `docs/BASELINE-GAP-REPORT.md`
 - `docs/IMPLEMENTATION-LOG.md`
+
+> Nota: un commit no puede contener su propio hash. `d68b29c` es el commit de
+> entrega que aporta ambos documentos. Le sigue un commit menor
+> (`docs: record tramo 0 baseline commit hash in implementation log`) cuyo único
+> propósito es dejar ese hash registrado en esta bitácora; su hash no se cita
+> aquí por la misma razón.
 
 Ningún archivo bajo `cmd/`, `internal/` o `skills/` fue tocado. `go.mod` y
 `go.sum` sin cambios.
