@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -73,6 +74,88 @@ func TestReplaceWindowsStyle(t *testing.T) {
 	// executable can be swapped out; it is removed on the next run.
 	if got := string(readFileOrFatal(t, target+oldBinarySuffix)); got != "old binary" {
 		t.Fatalf("%s content = %q, want %q", oldBinarySuffix, got, "old binary")
+	}
+	// The staged copy is consumed by the same-directory swap.
+	if _, err := os.Stat(target + newBinarySuffix); !os.IsNotExist(err) {
+		t.Fatalf("staged %s file must not remain after success, stat err = %v", newBinarySuffix, err)
+	}
+	// The update lock is released on success.
+	if _, err := os.Stat(target + updateLockSuffix); !os.IsNotExist(err) {
+		t.Fatalf("lock file must be removed after success, stat err = %v", err)
+	}
+}
+
+func TestReplaceFailsWhenLockHeld(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "royo-learn.exe")
+	writeFileOrFatal(t, target, []byte("old binary"))
+	lockPath := target + updateLockSuffix
+	writeFileOrFatal(t, lockPath, []byte(""))
+
+	stagingDir := t.TempDir()
+	newBinary := filepath.Join(stagingDir, "royo-learn.exe.new")
+	writeFileOrFatal(t, newBinary, []byte("new binary"))
+
+	err := Replace(target, newBinary, true)
+	if err == nil {
+		t.Fatal("Replace expected error while lock is held, got nil")
+	}
+	if !strings.Contains(err.Error(), lockPath) {
+		t.Fatalf("error %q should name the lock file %s", err, lockPath)
+	}
+	if !strings.Contains(err.Error(), "remove it") {
+		t.Fatalf("error %q should tell the user to remove the lock if no other update is running", err)
+	}
+	if got := string(readFileOrFatal(t, target)); got != "old binary" {
+		t.Fatalf("target content = %q, want untouched %q", got, "old binary")
+	}
+	// A pre-existing lock is never removed by the losing run.
+	if _, statErr := os.Stat(lockPath); statErr != nil {
+		t.Fatalf("pre-existing lock file must remain, stat err = %v", statErr)
+	}
+}
+
+func TestReplaceReleasesLockAfterSuccessfulUnixRun(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "royo-learn")
+	writeFileOrFatal(t, target, []byte("old binary"))
+
+	stagingDir := t.TempDir()
+	newBinary := filepath.Join(stagingDir, "royo-learn.new")
+	writeFileOrFatal(t, newBinary, []byte("new binary"))
+
+	if err := Replace(target, newBinary, false); err != nil {
+		t.Fatalf("Replace returned error: %v", err)
+	}
+	if _, err := os.Stat(target + updateLockSuffix); !os.IsNotExist(err) {
+		t.Fatalf("lock file must be removed after success, stat err = %v", err)
+	}
+}
+
+func TestReplaceWindowsStyleStagingFailureLeavesBinaryUntouched(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "royo-learn.exe")
+	writeFileOrFatal(t, target, []byte("old binary"))
+
+	stagingDir := t.TempDir()
+	newBinary := filepath.Join(stagingDir, "royo-learn.exe.new")
+	writeFileOrFatal(t, newBinary, []byte("new binary"))
+
+	// Occupy the staged path with a directory so staging fails before the
+	// current binary is touched.
+	if err := os.Mkdir(target+newBinarySuffix, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := Replace(target, newBinary, true)
+	if err == nil {
+		t.Fatal("Replace expected error when staging is blocked, got nil")
+	}
+	if got := string(readFileOrFatal(t, target)); got != "old binary" {
+		t.Fatalf("target content = %q, want untouched %q", got, "old binary")
+	}
+	if _, statErr := os.Stat(target + updateLockSuffix); !os.IsNotExist(statErr) {
+		t.Fatalf("lock file must be removed after failure, stat err = %v", statErr)
 	}
 }
 

@@ -12,16 +12,53 @@ import (
 // at the start of the next self-update run.
 const oldBinarySuffix = ".old"
 
+// newBinarySuffix is appended to the target path for the staged copy of
+// the verified new binary. Staging into the target's own directory makes
+// the final swap a same-directory rename instead of a potentially slow
+// cross-device copy.
+const newBinarySuffix = ".new"
+
+// updateLockSuffix is appended to the target path for the lock file that
+// prevents two concurrent self-update runs from racing on the shared
+// .old backup.
+const updateLockSuffix = ".update-lock"
+
 // Replace atomically (or best-effort on Windows) replaces the file at
 // targetPath with newPath. isWindows toggles the platform-specific
 // strategy: on Unix it uses an atomic rename into the same directory;
-// on Windows it renames the current binary to .old and moves the new
-// binary in its place.
+// on Windows it parks the current binary as .old and swaps a staged
+// copy in with a same-directory rename.
+//
+// A lock file at targetPath + ".update-lock" guards the whole operation;
+// it is removed on every exit path.
 func Replace(targetPath, newPath string, isWindows bool) error {
+	unlock, err := acquireUpdateLock(targetPath)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	if isWindows {
 		return replaceWindows(targetPath, newPath)
 	}
 	return replaceUnix(targetPath, newPath)
+}
+
+// acquireUpdateLock creates the exclusive lock file for targetPath and
+// returns the function that releases it. When the lock already exists it
+// returns a readable error naming the file so the user can recover from
+// a crashed previous run.
+func acquireUpdateLock(targetPath string) (func(), error) {
+	lockPath := targetPath + updateLockSuffix
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		if os.IsExist(err) {
+			return nil, fmt.Errorf("another self-update appears to be in progress (lock file %s exists) — remove it if no other update is running", lockPath)
+		}
+		return nil, fmt.Errorf("replace: create lock file %s: %w", lockPath, err)
+	}
+	_ = f.Close()
+	return func() { _ = os.Remove(lockPath) }, nil
 }
 
 // replaceUnix writes to a temp file in the same directory and uses
@@ -60,60 +97,69 @@ func replaceUnix(targetPath, newPath string) error {
 	return nil
 }
 
-// replaceWindows parks the current binary as <target>.old and moves the
-// new binary to the original location.
+// replaceWindows stages the new binary next to the target, parks the
+// current binary as <target>.old, and swaps the staged copy in with a
+// same-directory rename. The window in which no binary exists at
+// targetPath is a single rename, never a copy, and a failed swap rolls
+// the old binary back.
 func replaceWindows(targetPath, newPath string) error {
+	stagedPath := targetPath + newBinarySuffix
 	backupPath := targetPath + oldBinarySuffix
 
+	// Stage the verified new binary in the target's own directory so
+	// the final swap cannot degrade into a cross-device copy.
+	if err := stageFile(newPath, stagedPath); err != nil {
+		return fmt.Errorf("replace: stage new binary: %w", err)
+	}
+
 	// Remove a stale .old from a previous run.
-	if _, err := os.Stat(backupPath); err == nil {
-		if err := os.Remove(backupPath); err != nil {
-			return fmt.Errorf("replace: remove stale %s: %w", oldBinarySuffix, err)
-		}
+	if err := os.Remove(backupPath); err != nil && !os.IsNotExist(err) {
+		_ = os.Remove(stagedPath)
+		return fmt.Errorf("replace: remove stale %s: %w", oldBinarySuffix, err)
 	}
 
 	// Park the current binary. It is OK if the file is locked (e.g. the
 	// running process); Windows allows renaming open .exe files.
 	if err := os.Rename(targetPath, backupPath); err != nil {
+		_ = os.Remove(stagedPath)
 		return fmt.Errorf("replace: rename current to %s: %w", oldBinarySuffix, err)
 	}
 
-	if err := moveFile(newPath, targetPath); err != nil {
-		// Best-effort rollback: put the old binary back.
+	if err := os.Rename(stagedPath, targetPath); err != nil {
+		// Roll back: restore the old binary and drop the staged copy.
 		_ = os.Rename(backupPath, targetPath)
-		return fmt.Errorf("replace: move new binary: %w", err)
+		_ = os.Remove(stagedPath)
+		return fmt.Errorf("replace: swap staged binary in: %w", err)
 	}
 	return nil
 }
 
-// moveFile first attempts os.Rename; if it fails with a cross-device
-// error it falls back to copy + delete.
-func moveFile(src, dst string) error {
-	if err := os.Rename(src, dst); err == nil {
-		return nil
-	}
-	// os.Rename failed — likely cross-device; fall back to copy + delete.
-	in, openErr := os.Open(src)
-	if openErr != nil {
-		return fmt.Errorf("moveFile: open source after failed rename: %w (rename: %v)", openErr, os.Rename(src, dst))
+// stageFile copies src to stagedPath with mode 0755 and syncs it to disk
+// so the subsequent rename swaps in fully written bytes.
+func stageFile(src, stagedPath string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
 	}
 	defer in.Close()
 
-	out, createErr := os.Create(dst)
-	if createErr != nil {
-		return createErr
+	out, err := os.OpenFile(stagedPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		return err
 	}
-	defer out.Close()
-
-	if _, copyErr := io.Copy(out, in); copyErr != nil {
+	if _, err := io.Copy(out, in); err != nil {
 		out.Close()
-		os.Remove(dst)
-		return copyErr
+		_ = os.Remove(stagedPath)
+		return err
 	}
-	out.Close()
-	in.Close()
-	if removeErr := os.Remove(src); removeErr != nil {
-		return fmt.Errorf("moveFile: remove source after copy: %w", removeErr)
+	if err := out.Sync(); err != nil {
+		out.Close()
+		_ = os.Remove(stagedPath)
+		return err
+	}
+	if err := out.Close(); err != nil {
+		_ = os.Remove(stagedPath)
+		return err
 	}
 	return nil
 }
