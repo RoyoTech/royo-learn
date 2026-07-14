@@ -60,14 +60,20 @@ type CheckResult struct {
 	UpdateAvailable bool   `json:"update_available"`
 }
 
+// maxArtifactBytes caps both the downloaded release archive and the
+// binary extracted from it so a malicious or corrupted stream cannot
+// fill the disk. Real release assets are a few megabytes.
+const maxArtifactBytes = 256 << 20
+
 // Updater controls a single self-update operation.
 type Updater struct {
-	apiBase    string
-	current    string
-	execPath   string
-	goos       string
-	goarch     string
-	httpClient *http.Client
+	apiBase       string
+	current       string
+	execPath      string
+	goos          string
+	goarch        string
+	allowInsecure bool
+	httpClient    *http.Client
 }
 
 // New validates config and returns a ready-to-use Updater.
@@ -88,14 +94,25 @@ func New(cfg Config) (*Updater, error) {
 		return nil, errors.New("GOOS and GOARCH are required")
 	}
 
+	allowInsecure := cfg.AllowInsecureHTTP
 	return &Updater{
-		apiBase:  strings.TrimRight(cfg.APIBaseURL, "/"),
-		current:  cfg.CurrentVersion,
-		execPath: cfg.ExecutablePath,
-		goos:     cfg.GOOS,
-		goarch:   cfg.GOARCH,
+		apiBase:       strings.TrimRight(cfg.APIBaseURL, "/"),
+		current:       cfg.CurrentVersion,
+		execPath:      cfg.ExecutablePath,
+		goos:          cfg.GOOS,
+		goarch:        cfg.GOARCH,
+		allowInsecure: allowInsecure,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) >= 10 {
+					return errors.New("stopped after 10 redirects")
+				}
+				if !allowInsecure && req.URL.Scheme != "https" {
+					return fmt.Errorf("redirect to non-HTTPS URL refused: %s", req.URL)
+				}
+				return nil
+			},
 		},
 	}, nil
 }
@@ -175,22 +192,25 @@ func (u *Updater) Update(ctx context.Context, explicitVersion string) (*Result, 
 	// --- version comparison (implicit update only) ---
 	if !tagExplicit && !isDevVersion(u.current) {
 		cmp, err := CompareVersions(tag, u.current)
-		if err == nil {
-			if cmp == 0 {
-				// Already up to date. Clean up a leftover .old
-				// from a previous Windows update before returning.
-				CleanupOldBinary(u.execPath)
-				return &Result{
-					Updated:        false,
-					CurrentVersion: u.current,
-					NewVersion:     tag,
-					Path:           u.execPath,
-				}, nil
-			}
-			if cmp < 0 {
-				// latest < current — implicit downgrade refused.
-				return nil, fmt.Errorf("release %s is older than the running version %s — use --version to install it explicitly", tag, u.current)
-			}
+		if err != nil {
+			// Fail closed: never install a tag we cannot compare
+			// against the running version.
+			return nil, fmt.Errorf("compare versions: %w", err)
+		}
+		if cmp == 0 {
+			// Already up to date. Clean up a leftover .old
+			// from a previous Windows update before returning.
+			CleanupOldBinary(u.execPath)
+			return &Result{
+				Updated:        false,
+				CurrentVersion: u.current,
+				NewVersion:     tag,
+				Path:           u.execPath,
+			}, nil
+		}
+		if cmp < 0 {
+			// latest < current — implicit downgrade refused.
+			return nil, fmt.Errorf("release %s is older than the running version %s — use --version to install it explicitly", tag, u.current)
 		}
 	}
 
@@ -287,6 +307,28 @@ func (u *Updater) fetchLatestTag(ctx context.Context) (string, error) {
 	return u.fetchLatestTagRaw(ctx)
 }
 
+// addAuthHeader attaches GITHUB_TOKEN, when set, as a Bearer token so
+// authenticated requests get the higher GitHub API rate limits the
+// rate-limit error message advertises.
+func addAuthHeader(req *http.Request) {
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+}
+
+// copyLimited copies src into dst, failing when the stream exceeds
+// maxArtifactBytes.
+func copyLimited(dst io.Writer, src io.Reader) error {
+	n, err := io.Copy(dst, io.LimitReader(src, maxArtifactBytes+1))
+	if err != nil {
+		return err
+	}
+	if n > maxArtifactBytes {
+		return fmt.Errorf("stream exceeds the %d-byte artifact limit", int64(maxArtifactBytes))
+	}
+	return nil
+}
+
 // fetchLatestTagRaw hits the /releases/latest endpoint and returns tag_name.
 func (u *Updater) fetchLatestTagRaw(ctx context.Context) (string, error) {
 	url := u.apiBase + "/repos/RoyoTech/royo-learn/releases/latest"
@@ -296,6 +338,7 @@ func (u *Updater) fetchLatestTagRaw(ctx context.Context) (string, error) {
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "royo-learn (self-update)")
+	addAuthHeader(req)
 
 	resp, err := u.httpClient.Do(req)
 	if err != nil {
@@ -329,6 +372,7 @@ func (u *Updater) fetchRelease(ctx context.Context, tag string) (*releaseData, e
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "royo-learn (self-update)")
+	addAuthHeader(req)
 
 	resp, err := u.httpClient.Do(req)
 	if err != nil {
@@ -362,13 +406,20 @@ func (u *Updater) fetchRelease(ctx context.Context, tag string) (*releaseData, e
 	return &releaseData{Assets: assets}, nil
 }
 
-// download fetches url and writes the response body to destPath.
+// download fetches url and writes the response body to destPath. In
+// production mode (the same knob as the HTTPS check in New) the release
+// JSON may only point at HTTPS download URLs.
 func (u *Updater) download(ctx context.Context, url, destPath string) error {
+	if !u.allowInsecure && !strings.HasPrefix(url, "https://") {
+		return fmt.Errorf("download URL must use HTTPS: %s", url)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("User-Agent", "royo-learn (self-update)")
+	addAuthHeader(req)
 
 	resp, err := u.httpClient.Do(req)
 	if err != nil {
@@ -387,7 +438,7 @@ func (u *Updater) download(ctx context.Context, url, destPath string) error {
 	}
 	defer f.Close()
 
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	if err := copyLimited(f, resp.Body); err != nil {
 		return err
 	}
 	return f.Close()
@@ -434,7 +485,7 @@ func extractTarGz(srcPath, binaryName, destPath string) error {
 				return err
 			}
 			defer out.Close()
-			if _, err := io.Copy(out, tr); err != nil {
+			if err := copyLimited(out, tr); err != nil {
 				return err
 			}
 			return out.Close()
@@ -463,7 +514,7 @@ func extractZip(srcPath, binaryName, destPath string) error {
 				return err
 			}
 			defer out.Close()
-			if _, err := io.Copy(out, rc); err != nil {
+			if err := copyLimited(out, rc); err != nil {
 				return err
 			}
 			return out.Close()
