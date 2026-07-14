@@ -479,3 +479,103 @@ despacharse como «fallo conocido».
 Recorrido B — captura con evidencia real. Es la **dependencia raíz** de todo el
 Hito 1 (D11 §11.5): sin entrada pública de evidencia, ningún aprendizaje alcanza
 `approved`, y los Recorridos C, D y E no tienen sobre qué operar.
+
+---
+
+## Tramo 2 — Recorrido B: captura con evidencia real
+
+> **Sesión reanudada.** Una sesión anterior alcanzó su límite a mitad de la
+> implementación y dejó el árbol de trabajo **sin compilar**. Esta sesión no
+> reinició el recorrido: partió del estado real, conservó el trabajo confirmado
+> y el del árbol de trabajo, y lo condujo a verde.
+
+### Commits
+
+De la sesión interrumpida (documentación y prueba RED, se conservan intactos):
+
+| Hash | Mensaje |
+|------|---------|
+| `fced055` | `docs: add public evidence entry to the domain, CLI and MCP contract` |
+| `c1aafec` | `test: require public evidence entry before approval` (RED intencional) |
+
+De esta sesión (implementación hasta verde):
+
+| Hash | Mensaje |
+|------|---------|
+| `8866a49` | `feat: real evidence capture path unblocks approval (Recorrido B)` |
+| `8199782` | `test: reroute integration evidence through the public capture path` |
+| *(este)* | `docs: record Recorrido B closure in the recovery log` |
+
+### Punto de partida real
+
+El diagnóstico del árbol de trabajo confirmó lo previsto: `internal/evidence`
+tenía dos archivos nuevos (`service.go`, `collect.go`) y `capture`, `domain`,
+`mcpserver` y `storage` estaban modificados, pero `internal/mcpserver/server.go:67`
+seguía llamando a la firma antigua de `newCaptureSvc`. Esa discordancia rompía
+la compilación. `storage.SaveEvidence` no tenía **ningún** llamador de
+producción: ese era el cerrojo raíz.
+
+### Qué se completó
+
+1. **Compila.** Se ajustó `server.go` a la nueva firma
+   `newCaptureSvc(db, recordsDir, projectRoot, allowedCommands)` con manejo del
+   error devuelto, y se añadió `Config.AllowedCommands`.
+2. **`storage.SaveEvidence` ya tiene llamador de producción.** `capture.Service`
+   persiste aprendizaje + evidencia + evento de auditoría en una sola
+   transacción coherente, tanto en captura embebida como en `AddEvidence`.
+3. **Flujo público completo.** Se registró la tool MCP `learning_add_evidence`
+   (perfiles agent/admin, escritura) y se cablearon el handler de captura
+   (evidencia + `idempotency_key`) y los comandos CLI `evidence add` /
+   `evidence list`, además de los flags de captura que faltaban
+   (`--destination`, `--evidence-level`, colectores y `--idempotency-key`).
+4. **Redacción antes de cualquier sink.** La redacción corre dentro de
+   `evidence.Prepare` y `RedactLearning`, **antes** del hash y de cualquier
+   escritura; SQLite, blob store, Markdown, auditoría y las respuestas CLI/MCP
+   solo ven contenido ya redactado.
+5. **Idempotencia (D5).** Misma `idempotency_key` en un reintento devuelve el
+   aprendizaje existente sin duplicar evidencia ni crear un segundo aprendizaje.
+
+### Verde falso reencaminado
+
+`internal/integration/learning_flow_test.go` y
+`internal/integration/p1_procedure_e2e_test.go` satisfacían el umbral de
+aprobación llamando a `storage.SaveEvidence` directamente. Se reescribieron para
+adjuntar evidencia vía `capture.Service.AddEvidence` (interfaz pública, sin SQL).
+No se eliminó cobertura: se reencaminó.
+
+### Decisiones
+
+Ninguna contradicción plan/docs/código nueva. El único ajuste de contrato lo
+dictó la propia prueba: `TestContract_DocsRegistrySkillsTripleMatch` exige
+retirar una tool de `pendingTools` en el mismo commit que la registra, así que
+`learning_add_evidence` se quitó de esa lista. No requiere nuevo número D.
+
+### Comandos ejecutados (resultado real)
+
+- `go build ./...` — limpio.
+- `go vet ./...` — limpio.
+- `go test -p 1 -count=1 ./...` — todo **ok** salvo `internal/buildinfo`, que
+  falla con `fork/exec ... Access is denied` / `open ... Access is denied`. Es
+  la contención de antivirus conocida de esta máquina sobre binarios de test en
+  el árbol `go-build`; el paquete no fue tocado por este recorrido.
+- `go test -race -p 1 ./internal/capture ./internal/mcpserver ./internal/evidence ./internal/integration ./cmd/royo-learn` — todo **ok**, sin data races.
+
+Las diez pruebas de aceptación (cinco CLI, cinco MCP) pasan en verbose:
+`captured → needs_evidence → evidence_attached → approved` conducido solo por
+interfaces públicas, redacción antes de todo sink, y no duplicación por
+idempotencia.
+
+### Puerta de salida del Recorrido B
+
+| # | Criterio | Estado |
+|---|----------|--------|
+| 1 | Cadena `captured → needs_evidence → evidence_attached → approved` solo por interfaz pública | **PASS** — `TestCLI_EvidenceUnblocksApproval`, `TestMCP_AddEvidenceUnblocksApproval` |
+| 2 | Captura acepta evidencia embebida y persiste en una transacción | **PASS** — `TestCLI_CaptureAcceptsEmbeddedEvidence`, `TestMCP_CaptureAcceptsEmbeddedEvidence` |
+| 3 | Secreto redactado antes de todo sink | **PASS** — `TestCLI_SecretIsRedactedBeforeEverySink`, `TestMCP_SecretIsRedactedBeforeTheResponse` |
+| 4 | Idempotencia (D5) no duplica | **PASS** — `TestCLI_IdempotencyKeyDoesNotDuplicateEvidence` |
+| 5 | Verde falso reencaminado por interfaz pública | **PASS** — integración sin `storage.SaveEvidence` |
+| 6 | `go build` / `go vet` limpios | **PASS** |
+
+**Resultado del Recorrido B: PASS. Sin FAIL.** El único fallo de `go test ./...`
+es la contención de antivirus en `internal/buildinfo`, ambiental y ajena a este
+recorrido.
