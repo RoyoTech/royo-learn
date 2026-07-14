@@ -74,19 +74,94 @@ Flags:
 Entradas:
 
 ```text
---file <json|yaml>
+--file <json>
 --stdin
 --title
---type
+--context
+--observation
 --lesson
+--type
+--scope
+--destination <none|project|shared|skill|agents_rule>
+--confidence <low|medium|high>
+--evidence-level <insufficient|weak|moderate|strong>
 --idempotency-key
---collect-git-diff
+--evidence-file <path>
 --collect-git-status
+--collect-git-diff
 --evidence-command <JSON array>
---no-engram
+--project-root
+--json
 ```
 
 Debe rechazar capturas sin lección reusable.
+
+`--file` y `--stdin` leen una petición de captura completa en JSON (ver
+`schemas/capture-request.schema.json`), incluido el array `evidence[]`. Las
+banderas explícitas tienen prioridad sobre los campos del archivo.
+
+**Destino y nivel de evidencia son obligatorios para poder aprobar.** Sin
+`--destination`, toda captura del CLI propone `project`, lo que hace
+estructuralmente inalcanzables las decisiones de curación `approve_new_skill` y
+`approve_skill_update`. Sin `--evidence-level`, toda captura nace `insufficient`
+y el umbral de D3 la rechaza. Ambas banderas existen precisamente para que el
+recorrido `capture → curate → approved` sea alcanzable desde el CLI.
+
+Colectores (D3): evidencia entregada directamente (`--evidence-file`),
+`--collect-git-status`, `--collect-git-diff`, y `--evidence-command` con un
+comando explícitamente permitido. No hay más colectores.
+
+La redacción de secretos ocurre **antes** de cualquier escritura: SQLite, blob
+store, Markdown, audit log, salida JSON y logs.
+
+### `royo-learn evidence add <learning-id>`
+
+Adjunta evidencia a un aprendizaje ya capturado. Es la operación que hace
+utilizable el estado `needs_evidence`: sin ella, un aprendizaje devuelto a
+`needs_evidence` no tiene forma de volver a `approved`.
+
+```text
+royo-learn evidence add <learning-id> \
+  --kind <file|git_diff|git_commit|command|test|engram_observation|issue|pull_request|text|external_reference> \
+  --summary <text> \
+  --source <text> \
+  --content <text>
+```
+
+Flags:
+
+```text
+--kind <kind>              (default: text)
+--summary <text>
+--source <text>
+--content <text>
+--evidence-file <path>     lee un array JSON de registros de evidencia
+--collect-git-status
+--collect-git-diff
+--evidence-command <JSON array>
+--evidence-level <insufficient|weak|moderate|strong>
+--project-root
+--json
+```
+
+`--evidence-level` actualiza el nivel declarado del aprendizaje en la misma
+operación. Sin él, un aprendizaje capturado con el nivel por defecto
+(`insufficient`) seguiría siendo inaprobable aunque se le adjunte evidencia
+real, porque el umbral de D3 exige las dos condiciones.
+
+Salida (`--json`):
+
+```json
+{
+  "learning_id": "...",
+  "evidence_ids": ["..."],
+  "evidence_count": 1,
+  "evidence_level": "moderate",
+  "redacted": false
+}
+```
+
+Debe rechazar una llamada sin ningún registro de evidencia.
 
 ### `royo-learn get <id>`
 

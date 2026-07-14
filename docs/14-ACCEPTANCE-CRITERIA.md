@@ -41,13 +41,17 @@
 
 ## E. Ciclo de aprendizaje
 
-- [ ] capture idempotente.
+- [ ] capture idempotente: la misma `idempotency_key` no crea un segundo aprendizaje ni duplica evidencia.
+- [ ] capture acepta evidencia embebida (`evidence[]`) por CLI y por MCP.
+- [ ] `learning_add_evidence` (MCP) y `royo-learn evidence add` (CLI) adjuntan evidencia después de la captura.
 - [ ] búsqueda previa.
 - [ ] curación con estados válidos.
 - [ ] needs_evidence.
+- [ ] un aprendizaje en `needs_evidence` puede volver a `approved` tras adjuntar evidencia, **sin tocar SQLite a mano**.
 - [ ] merge.
 - [ ] reject.
 - [ ] approve.
+- [ ] **`captured → needs_evidence → evidence_attached → approved` recorrido íntegramente por interfaces públicas.** Ninguna prueba puede llamar a `storage.SaveEvidence` directamente.
 - [ ] preview.
 - [ ] approval ligada a hash.
 - [ ] publish.
@@ -62,6 +66,8 @@
 - [ ] symlink escape bloqueado.
 - [ ] comandos sin shell.
 - [ ] secrets redacted.
+- [ ] la redacción ocurre **antes** de cualquier persistencia, no a la salida: un secreto entregado en un registro de evidencia no aparece en SQLite, ni en el blob store, ni en el Markdown, ni en el audit log, ni en la respuesta JSON de CLI o MCP.
+- [ ] `internal/evidence` está invocado desde una ruta de producción: `evidence.Redact` se ejecuta en la captura real, no solo en sus propias pruebas.
 - [ ] changed target bloquea apply.
 - [ ] shared/AGENTS requiere humano.
 - [ ] archivos sucios bloqueados por defecto.

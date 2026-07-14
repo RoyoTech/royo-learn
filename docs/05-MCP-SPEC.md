@@ -50,23 +50,90 @@ Input resumido:
   "evidence_level": "reproduced",
   "proposed_destination": "skill_update",
   "retrieval_terms": ["pdf", "page number"],
-  "evidence": [],
+  "evidence": [
+    {
+      "kind": "test",
+      "summary": "El test reproduce el fallo",
+      "source": "go test ./internal/pdf",
+      "content": "--- FAIL: TestPageNumbers ..."
+    }
+  ],
   "idempotency_key": "session/task/lesson",
   "actor": {}
 }
 ```
 
+Cada elemento de `evidence[]`:
+
+| Campo | Obligatorio | Descripción |
+|-------|-------------|-------------|
+| `kind` | sí | Kind del dominio (docs/03). `type` se acepta como alias de entrada. |
+| `summary` | sí | Descripción legible. |
+| `source` | no | Origen del registro; se persiste en `URI`. |
+| `content` | no | Contenido literal; va al blob store content-addressed. |
+
+`idempotency_key` implementa D5: la misma clave en un reintento **no crea un
+segundo aprendizaje ni duplica la evidencia**.
+
+La redacción de secretos ocurre **antes** de escribir en SQLite, en el blob
+store, en el Markdown, en el audit log y **antes de construir esta respuesta**.
+
 Output:
 
 ```json
 {
-  "learning": {},
-  "created": true,
-  "similar": [],
-  "engram": {"available": true, "references": []},
-  "next_action": "curate"
+  "learning_id": "...",
+  "status": "captured",
+  "new": true,
+  "evidence_ids": ["..."],
+  "evidence_count": 1
 }
 ```
+
+### `learning_add_evidence`
+
+Write. Perfiles `agent` y `admin`.
+
+Adjunta evidencia a un aprendizaje ya capturado. Es la operación que hace
+utilizable el estado `needs_evidence`: sin ella, un aprendizaje devuelto a
+`needs_evidence` no puede volver a `approved` por ninguna interfaz pública.
+
+Input:
+
+```json
+{
+  "learning_id": "...",
+  "evidence": [
+    {
+      "kind": "command",
+      "summary": "La suite pasa tras el arreglo",
+      "source": "go test ./...",
+      "content": "ok  agent-royo-learn/internal/curate  0.4s"
+    }
+  ],
+  "evidence_level": "moderate",
+  "actor": {}
+}
+```
+
+`evidence_level` es opcional y actualiza el nivel declarado del aprendizaje en
+la misma operación. Sin él, un aprendizaje capturado como `insufficient` seguiría
+siendo inaprobable pese a tener evidencia, porque el umbral de D3 exige las dos
+condiciones acumulativas.
+
+Output:
+
+```json
+{
+  "learning_id": "...",
+  "evidence_ids": ["..."],
+  "evidence_count": 1,
+  "evidence_level": "moderate",
+  "redacted": false
+}
+```
+
+Rechaza una llamada sin ningún registro de evidencia.
 
 ### `learning_search`
 

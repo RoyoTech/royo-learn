@@ -221,6 +221,7 @@ func TestContract_SkillsCiteOnlyRegisteredCanonicalTools(t *testing.T) {
 // removing it from this list fails the build, and so does adding a name here
 // that docs/05 does not actually document. It can only shrink.
 var pendingTools = map[string]string{
+	"learning_add_evidence":      "Recorrido B — registered by the implementation commit that follows",
 	"learning_approve":           "Recorrido C — approval bound to preview_hash",
 	"learning_report_occurrence": "Recorrido D / Tramo 4",
 	"learning_status":            "Recorrido D / Tramo 4",
