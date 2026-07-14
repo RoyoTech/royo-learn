@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"agent-royo-learn/internal/buildinfo"
@@ -22,6 +23,7 @@ import (
 	"agent-royo-learn/internal/project"
 	"agent-royo-learn/internal/publish"
 	"agent-royo-learn/internal/recurrence"
+	"agent-royo-learn/internal/selfupdate"
 	"agent-royo-learn/internal/storage"
 
 	"github.com/google/uuid"
@@ -82,6 +84,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runE2E(args[1:], stdout, stderr)
 	case "setup":
 		return runSetup(args[1:], stdout, stderr)
+	case "self-update":
+		return runSelfUpdate(args[1:], stdout, stderr)
 	default:
 		return writeUnknownCommandError(stderr)
 	}
@@ -110,6 +114,7 @@ Commands:
   e2e            Run end-to-end tests
   setup          Configure the tool for first use
   version        Print version information
+  self-update    Update to the latest or a specific version
 
 Global flags:
   --project-root string   Explicit project root (most commands)
@@ -1354,6 +1359,106 @@ func writeRecurrenceError(stderr io.Writer, code, format string, args ...interfa
 		Recoverable: true,
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn recurrences --learning-id <id>"`,
+	})
+	return exitFailure
+}
+
+// ---------------------------------------------------------------------------
+// self-update
+// ---------------------------------------------------------------------------
+
+func runSelfUpdate(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("self-update", flag.ContinueOnError)
+	checkOnly := fs.Bool("check", false, "report available update without downloading")
+	versionFlag := fs.String("version", "", "install a specific version")
+	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
+
+	if err := fs.Parse(args); err != nil {
+		return writeSelfUpdateError(stderr, "invalid_argument", "self-update: %v", err)
+	}
+
+	if *checkOnly && *versionFlag != "" {
+		return writeSelfUpdateError(stderr, "invalid_argument", "self-update: --check cannot be combined with --version")
+	}
+
+	execPath, err := os.Executable()
+	if err != nil {
+		return writeSelfUpdateError(stderr, "invalid_argument", "self-update: cannot determine executable path: %v", err)
+	}
+	execPath, err = filepath.EvalSymlinks(execPath)
+	if err != nil {
+		return writeSelfUpdateError(stderr, "invalid_argument", "self-update: cannot resolve executable path: %v", err)
+	}
+
+	u, err := selfupdate.New(selfupdate.Config{
+		CurrentVersion: buildinfo.Version,
+		ExecutablePath: execPath,
+		GOOS:           runtime.GOOS,
+		GOARCH:         runtime.GOARCH,
+	})
+	if err != nil {
+		return writeSelfUpdateError(stderr, "invalid_argument", "self-update: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// --check mode: only report availability.
+	if *checkOnly {
+		check, err := u.Check(ctx)
+		if err != nil {
+			return writeSelfUpdateError(stderr, "self_update_failed", "self-update: %v", err)
+		}
+		if *jsonFlag {
+			data, _ := json.MarshalIndent(check, "", "  ")
+			_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+		} else {
+			_, _ = fmt.Fprintf(stdout, "Current version: %s\n", check.CurrentVersion)
+			_, _ = fmt.Fprintf(stdout, "Latest version:  %s\n", check.LatestVersion)
+			if check.UpdateAvailable {
+				_, _ = fmt.Fprintf(stdout, "Update available.\n")
+			} else {
+				_, _ = fmt.Fprintf(stdout, "Already up to date.\n")
+			}
+		}
+		return exitSuccess
+	}
+
+	// Full update.
+	result, err := u.Update(ctx, *versionFlag)
+	if err != nil {
+		if errors.Is(err, selfupdate.ErrDevBuild) {
+			return writeSelfUpdateError(stderr, "development_build", "%s", err.Error())
+		}
+		return writeSelfUpdateError(stderr, "self_update_failed", "self-update: %v", err)
+	}
+
+	if !result.Updated {
+		if *jsonFlag {
+			data, _ := json.MarshalIndent(result, "", "  ")
+			_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+		} else {
+			_, _ = fmt.Fprintf(stdout, "Already up to date (%s).\n", result.NewVersion)
+		}
+		return exitSuccess
+	}
+
+	if *jsonFlag {
+		data, _ := json.MarshalIndent(result, "", "  ")
+		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+	} else {
+		_, _ = fmt.Fprintf(stdout, "Updated to %s\n", result.NewVersion)
+	}
+	return exitSuccess
+}
+
+func writeSelfUpdateError(stderr io.Writer, code, format string, args ...interface{}) int {
+	msg := fmt.Sprintf(format, args...)
+	_ = logging.WriteError(stderr, logging.ErrorEnvelope{
+		Code:        code,
+		Message:     msg,
+		Recoverable: true,
+		Details:     map[string]any{},
+		NextAction:  `run "royo-learn self-update --check" or use the installer`,
 	})
 	return exitFailure
 }
