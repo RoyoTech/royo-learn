@@ -1534,3 +1534,176 @@ dependencias del plan (`A → B → C → D → E`) es correcto, pero **el Recor
 (evidencia) es la dependencia raíz de todo el Hito 1**, no una etapa más. Sin
 entrada pública de evidencia, ningún aprendizaje alcanza `approved` y los
 Recorridos C, D y E no tienen sobre qué operar.
+
+---
+
+## Hallazgo bloqueante de Recorrido E — El escenario E2E exige operaciones que el Hito 1 no implementó (2026-07-14)
+
+> **Estado: BLOQUEO. No es una decisión resuelta, es una contradicción que requiere
+> resolución explícita antes de escribir el E2E.** Registrada aquí conforme a la
+> regla §1.1 del plan («ante una inconsistencia real del contrato: identificarla,
+> documentarla en `docs/CONTRACT-DECISIONS.md`, resolverla con una decisión
+> explícita») y a la instrucción del Recorrido E: «si el contrato real hace un paso
+> imposible, es un hallazgo: documentarlo y PARAR, no soft-passearlo».
+
+### Contexto verificado
+
+El escenario del Recorrido E (plan, líneas 464-484, y el mandato del ejecutor)
+exige un escenario CLI de 19 pasos y un escenario MCP que ejercitan, entre otras,
+estas seis operaciones públicas:
+
+| Paso del escenario | Interfaz exigida | Estado real en el código del Hito 1 |
+|--------------------|------------------|-------------------------------------|
+| CLI `get` | `royo-learn get` | **Ausente.** Sin `case "get"` en el dispatcher (`cmd/royo-learn/main.go:58-97`). |
+| CLI `search` | `royo-learn search` | **Ausente.** Sigue siendo el comando fantasma: anunciado en el help (`main.go:116`), sin `case`. **D12 decidió implementarlo en el Hito 1** (líneas 1077-1090 de este documento) — **no se implementó** en los Recorridos A-D. |
+| CLI `report occurrence` | `royo-learn occurrence` | **Ausente.** Sin `case "occurrence"`. |
+| MCP `learning_report_occurrence` | tool registrada | **Ausente.** En `pendingTools` («Recorrido D / Tramo 4», `internal/mcpserver/contract_test.go:224`); no está en `allTools` (`internal/mcpserver/profiles.go:186-306`). |
+| MCP `learning_status` | tool registrada | **Ausente.** En `pendingTools` (`contract_test.go:225`); no está en `allTools`. |
+| MCP `learning_rollback` | tool registrada | **Ausente.** No está en `allTools` **ni documentada en `docs/05-MCP-SPEC.md`**. Solo la citan D1 y el plan. |
+
+La superficie MCP registrada (`profiles.go:186-306`) termina en `learning_publish`
+(12 tools canónicas). No existe ningún handler `handleReportOccurrence`,
+`handleStatus` ni `handleRollback` en `internal/mcpserver`. La superficie CLL
+(`main.go:58-97`) no expone `get`, `search`, `occurrence` ni `status`
+(`setup status`, `setup.go:55`, es un subcomando ajeno).
+
+### La contradicción interna del propio contrato
+
+El contrato documental no es consistente sobre si estas operaciones pertenecen al
+Hito 1:
+
+1. **D1** (líneas 100-114) declara `learning_rollback`, `learning_report_occurrence`
+   y `learning_status` entre las **15 tools canónicas del Hito 1**.
+2. **D12** (líneas 1077-1090) decide implementar `royo-learn search` **en el Hito 1**.
+3. **En sentido contrario**, `internal/mcpserver/contract_test.go:223-226` marca
+   `learning_report_occurrence` y `learning_status` como `pendingTools` de
+   «Recorrido D / Tramo 4», y **D8** enumera `status` entre las operaciones que
+   «siguen sin existir» en el Hito 1. El plan asigna `report occurrence`, `status`,
+   `get` y `search` al **Tramo 4 (Hito 2)** (plan §§4.1, 4.4).
+
+Es decir: el contrato **se comprometió** con varias de estas operaciones para el
+Hito 1 (D1, D12) pero los Recorridos A-D **no las implementaron**, y otras partes
+del mismo contrato (D8, `pendingTools`, plan §4) las difieren al Hito 2. El
+escenario del Recorrido E las da todas por existentes.
+
+### Por qué esto es un bloqueo y no algo que el Recorrido E deba resolver por su cuenta
+
+- El mandato del Recorrido E es explícito: **«No cambiar el contrato de
+  publish/aprobación para hacer el E2E más fácil — el E2E se adapta al contrato
+  real, nunca al revés»** y **«No architecture redesign»**. Registrar tres tools
+  MCP nuevas y añadir tres comandos CLI nuevos (aunque se apoyen en servicios
+  internos existentes: `recurrence.RecordRecurrence`, `storage.GetLearning`,
+  `publish.Service.Rollback`) es **completar el contrato**, no escribir un E2E. Es
+  trabajo de recorrido propio, con su prueba roja, su implementación y su
+  documentación (§1.4), no un efecto colateral del E2E.
+- Hacerlo dentro del Recorrido E **resolvería unilateralmente** la tensión D1/D12
+  ↔ D8/`pendingTools`/plan §4, que es una decisión de alcance del Hito 1 que
+  excede a este recorrido.
+- La alternativa —escribir un E2E que **omita** `get`, `search`, `occurrence`,
+  `status` y el `rollback` por MCP— sería exactamente el soft-pass que el Recorrido
+  E existe para erradicar: un E2E «verde» que no ejercita el escenario que dice
+  ejercitar. Está prohibido.
+
+### Opciones de resolución (requieren decisión explícita antes de continuar)
+
+1. **Adelantar las seis operaciones al Hito 1 como recorridos propios previos a E.**
+   Registrar `learning_report_occurrence`, `learning_status` y `learning_rollback`
+   (esta última exige además documentarla en `docs/05-MCP-SPEC.md` y sacar las dos
+   primeras de `pendingTools`), e implementar `royo-learn get`, `search`
+   (completando D12) y `occurrence`. Cada una con TDD y prueba de contrato. Solo
+   entonces el Recorrido E puede escribir el escenario literal de 19 pasos.
+2. **Reducir el escenario del Recorrido E al flujo que los Recorridos A-D
+   entregaron realmente** (init → doctor → capture+evidence → curate → preview →
+   publish sin aprobación [bloqueado] → approve → publish `--apply` → verificar
+   archivo → verificar `status == published` **vía `learning_get` por MCP** →
+   rollback [CLI, ya existe] → verificar restauración byte a byte → doctor final),
+   y **modificar el plan y este contrato** para reflejar que `get`/`search`/
+   `occurrence`/`status`/`learning_rollback` son Hito 2. Documentar que el E2E de
+   ocurrencia/estado/rollback-MCP llega en el Tramo 4.
+3. **Corregir la inconsistencia D1/D12 ↔ D8/plan** primero (decidir de una vez qué
+   operaciones son Hito 1), y luego ejecutar la opción 1 o la 2 en consecuencia.
+
+**Recomendación:** opción 1 acotada a lo que el escenario del Recorrido E realmente
+necesita, porque D1 y D12 **ya** comprometieron estas operaciones con el Hito 1 y
+los servicios internos existen (regla §1.3: conectar, no reconstruir). Pero es una
+decisión de alcance que no corresponde tomar dentro del Recorrido E sin
+autorización explícita. **Hasta esa autorización, el Recorrido E queda detenido.**
+
+### Fecha
+
+2026-07-14
+
+---
+
+## D17 — Seis operaciones se adelantan al Hito 1 (resolución del hallazgo bloqueante de Recorrido E)
+
+### Contexto
+
+El hallazgo bloqueante anterior identificó que el escenario del Recorrido E exige
+seis operaciones públicas ausentes del código del Hito 1: CLI `get`, `search` y
+`occurrence`; y las tools MCP `learning_report_occurrence`, `learning_status` y
+`learning_rollback`. También registró la tensión interna del contrato: **D1**
+(líneas 100-114) declara `learning_rollback`, `learning_report_occurrence` y
+`learning_status` entre las 15 tools canónicas del Hito 1, y **D12** decide
+implementar `royo-learn search` en el Hito 1; mientras que **D8**,
+`internal/mcpserver/contract_test.go:223-226` (`pendingTools`) y el plan §§4.1/4.4
+las difieren al Tramo 4 (Hito 2).
+
+La resolución de esta tensión fue autorizada explícitamente por el coordinador
+humano: **Opción 1 — adelantar las seis operaciones al Hito 1.**
+
+### Opciones consideradas
+
+Las tres del hallazgo bloqueante anterior: (1) adelantar las seis operaciones al
+Hito 1; (2) reducir el escenario del Recorrido E al flujo A-D y diferir el resto al
+Hito 2; (3) corregir primero la inconsistencia D1/D12 ↔ D8/plan.
+
+### Decisión
+
+**Opción 1, autorizada.** Las seis operaciones se implementan en el Hito 1
+(`v0.1.10`) como trabajo de recorrido propio, previo y de soporte al Recorrido E,
+reutilizando los motores internos existentes (regla §1.3: conectar, no
+reconstruir). Reglas vinculantes:
+
+1. **CLI `get`, `search`, `occurrence`.** Se apoyan en `storage.GetLearning`, la
+   ruta FTS5 ya expuesta por `learning_search`, y `recurrence` respectivamente.
+   `search` deja de ser el comando fantasma (cumple **D12**): dispatcher real,
+   ayuda y mensaje de error corregidos. `occurrence` registra los campos que el
+   plan §4.4 enumera (learning ID, fingerprint, evento, fecha, resultado, si se
+   recuperó el aprendizaje, si se activó la Skill, evidencia, actor) y aplica la
+   semántica de idempotencia de **D5**.
+2. **MCP `learning_report_occurrence` (write), `learning_status` (read),
+   `learning_rollback` (destructive).** `learning_rollback`, por destructiva, vive
+   **solo en `admin`** (regla D2: nada destructivo en `read` ni en `agent`);
+   `learning_status` es lectura y vive en `read`/`agent`/`admin`;
+   `learning_report_occurrence` es escritura y vive en `agent`/`admin`. Se retiran
+   `learning_report_occurrence` y `learning_status` de `pendingTools` y se documenta
+   `learning_rollback` en `docs/05-MCP-SPEC.md` (D1 la declara canónica pero no
+   estaba documentada).
+3. **Alcance acotado.** Esta decisión adelanta **solo estas seis operaciones**. El
+   resto del Tramo 4 (`list` como comando CLI dedicado, `review`, `export`,
+   `import`, `rebuild-index`) permanece en el Hito 2 y el README debe seguir
+   diciéndolo. **D8 se mantiene en todo lo demás.**
+4. **Compatibilidad.** Ninguna de las seis retira un nombre existente ni cambia un
+   esquema de forma incompatible; todas añaden superficie. La condición de §2 del
+   plan para `v0.1.10` se conserva.
+
+### Justificación
+
+D1 y D12 ya comprometieron estas operaciones con el Hito 1; el conflicto con D8 y
+`pendingTools` era una inconsistencia **dentro** del contrato, no entre el contrato
+y una petición externa. La resolución la elimina en la dirección que el propio
+contrato ya apuntaba (D1/D12) y que la separación conceptual del producto exige: un
+E2E no puede «demostrar el producto» si el producto no expone las operaciones que
+el escenario ejercita. La regla §1.4 del plan es explícita: una capacidad no está
+terminada mientras ninguna interfaz pública pueda invocarla. Los motores
+(`storage`, `recurrence`, `publish.Service.Rollback`) ya existen y están probados;
+esto es conectar, no rediseñar (§§1.2, 1.3).
+
+Se descarta la Opción 2 porque dejaría el escenario del Recorrido E amputado —sin
+`occurrence`, `status` ni `rollback` por MCP— y obligaría a un E2E que omite pasos
+obligatorios, es decir, el soft-pass que este recorrido existe para erradicar.
+
+### Fecha
+
+2026-07-14
