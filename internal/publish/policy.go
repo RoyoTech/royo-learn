@@ -1,6 +1,10 @@
 package publish
 
 import (
+	"fmt"
+	"sort"
+	"strings"
+
 	"agent-royo-learn/internal/domain"
 )
 
@@ -24,6 +28,21 @@ func RequiresHumanApproval(evaluations []PolicyEvaluation) bool {
 		}
 	}
 	return false
+}
+
+// PolicySignature renders the policy evaluation as a deterministic string so it
+// can be folded into the preview hash. Binding the hash to the policy outcome
+// means that a change to the relevant policy yields a different preview hash,
+// which invalidates any approval bound to the old hash (D11 §11.1, the sixth
+// invalidation condition). The signature is order-independent.
+func PolicySignature(evaluations []PolicyEvaluation) string {
+	parts := make([]string, 0, len(evaluations))
+	for _, e := range evaluations {
+		parts = append(parts, fmt.Sprintf("%s=%t", e.PolicyName, e.Passed))
+	}
+	sort.Strings(parts)
+	return fmt.Sprintf("requires_approval=%t;%s",
+		RequiresHumanApproval(evaluations), strings.Join(parts, ","))
 }
 
 // policyPreferenceTypeRequiresHuman: preference-type learnings routed to shared

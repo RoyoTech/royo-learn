@@ -121,9 +121,13 @@ func (s *Service) Preview(ctx context.Context, projectID domain.ProjectID, input
 	// Evaluate policies.
 	policies := EvaluatePolicies(learning, curation)
 
-	// Build preview record.
+	// Build preview record. The preview hash binds the full plan the approval
+	// authorizes: the combined diff (which already reflects the destinations and
+	// the prior file content) AND the policy outcome. A change to any of these
+	// yields a different hash, so an approval bound to the old hash no longer
+	// applies (D11 §11.1 invalidation conditions).
 	previewID := domain.PreviewID(uuid.Must(uuid.NewV7()).String())
-	previewHash := HashContent([]byte(combinedDiff))
+	previewHash := HashContent([]byte(combinedDiff + "\x00policy:" + PolicySignature(policies)))
 
 	preview := &domain.PublicationPreview{
 		ID:         previewID,
