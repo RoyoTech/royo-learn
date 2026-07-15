@@ -579,3 +579,128 @@ idempotencia.
 **Resultado del Recorrido B: PASS. Sin FAIL.** El único fallo de `go test ./...`
 es la contención de antivirus en `internal/buildinfo`, ambiental y ajena a este
 recorrido.
+
+---
+
+## Tramo 2 · Recorrido C — Aprobación pública y verificable (2026-07-14)
+
+Cierre del defecto central del Hito 1 (D11): el **agujero de gobernanza**
+(publicar en `AGENTS.md` o alcance compartido **sin** aprobación humana) y el
+**bloqueo de aprobación** (la aprobación existía en el dominio pero ninguna
+interfaz pública podía otorgarla). Ambos se reparan juntos.
+
+### Commits
+
+| Hash | Mensaje |
+|------|---------|
+| `0594414` | `test: prove AGENTS.md publishes without approval (governance hole)` (prueba roja) |
+| `c5b9d69` | `fix: require human approval for shared and AGENTS.md destinations` |
+| `421bfea` | `feat: share one canonical curation-decision allowlist across CLI and MCP` |
+| `24dccaf` | `feat: expose publication approval via CLI and MCP and gate publish on it` |
+| `474377e` | `refactor: bind preview hash to the policy outcome for approval invalidation` |
+| `c6bd3f8` | `docs: restore the learning_approve step in the publish-learning skill` |
+| `5bd9ef7` | `test: prove the CLI approval gate end to end` |
+
+### Qué se hizo
+
+1. **Se cerró la tautología (Problema 1, el titular).**
+   `policySharedScopeRequiresApproval` y `policyAgentsRuleRequiresApproval`
+   (`internal/publish/policy.go`) ya no dependen de la decisión de curación que
+   *derivó* el destino —comprobación inalcanzable— sino del **destino efectivo**:
+   cualquier destino `shared` o `agents_rule` marca `requires_approval: true`.
+   Un aprendizaje **no-`preference`** dirigido a `AGENTS.md` ahora exige
+   aprobación. Se corrigieron las dos pruebas que consagraban el agujero
+   (`TestEvaluatePolicies_ProcedureType_Shared`,
+   `TestEvaluatePolicies_AgentsRuleApproved`).
+2. **Se rompió el bloqueo (aprobación pública).** Nueva tool MCP
+   `learning_approve` (`{learning_id, preview_hash, approved_by, reason,
+   approval_evidence, expires_at}`, perfil agent/admin, escritura) y comando CLI
+   `royo-learn approve <id> --preview-hash --approved-by --reason
+   --approval-evidence [--expires-at]`. Ambos son el **primer llamador de
+   producción** de `publish.Service.Approve`; no se reimplementó el store (regla 1.3).
+3. **`learning_publish` exige `approval_id`** cuando el preview indica
+   `requires_approval: true`. No basta con "alguna aprobación compatible": el
+   `approval_id` debe ser el ligado a **ese** `preview_hash`
+   (`internal/publish/publish_op.go`). Se añadió `--approval-id` al CLI y
+   `approval_id` al schema MCP.
+4. **Lista blanca canónica única (D11 §11.2).** `internal/domain` define
+   `ValidCurationDecisions` / `ParseCurationDecision`; el CLI (`parseCurateAction`)
+   y el handler MCP (`curate_learning`) validan **contra ella y nada más**. El
+   MCP dejó de pasar la decisión en crudo. Prueba de contrato
+   `TestContract_CLIAndDomainShareCurationAllowlist`: ambos aceptan y rechazan
+   exactamente el mismo conjunto.
+5. **Preview hash ligado a la política.** El hash del preview incorpora ahora la
+   firma de la evaluación de políticas (`PolicySignature`), además del diff
+   combinado que ya reflejaba destinos y contenido previo. Un cambio de política
+   produce un hash distinto e invalida la aprobación previa.
+6. **Skill restituida (D15).** `skills/publish-learning/SKILL.md` (v4.0.0)
+   vuelve a citar `learning_approve` en el paso 4 y a exigir el `approval_id` en
+   el paso 5, ahora que la tool existe.
+
+### `learning_publish` movido a `agent` (D2)
+
+**Sí, se movió `learning_publish` del perfil `admin` al perfil `agent`.** La
+cláusula vinculante de D2 lo condicionaba a que existieran las políticas por
+destino y `learning_approve`; el Recorrido C entrega ambas. La protección deja de
+ser el perfil y pasa a ser la aprobación: los destinos sensibles reportan
+`requires_approval: true` y `learning_publish` rehúsa sin un `approval_id`
+coincidente. Se actualizaron `internal/mcpserver/conformance_test.go` (perfiles
+`standard`/`agent`/`admin`) y se retiró `learning_approve` de `pendingTools` en
+`internal/mcpserver/contract_test.go`.
+
+### Estado de las seis condiciones de invalidación (D11 §11.1)
+
+| # | Condición | Mecanismo | Prueba |
+|---|-----------|-----------|--------|
+| 1 | Cambia el preview | La aprobación se busca por `preview_hash`; un preview distinto es otro hash sin aprobación | `TestApprovalGate_ApprovalForDifferentPreviewIsRejected` |
+| 2 | Cambia un destino | El destino está en el diff → cambia el `preview_hash` | igual que #1 (dos aprendizajes, hashes distintos) |
+| 3 | Cambia el contenido previo de un destino | El contenido previo está en el diff → cambia el `preview_hash` | cubierto por la composición del hash (`preview.go`); regenerar el preview produce otro hash |
+| 4 | Expira | `Service.CheckApproval` rechaza `ExpiresAt` pasado | `TestApprovalGate_ExpiredApprovalIsRejected`, `TestCLI_ApprovalGate` |
+| 5 | Se revoca | `GetApprovalByHash` filtra revocadas; `CheckApproval` rechaza `RevokedAt` | soportado en dominio/almacenamiento (`RevokeApproval`); **sin interfaz pública de revocación en este recorrido** (fuera del alcance C) |
+| 6 | Cambia la política relevante | `PolicySignature` entra en el `preview_hash` | `TestPolicySignature_ChangesWithPolicyOutcome` |
+
+Nota sobre #5: la revocación se **valida** correctamente (una aprobación con
+`revoked_at` se rechaza), pero el Recorrido C no añade un comando/tool público de
+revocación; el plan no lo pide en C. Queda como capacidad de dominio disponible.
+
+### Pruebas obligatorias (todas por interfaz pública)
+
+| Prueba | Ubicación |
+|--------|-----------|
+| Agujero: no-`preference` → `AGENTS.md` → publicar sin aprobación **bloqueado** (`requires_approval: true`) | `internal/mcpserver/approval_gate_test.go::TestApprovalGate_NonPreferenceAgentsRuleRequiresApproval` (roja primero) |
+| Publicación sensible sin aprobación → bloqueada | `TestApprovalGate_SensitiveWithoutApprovalIsBlocked`, `TestCLI_ApprovalGate` |
+| Aprobación de otro `preview_hash` → rechazada | `TestApprovalGate_ApprovalForDifferentPreviewIsRejected` |
+| Aprobación expirada → rechazada | `TestApprovalGate_ExpiredApprovalIsRejected` |
+| Aprobación válida → aceptada | `TestApprovalGate_ValidApprovalIsAccepted`, `TestCLI_ApprovalGate` |
+| Aprobación reutilizada para otro preview → rechazada | `TestApprovalGate_ApprovalForDifferentPreviewIsRejected`, `TestCLI_ApprovalGate` (approval_id ajeno) |
+| Lista blanca única CLI↔MCP | `cmd/royo-learn/curate_allowlist_test.go::TestContract_CLIAndDomainShareCurationAllowlist` |
+| Toda política tiene una entrada que la hace fallar | `TestEvaluatePolicies_SharedWithoutApproval`, `_AgentsRuleNotApproved`, `_PreferenceType` |
+
+Ninguna prueba fabrica una `Approval` escribiendo en el almacenamiento: cada
+aprobación se obtiene por `learning_approve` / `royo-learn approve`.
+
+### Comandos ejecutados (resultado real)
+
+- `go build ./...` — limpio.
+- `go vet ./...` — limpio.
+- `go test -p 1 -count=1 ./...` — todo **ok** salvo `internal/buildinfo`, que
+  falla con `Access is denied` al abrir/ejecutar `buildinfo.test.exe` en el árbol
+  `go-build`. Es la contención de antivirus conocida de esta máquina; el paquete
+  no fue tocado por este recorrido.
+- `go test -race -p 1 ./internal/publish ./internal/mcpserver ./internal/domain ./internal/integration ./cmd/royo-learn` — todo **ok**, sin data races.
+
+### Puerta de salida del Recorrido C
+
+| # | Criterio | Estado |
+|---|----------|--------|
+| 1 | El agujero está cerrado: `AGENTS.md`/compartido no-`preference` exige aprobación | **PASS** |
+| 2 | La aprobación es obtenible por interfaz pública (CLI y MCP) | **PASS** |
+| 3 | `learning_publish` exige el `approval_id` ligado al `preview_hash` | **PASS** |
+| 4 | Lista blanca de decisiones única CLI↔MCP | **PASS** |
+| 5 | Las cinco pruebas del plan + la del agujero, por interfaz pública | **PASS** |
+| 6 | Skill restituye `learning_approve` (D15) | **PASS** |
+| 7 | `go build` / `go vet` limpios; suite verde salvo `buildinfo` ambiental | **PASS** |
+
+**Resultado del Recorrido C: PASS. Sin FAIL.** El único fallo de
+`go test ./...` es la contención de antivirus en `internal/buildinfo`, ambiental
+y ajena a este recorrido.
