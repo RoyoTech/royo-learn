@@ -220,10 +220,10 @@ func TestContract_SkillsCiteOnlyRegisteredCanonicalTools(t *testing.T) {
 // asserts it is EXACT in both directions. Registering one of these tools without
 // removing it from this list fails the build, and so does adding a name here
 // that docs/05 does not actually document. It can only shrink.
-var pendingTools = map[string]string{
-	"learning_report_occurrence": "Recorrido D / Tramo 4",
-	"learning_status":            "Recorrido D / Tramo 4",
-}
+// pendingTools is now empty: Recorrido E / D17 landed learning_report_occurrence
+// and learning_status. The map is kept (rather than deleted) so the exactness
+// checks in TestContract_DocsRegistrySkillsTripleMatch keep guarding future debt.
+var pendingTools = map[string]string{}
 
 // contractExtensions are canonical tools that D1 adds on top of docs/05-MCP-SPEC.md
 // so that no registered tool is left without a canonical name.

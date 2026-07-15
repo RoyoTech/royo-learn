@@ -241,12 +241,14 @@ func TestListTools_MinimalProfile_LimitedTools(t *testing.T) {
 		t.Fatalf("ListTools: %v", err)
 	}
 
-	// The read profile serves four canonical tools plus their deprecated aliases.
+	// The read profile serves read-only canonical tools plus their deprecated
+	// aliases. learning_status (D17) is read-only and has no alias.
 	allowedTools := map[string]bool{
 		"learning_search": true, "search_learnings": true,
 		"learning_get": true, "get_learning": true,
 		"learning_list": true, "list_learnings": true,
 		"learning_doctor": true, "doctor": true,
+		"learning_status": true,
 	}
 
 	for _, tool := range result.Tools {

@@ -245,7 +245,34 @@ Write.
 
 Read-only.
 
-Devuelve métricas y estado de integraciones.
+Devuelve el estado de ciclo de vida de un aprendizaje: su `status`, tipo,
+revisión y última actualización.
+
+Input:
+
+```json
+{
+  "learning_id": "..."
+}
+```
+
+### `learning_rollback`
+
+Destructive. Confinada al perfil `admin` (D2: nada destructivo en `read` ni en
+`agent`). Revierte una publicación restaurando desde los backups cada archivo que
+modificó, y marca la publicación como `rolled_back`.
+
+Input:
+
+```json
+{
+  "publication_id": "...",
+  "actor": {}
+}
+```
+
+Reintentar el rollback de una publicación ya revertida devuelve un error de
+conflicto.
 
 ### `learning_doctor`
 

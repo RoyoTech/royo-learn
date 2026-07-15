@@ -89,6 +89,10 @@ func (s *publishSvc) Approve(ctx context.Context, projectID domain.ProjectID, in
 	return s.service().Approve(ctx, projectID, input)
 }
 
+func (s *publishSvc) Rollback(ctx context.Context, projectID domain.ProjectID, input *publish.RollbackPublicationInput) error {
+	return s.service().Rollback(ctx, projectID, input)
+}
+
 // ---------------------------------------------------------------------------
 // Tool input types — Go structs for automatic JSON Schema generation via AddTool.
 // ---------------------------------------------------------------------------
@@ -235,6 +239,27 @@ type listRecurrencesInput struct {
 
 type computeMetricsInput struct {
 	LearningID string `json:"learning_id" jsonschema:"required,learning ID"`
+}
+
+type reportOccurrenceInput struct {
+	LearningID     string     `json:"learning_id" jsonschema:"required,learning whose pattern recurred"`
+	Fingerprint    string     `json:"fingerprint,omitempty" jsonschema:"override the derived recurrence fingerprint"`
+	Summary        string     `json:"summary,omitempty" jsonschema:"what recurred"`
+	Outcome        string     `json:"outcome,omitempty" jsonschema:"outcome of the recurrence"`
+	Retrieved      bool       `json:"retrieved,omitempty" jsonschema:"whether the learning was retrieved"`
+	SkillActivated bool       `json:"skill_activated,omitempty" jsonschema:"whether the skill was activated"`
+	Evidence       string     `json:"evidence,omitempty" jsonschema:"reference to evidence for this occurrence"`
+	IdempotencyKey string     `json:"idempotency_key,omitempty" jsonschema:"the same key on a retry does not create a second record (D5)"`
+	Actor          actorInput `json:"actor" jsonschema:"required"`
+}
+
+type statusInput struct {
+	LearningID string `json:"learning_id" jsonschema:"required,learning ID"`
+}
+
+type rollbackInput struct {
+	PublicationID string     `json:"publication_id" jsonschema:"required,publication to roll back"`
+	Actor         actorInput `json:"actor,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -687,6 +712,103 @@ func handleComputeMetrics(srv *Server) func(ctx context.Context, req *mcp.CallTo
 			"trend":         string(metrics.Trend),
 			"needs_review":  metrics.NeedsReview,
 			"review_reason": metrics.ReviewReason,
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// report_occurrence / status / rollback (D17)
+// ---------------------------------------------------------------------------
+
+func handleReportOccurrence(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in reportOccurrenceInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in reportOccurrenceInput) (*mcp.CallToolResult, any, error) {
+		if in.LearningID == "" {
+			return toolError("invalid_argument", "learning_id is required")
+		}
+
+		tx, err := srv.db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if err != nil {
+			return toolError("db_error", err.Error())
+		}
+		learning, err := storage.GetLearning(ctx, tx, domain.LearningID(in.LearningID))
+		tx.Rollback()
+		if err != nil {
+			return toolError("get_learning_failed", err.Error())
+		}
+		if learning == nil {
+			return toolError("learning_not_found", fmt.Sprintf("learning %q not found", in.LearningID))
+		}
+
+		rec, isNew, err := recurrence.RecordOccurrence(ctx, srv.db, srv.projectID, learning, recurrence.OccurrenceInput{
+			Summary:        in.Summary,
+			Fingerprint:    in.Fingerprint,
+			Outcome:        in.Outcome,
+			Retrieved:      in.Retrieved,
+			SkillActivated: in.SkillActivated,
+			Evidence:       in.Evidence,
+			Actor:          toActor(in.Actor),
+			IdempotencyKey: in.IdempotencyKey,
+		})
+		if err != nil {
+			return toolError("report_occurrence_failed", err.Error())
+		}
+
+		return toolResultJSON(map[string]any{
+			"recurrence_id":   string(rec.ID),
+			"learning_id":     string(rec.LearningID),
+			"fingerprint":     rec.RecurrenceFingerprint,
+			"occurred_at":     rec.OccurredAt.Format(time.RFC3339),
+			"outcome":         rec.Outcome,
+			"retrieved":       rec.Retrieved,
+			"skill_activated": rec.SkillActivated,
+			"new":             isNew,
+		})
+	}
+}
+
+func handleStatus(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in statusInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in statusInput) (*mcp.CallToolResult, any, error) {
+		if in.LearningID == "" {
+			return toolError("invalid_argument", "learning_id is required")
+		}
+		tx, err := srv.db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if err != nil {
+			return toolError("db_error", err.Error())
+		}
+		learning, err := storage.GetLearning(ctx, tx, domain.LearningID(in.LearningID))
+		tx.Rollback()
+		if err != nil {
+			return toolError("get_learning_failed", err.Error())
+		}
+		if learning == nil {
+			return toolError("learning_not_found", fmt.Sprintf("learning %q not found", in.LearningID))
+		}
+		return toolResultJSON(map[string]any{
+			"learning_id": string(learning.ID),
+			"status":      string(learning.Status),
+			"type":        string(learning.Type),
+			"title":       learning.Title,
+			"revision":    learning.Revision,
+			"updated_at":  learning.UpdatedAt.Format(time.RFC3339),
+		})
+	}
+}
+
+func handleRollback(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in rollbackInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in rollbackInput) (*mcp.CallToolResult, any, error) {
+		if in.PublicationID == "" {
+			return toolError("invalid_argument", "publication_id is required")
+		}
+		err := srv.publishSvc.Rollback(ctx, srv.projectID, &publish.RollbackPublicationInput{
+			PublicationID: domain.PublicationID(in.PublicationID),
+			Actor:         toActor(in.Actor),
+		})
+		if err != nil {
+			return toolError("rollback_failed", err.Error())
+		}
+		return toolResultJSON(map[string]any{
+			"publication_id": in.PublicationID,
+			"status":         "rolled_back",
 		})
 	}
 }

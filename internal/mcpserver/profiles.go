@@ -303,4 +303,31 @@ var allTools = []profileTool{
 			bind(ms, t, handlePublishLearning(srv))
 		},
 	},
+	{
+		name:        "learning_report_occurrence",
+		description: "Record an explicit occurrence of a learning's pattern, with outcome, retrieval and skill-activation detail. The same idempotency_key on a retry does not create a second record (D5).",
+		access:      accessWrite,
+		profiles:    map[string]bool{profileAgent: true, profileAdmin: true},
+		register: func(ms *mcp.Server, srv *Server, t profileTool) {
+			bind(ms, t, handleReportOccurrence(srv))
+		},
+	},
+	{
+		name:        "learning_status",
+		description: "Report the current status of a learning: its lifecycle state, type, revision and last update.",
+		access:      accessRead,
+		profiles:    map[string]bool{profileRead: true, profileAgent: true, profileAdmin: true},
+		register: func(ms *mcp.Server, srv *Server, t profileTool) {
+			bind(ms, t, handleStatus(srv))
+		},
+	},
+	{
+		name:        "learning_rollback",
+		description: "Roll back a publication, restoring every file it changed from backups. Destructive: confined to the admin profile.",
+		access:      accessDestructive,
+		profiles:    map[string]bool{profileAdmin: true},
+		register: func(ms *mcp.Server, srv *Server, t profileTool) {
+			bind(ms, t, handleRollback(srv))
+		},
+	},
 }
