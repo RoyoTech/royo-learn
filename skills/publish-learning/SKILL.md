@@ -4,7 +4,7 @@ description: Publish only a curated and approved learning. Generate and show a p
 license: MIT
 metadata:
   author: RoyoTech
-  version: "3.0.0"
+  version: "4.0.0"
   mcp_profile: admin
 ---
 
@@ -24,27 +24,32 @@ metadata:
 1. Call `learning_publication_preview`.
 2. Inspect targets, diff, risk and verification.
 3. Show high-impact previews to the user.
-4. For AGENTS.md, shared scope or existing Skill updates, stop and obtain explicit human approval before continuing. See "Approval step" below.
-5. Call `learning_publish` with the exact preview hash.
+4. When the preview reports `requires_approval: true` (AGENTS.md, shared scope or
+   existing Skill updates), obtain explicit human approval, then call
+   `learning_approve` with the exact preview hash to record it. See "Approval
+   step" below.
+5. Call `learning_publish` with the exact preview hash, and pass the
+   `approval_id` returned by `learning_approve` whenever approval was required.
 6. Verify result and registry.
 7. If verification fails, ensure rollback occurred.
 8. Report canonical target and publication ID.
 
 ## Approval step
 
-There is no approval tool yet. The publication approval bound to a preview hash
-lands in Recorrido C of the contract recovery, together with the destination-based
-approval policies. Until it ships, this Skill deliberately cites no approval tool,
-because a Skill must never cite a tool that does not exist (decision D15).
+royo-learn now enforces approval. When a preview reports `requires_approval: true`,
+publishing is refused until a valid approval exists, so the burden is shared with
+the tool rather than resting entirely on you.
 
-Consequences you must respect in the meantime:
-
-- approval is obtained from the user in conversation, not through royo-learn;
-- royo-learn does not yet enforce it, so the burden is entirely on you;
-- never treat a preview as an authorization: a preview describes, it does not permit.
-
-When Recorrido C lands, step 4 becomes a call to the approval tool and this section
-is removed.
+- obtain explicit human approval in conversation first;
+- record it with `learning_approve`, passing the exact `preview_hash`,
+  `approved_by`, `reason` and `approval_evidence` (a link, message id or ticket);
+- the approval is bound to that preview hash. It is rejected if the preview
+  changes, a destination changes, the prior file content of a destination
+  changes, the relevant policy changes, it expires, or it is revoked;
+- never treat a preview as an authorization: a preview describes, it does not
+  permit;
+- never reuse an approval for a different preview — `learning_publish` will
+  reject it.
 
 ## Rules
 
