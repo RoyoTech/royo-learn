@@ -704,3 +704,154 @@ aprobación se obtiene por `learning_approve` / `royo-learn approve`.
 **Resultado del Recorrido C: PASS. Sin FAIL.** El único fallo de
 `go test ./...` es la contención de antivirus en `internal/buildinfo`, ambiental
 y ajena a este recorrido.
+
+---
+
+## Tramo 2 · Recorrido D — Publicación segura y estados verdaderos (2026-07-14)
+
+Objetivo: el sistema **nunca** informa éxito parcial y **nunca** deja archivos
+modificados tras un fallo tardío. `published` se alcanza **solo** después de que
+todas las escrituras terminen, las verificaciones pasen, el registro de
+publicación persista y la auditoría quede escrita.
+
+### Commits
+
+| Hash | Mensaje | Rol |
+|------|---------|-----|
+| `d8c71ae` | `test: bind the preview hash to the whole publication plan` | Prueba roja (no compila: falta `domain.PublicationPlanTarget`). |
+| `3db951d` | `feat: bind preview hash to per-destination prior and posterior hashes` | Verde: preview persiste el plan completo por destino. |
+| `5230363` | `test: require --apply to write and dry-run by default` | Prueba roja (falta el campo `Apply`). |
+| `e32bf41` | `feat: dry-run publish by default and require --apply to write` | Verde: D7 en servicio, CLI y MCP. |
+| `4e4736e` | `refactor: order the publish flow and add a fault-injection seam` | Reordena el flujo, compensa todo fallo tardío y añade la costura de inyección. Toda la suite previa queda verde. |
+| `5b856a2` | `test: prove publication leaves no false published under seven faults` | Las siete pruebas de inyección de fallo. |
+| *(este)* | `docs: record Recorrido D closure in the recovery log` | Documentación. |
+
+### Qué se hizo
+
+1. **Preview que liga el plan completo (no solo el diff).** El preview persiste
+   ahora, por destino, `root`, `path`, operación, **hash previo** y **hash
+   posterior** (`domain.PublicationPlanTarget`, `internal/domain/types.go`). El
+   `preview_hash` se calcula sobre `PlanSignature(targets)` +
+   `PolicySignature(policies)` (`internal/publish/policy.go`,
+   `internal/publish/preview.go`). No se estrecha respecto de Recorrido C: el
+   hash del contenido subsume el diff combinado y añade explícitamente la
+   operación y la raíz por destino. Se persiste en `plan_json` (columna JSON), sin
+   migración de esquema.
+2. **Dry-run por defecto (D7).** `PublishInput.Apply` (default `false`). Sin él,
+   `Service.Publish` valida el plan y **no escribe nada**, devolviendo un
+   resultado marcado `DryRun`. Escribir exige `--apply` (CLI) / `apply: true`
+   (MCP); `--apply` y `--dry-run=false` son equivalentes. La puerta de dry-run
+   vive en el servicio: es la segunda línea de defensa, independiente de la
+   aprobación, y ningún handler puede escribir por accidente.
+3. **Flujo de aplicación en el orden exacto del plan**
+   (`internal/publish/publish_op.go`):
+   `validar aprendizaje → validar preview → validar aprobación → validar hashes
+   actuales → adquirir lock → crear backups → registrar intento (journal) →
+   escribir → verificar → persistir resultado → marcar published → cerrar
+   journal`.
+4. **`published` solo tras el éxito total.** `learning.Status = Published` y el
+   registro de publicación se persisten en **una sola transacción**. Cualquier
+   fallo posterior a la primera escritura ejecuta compensación (rollback),
+   registra el resultado en el journal, **no** marca `published` y devuelve un
+   error estructurado.
+5. **Instrucción de recuperación cuando el rollback falla.** `Service.compensate`
+   devuelve un `domain.DomainError` con código `rollback_failed`, los backups
+   pendientes y la instrucción (`royo-learn rollback --journal-id … && royo-learn
+   doctor`). El journal registra el estado `rollback_failed`. El defecto que se
+   corrige: antes, un fallo de journal o de la actualización final de SQLite tras
+   escribir dejaba archivos modificados **sin** rollback.
+
+### Las siete pruebas de inyección de fallo
+
+Todas en `internal/publish/fault_injection_test.go`, conducidas por
+`Service.Publish` con una **costura real** (`FileWriter` inyectable + `FaultHooks`,
+`internal/publish/publish.go`); ninguna manipula el almacenamiento por detrás del
+servicio.
+
+| # | Punto de fallo | Prueba | Asalto |
+|---|----------------|--------|--------|
+| 1 | Escritura del primer archivo | `TestFault_FirstFileWriteFails` | writer falla en la llamada 1 |
+| 2 | Escritura del segundo archivo | `TestFault_SecondFileWriteFails` | multi-destino; writer falla en la llamada 2 |
+| 3 | Verificación | `TestFault_VerificationFails` | writer corrompe el contenido; el hash on-disk no cuadra |
+| 4 | Journal (registro de intento) | `TestFault_JournalAttemptFails` | `FaultHooks.BeforeJournalAttempt` |
+| 5 | Actualización final de SQLite | `TestFault_FinalSQLiteUpdateFails` | `FaultHooks.BeforeDBCommit` |
+| 6 | El rollback mismo | `TestFault_RollbackItselfFailsEmitsRecoveryInstruction` | corrupción + `FaultHooks.FailRollback` |
+| 7 | Destino modificado tras el preview | `TestFault_DestinationModifiedAfterPreviewIsRefused` | edición out-of-band; `target_changed` |
+
+Cada prueba afirma: **cero `published` falso** (el aprendizaje sigue `approved`)
+y **cero archivo modificado** — el rollback restaura byte a byte (`#3`, `#5`) o
+elimina el archivo nuevo (`#1`, `#2`). En `#6`, con el rollback roto, se afirma
+que se emite una instrucción de recuperación con código `rollback_failed`. En
+`#7` se rehúsa **antes** de escribir.
+
+### Determinación sobre el outbox (regla dura)
+
+**Journal + compensación + `doctor` bastan. No se introdujo outbox.** Ninguna de
+las siete pruebas de corte demostró una ventana irrecuperable que journal +
+compensación no cubran:
+
+- El **registro de intento** se escribe en el journal **antes** de cualquier
+  escritura, con la publicación, sus destinos y los backups: un corte entre ahí
+  y el final es recuperable solo desde el journal.
+- Todo fallo posterior a la escritura compensa y registra el desenlace
+  (`rolled_back` o `rollback_failed`) en el journal.
+- El caso #6 (rollback roto) **no** es una ventana silenciosa: el sistema emite
+  una instrucción de recuperación y deja el rastro durable (journal +
+  backups) para `royo-learn rollback` y `royo-learn doctor`.
+
+Por tanto **no se paró para revisión humana de outbox**: no había necesidad
+demostrada (regla §1.2 del plan y D6).
+
+### Ajustes de firma en pruebas previas (justificados, no debilitados)
+
+`Apply` es un campo obligatorio nuevo. Se añadió `Apply: true` a los llamadores
+de `Service.Publish` de las pruebas M1/M2/M3/E2E y de integración
+(`internal/publish/publish_test.go`, `internal/publish/skill_area_explicit_test.go`,
+`internal/integration/*`), y `--apply` / `apply: true` a las dos pruebas de
+Recorrido C que ejercen una publicación **exitosa** (`TestCLI_ApprovalGate`,
+`TestApprovalGate_ValidApprovalIsAccepted`) y a `main_test.go`. Las pruebas de
+bloqueo de C (aprobación ausente/errónea) **no** se tocaron: la validación de
+aprobación ocurre antes de la puerta de dry-run, así que siguen bloqueando. No se
+debilitó ninguna aserción; solo se declara el flag que D7 introduce.
+
+### Nota de interpretación — «adquirir lock»
+
+El flujo del plan lista «adquirir lock». El sistema no tiene un lock de sistema
+operativo y no se introdujo uno (sería rediseño §1.2 sin necesidad probada). Se
+implementó como la comprobación de árbol sucio (`CheckDirtyWorktree`) más la
+línea base de bloqueo optimista por hash ya existente (M3). No es una
+contradicción de contrato; no requiere número D.
+
+### Comandos ejecutados — resultado real
+
+- `go build ./...` — `exit=0`.
+- `go vet ./...` — `exit=0`.
+- `go test -p 1 -count=1 ./...` — todo **ok** salvo `internal/buildinfo`
+  (`fork/exec … Access is denied`), contención de antivirus conocida de esta
+  máquina; el paquete no lo toca este recorrido. Verificado en aislamiento
+  compilando a ruta estable: `PASS`.
+- `go test -race -p 1 ./...` — **todos los paquetes ok, sin data races**
+  (incluido `internal/buildinfo`, que en modo `-race` no sufre la contención).
+
+### Puerta de salida del Recorrido D
+
+| # | Criterio | Estado |
+|---|----------|--------|
+| 1 | `published` solo tras escritura+verificación+persistencia+auditoría | **PASS** |
+| 2 | Un fallo tardío nunca deja `published` falso | **PASS** — 7/7 pruebas |
+| 3 | Rollback restaura byte a byte (o elimina el archivo nuevo) | **PASS** — `#1`–`#5` |
+| 4 | Instrucción de recuperación si el rollback falla | **PASS** — `#6`, código `rollback_failed` |
+| 5 | Destino modificado tras el preview → rehúsa | **PASS** — `#7`, `target_changed` |
+| 6 | Dry-run por defecto; escribir exige `--apply` | **PASS** |
+| 7 | El preview hash liga el plan completo | **PASS** |
+| 8 | Journal + compensación suficientes; sin outbox | **PASS** |
+| 9 | `go build` / `go vet` limpios; `-race` verde | **PASS** |
+
+**Resultado del Recorrido D: PASS. Sin FAIL.** El único fallo de
+`go test ./...` es la contención de antivirus en `internal/buildinfo`, ambiental
+y ajena a este recorrido; en `-race` no aparece.
+
+### Siguiente paso
+
+Recorrido E — reemplazar el E2E permisivo (`cmd/royo-learn/e2e.go`) por los
+escenarios CLI (19 pasos) y MCP reales. **No tocado en este recorrido.**
