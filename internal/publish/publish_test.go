@@ -208,8 +208,11 @@ func TestEvaluatePolicies_ProcedureType_Shared(t *testing.T) {
 
 	policies := EvaluatePolicies(learning, curation)
 
-	if RequiresHumanApproval(policies) {
-		t.Error("procedure type + approved shared knowledge should NOT require human approval")
+	// D4/D11: shared scope always requires human approval, regardless of the
+	// curation decision that derived the destination. The old expectation here
+	// (no approval for approve_shared_knowledge) WAS the governance hole.
+	if !RequiresHumanApproval(policies) {
+		t.Error("procedure type + shared destination must require human approval")
 	}
 }
 
@@ -551,8 +554,11 @@ func TestEvaluatePolicies_AgentsRuleApproved(t *testing.T) {
 	}
 
 	policies := EvaluatePolicies(learning, curation)
-	if RequiresHumanApproval(policies) {
-		t.Error("AGENTS.md with approve_agents_rule decision should NOT require human approval")
+	// D4/D11: AGENTS.md always requires human approval. Deriving the destination
+	// via approve_agents_rule does NOT pre-authorize writing the file that
+	// governs every agent — that pre-authorization was the governance hole.
+	if !RequiresHumanApproval(policies) {
+		t.Error("AGENTS.md destination must always require human approval")
 	}
 }
 
