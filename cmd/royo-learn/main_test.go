@@ -811,6 +811,18 @@ func TestRunE2ETempCompletesAllSteps(t *testing.T) {
 		t.Skip("skipping e2e test in short mode")
 	}
 
+	// The MCP scenario spawns `royo-learn mcp-serve` as a subprocess. Under
+	// `go test`, os.Executable() is the test binary, so build a real binary and
+	// point the e2e at it through ROYO_LEARN_E2E_BIN.
+	bin := filepath.Join(t.TempDir(), "royo-learn-e2e")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build royo-learn binary for e2e: %v\n%s", err, out)
+	}
+	t.Setenv("ROYO_LEARN_E2E_BIN", bin)
+
 	var stdout, stderr bytes.Buffer
 	exitCode := run([]string{"e2e", "--temp"}, &stdout, &stderr)
 	if exitCode != exitSuccess {
@@ -826,12 +838,12 @@ func TestRunE2ETempCompletesAllSteps(t *testing.T) {
 		t.Fatal("e2e result has zero steps")
 	}
 	if result.Failed > 0 {
-		t.Fatalf("e2e had %d failing steps:\n", result.Failed)
 		for _, s := range result.Steps {
 			if !s.Passed {
 				t.Logf("  FAIL %s: %s", s.Step, s.Error)
 			}
 		}
+		t.Fatalf("e2e had %d failing steps", result.Failed)
 	}
 	if result.Summary == "" {
 		t.Error("e2e result missing summary")
