@@ -31,6 +31,8 @@ const (
 	ErrPublicationConflict   ErrorCode = "publication_conflict"
 	ErrVerificationFailed    ErrorCode = "verification_failed"
 	ErrRollbackConflict      ErrorCode = "rollback_conflict"
+	ErrRollbackFailed        ErrorCode = "rollback_failed"
+	ErrPublicationFailed     ErrorCode = "publication_failed"
 	ErrDatabaseLocked        ErrorCode = "database_locked"
 	ErrDatabaseCorrupt       ErrorCode = "database_corrupt"
 	ErrMigrationChecksum     ErrorCode = "migration_checksum_mismatch"

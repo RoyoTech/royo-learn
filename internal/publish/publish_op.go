@@ -147,11 +147,21 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 		return &PublishResult{DryRun: true, Targets: planEntries}, nil
 	}
 
-	// 6. Check dirty worktree (unless --force).
+	// From here the plan is fixed. Every failure after the FIRST write must
+	// restore the tree byte-for-byte and must NEVER mark the learning published.
+
+	// 6. Validate current hashes: refuse if any destination changed on disk
+	// after the preview was taken (prior-hash mismatch). No file has been
+	// touched yet, so this is a plain refusal with nothing to compensate.
+	if err := s.validateCurrentHashes(preview, targets); err != nil {
+		return nil, err
+	}
+
+	// 7. Acquire lock: refuse a dirty worktree (unless --force).
 	if !input.Force {
-		dirty, err := CheckDirtyWorktree(s.projectRoot, targets)
-		if err != nil {
-			return nil, fmt.Errorf("Publish: check dirty: %w", err)
+		dirty, derr := CheckDirtyWorktree(s.projectRoot, targets)
+		if derr != nil {
+			return nil, fmt.Errorf("Publish: check dirty: %w", derr)
 		}
 		if dirty.IsDirty {
 			return nil, domain.NewConflictError(domain.ErrDirtyTarget,
@@ -159,39 +169,73 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 		}
 	}
 
-	// 7. Back up target files.
+	// 8. Create backups of every target file.
 	backupMgr := NewBackupManager(s.projectRoot, s.backupDir)
 	var backupEntries []BackupEntry
 	for _, target := range targets {
 		// target.Root is RELATIVE to projectRoot; join gives the full relative path.
 		relPath := filepath.Join(target.Root, target.Path)
-		entry, err := backupMgr.BackupFile(relPath)
-		if err != nil {
-			return nil, fmt.Errorf("Publish: backup %s: %w", target.Path, err)
+		entry, berr := backupMgr.BackupFile(relPath)
+		if berr != nil {
+			return nil, fmt.Errorf("Publish: backup %s: %w", target.Path, berr)
 		}
 		backupEntries = append(backupEntries, *entry)
 	}
 
-	// 7b. Capture file hashes after backup for optimistic locking (M3).
+	// 8b. Optimistic-lock baseline: capture hashes after backup so a concurrent
+	// edit during the write loop is still detected.
 	fileHashes := make(map[string]string)
 	for _, target := range targets {
 		if target.Exists {
 			relPath := filepath.Join(target.Root, target.Path)
-			targetFullPath := filepath.Join(s.projectRoot, relPath)
-			h, err := HashFile(targetFullPath)
-			if err != nil {
-				return nil, fmt.Errorf("Publish: hash target %s: %w", target.Path, err)
+			h, herr := HashFile(filepath.Join(s.projectRoot, relPath))
+			if herr != nil {
+				return nil, fmt.Errorf("Publish: hash target %s: %w", target.Path, herr)
 			}
 			fileHashes[relPath] = h
 		}
 	}
 
-	// 8. Build per-target content.
-	targetContents := s.buildPublishContents(ctx, targets, learning, curation, targetCtx)
+	// Assemble the target/backup summary used for both the journal and the
+	// publication record.
+	pubID := domain.PublicationID(uuid.Must(uuid.NewV7()).String())
+	targetEntries := make([]domain.TargetEntry, 0, len(targets))
+	backupPaths := make([]string, 0, len(targets))
+	for i, target := range targets {
+		targetEntries = append(targetEntries, domain.TargetEntry{
+			Root: target.Root, Path: target.Path, Operation: target.Operation,
+		})
+		backupPaths = append(backupPaths, backupEntries[i].BackupPath)
+	}
 
-	// 9. Write files atomically.
-	writer := NewWriter(s.projectRoot)
-	var targetEntries []domain.TargetEntry
+	// 9. Record the attempt in the journal BEFORE writing. This is the durable
+	// recovery record: it names the publication, its targets and the backups, so
+	// a crash between here and completion is recoverable from the journal alone.
+	// If it fails, we abort before any write — nothing is left modified.
+	journal, jErr := NewJournal(s.journalDir)
+	if jErr != nil {
+		return nil, fmt.Errorf("Publish: create journal: %w", jErr)
+	}
+	if s.faults != nil && s.faults.BeforeJournalAttempt != nil {
+		if fErr := s.faults.BeforeJournalAttempt(); fErr != nil {
+			return nil, fmt.Errorf("Publish: journal: %w", fErr)
+		}
+	}
+	if aErr := journal.Append(JournalEntry{
+		PublicationID:  string(pubID),
+		LearningID:     string(input.LearningID),
+		Targets:        targetEntries,
+		BackupPaths:    backupPaths,
+		RollbackStatus: "attempting",
+	}); aErr != nil {
+		return nil, fmt.Errorf("Publish: journal: %w", aErr)
+	}
+
+	// 10. Build per-target content and write files. Any failure after this point
+	// compensates (rolls back) and returns a structured error; it never marks
+	// the learning published.
+	targetContents := s.buildPublishContents(ctx, targets, learning, curation, targetCtx)
+	writer := s.fileWriter()
 	var rollbackEntries []domain.RollbackEntry
 	writtenContents := make(map[string]string)
 
@@ -199,128 +243,58 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 		relPath := filepath.Join(target.Root, target.Path)
 		targetFullPath := filepath.Join(s.projectRoot, relPath)
 
-		var contentToWrite string
-
-		if target.IsManaged {
-			// Managed blocks: insert/merge into existing content.
-			if target.Exists {
-				existingContent, readErr := os.ReadFile(targetFullPath)
-				if readErr != nil {
-					if rbErr := rollbackAll(backupMgr, backupEntries); rbErr != nil {
-						return nil, fmt.Errorf("Publish: read existing file %s: %w (rollback also failed: %v)",
-							target.Path, readErr, rbErr)
-					}
-					return nil, fmt.Errorf("Publish: read existing file %s: %w", target.Path, readErr)
-				}
-
-				// For AGENTS.md, insert the reference line.
-				if target.Path == "AGENTS.md" && targetCtx != nil {
-					newContent, _ := InsertAgentsRef(string(existingContent), targetCtx.ProjectKey)
-					contentToWrite = newContent
-				} else {
-					managedContent := fmt.Sprintf("<!-- royo-learn:managed id:%s -->\n%s",
-						input.LearningID, targetContents[i].Content)
-					contentToWrite = InsertManagedBlock(string(existingContent), managedContent)
-				}
-			} else {
-				// Create new file with managed block.
-				if target.Path == "AGENTS.md" && targetCtx != nil {
-					contentToWrite = BuildAgentsRefManagedBlock(targetCtx.ProjectKey)
-					if !strings.HasSuffix(contentToWrite, "\n") {
-						contentToWrite += "\n"
-					}
-				} else {
-					managedContent := fmt.Sprintf("<!-- royo-learn:managed id:%s -->\n%s",
-						input.LearningID, targetContents[i].Content)
-					contentToWrite = InsertManagedBlock("", managedContent)
-				}
-			}
-		} else {
-			contentToWrite = targetContents[i].Content
+		contentToWrite, cErr := s.composeTargetContent(target, targetContents[i].Content, input.LearningID, targetCtx)
+		if cErr != nil {
+			return nil, s.compensate(journal, backupMgr, backupEntries, pubID, input.LearningID, targetEntries, backupPaths,
+				fmt.Sprintf("read existing file %s", target.Path), cErr)
 		}
 
-		// 9b. Optimistic locking (M3).
+		// Optimistic locking (M3): detect a concurrent edit since the baseline.
 		if !input.Force && target.Exists {
-			changed, err := hashChanged(targetFullPath, relPath, fileHashes)
-			if err != nil {
-				if rbErr := rollbackAll(backupMgr, backupEntries); rbErr != nil {
-					return nil, fmt.Errorf("Publish: %w (rollback also failed: %v)", err, rbErr)
-				}
-				return nil, fmt.Errorf("Publish: %w", err)
+			changed, hErr := hashChanged(targetFullPath, relPath, fileHashes)
+			if hErr != nil {
+				return nil, s.compensate(journal, backupMgr, backupEntries, pubID, input.LearningID, targetEntries, backupPaths,
+					fmt.Sprintf("re-hash %s", target.Path), hErr)
 			}
 			if changed {
 				conflictErr := domain.NewConflictError(domain.ErrDirtyTarget,
 					fmt.Sprintf("target file was modified after backup: %s — retry or use --force", target.Path))
-				if rbErr := rollbackAll(backupMgr, backupEntries); rbErr != nil {
-					return nil, fmt.Errorf("Publish: %w (rollback also failed: %v)", conflictErr, rbErr)
-				}
-				return nil, conflictErr
+				return nil, s.compensate(journal, backupMgr, backupEntries, pubID, input.LearningID, targetEntries, backupPaths,
+					fmt.Sprintf("concurrent edit on %s", target.Path), conflictErr)
 			}
 		}
 
-		if err := writer.WriteFile(relPath,
-			[]byte(contentToWrite), 0o644); err != nil {
-			if rbErr := rollbackAll(backupMgr, backupEntries); rbErr != nil {
-				return nil, fmt.Errorf("Publish: write %s: %w (rollback also failed: %v)",
-					target.Path, err, rbErr)
-			}
-			return nil, fmt.Errorf("Publish: write %s: %w", target.Path, err)
+		if wErr := writer.WriteFile(relPath, []byte(contentToWrite), 0o644); wErr != nil {
+			return nil, s.compensate(journal, backupMgr, backupEntries, pubID, input.LearningID, targetEntries, backupPaths,
+				fmt.Sprintf("write %s", target.Path), wErr)
 		}
 
-		targetEntries = append(targetEntries, domain.TargetEntry{
-			Root:      target.Root,
-			Path:      target.Path,
-			Operation: target.Operation,
-		})
 		rollbackEntries = append(rollbackEntries, domain.RollbackEntry{
-			Path:    relPath,
-			Backup:  backupEntries[i].BackupPath,
-			Success: true,
+			Path: relPath, Backup: backupEntries[i].BackupPath, Success: true,
 		})
-
 		writtenContents[relPath] = contentToWrite
 	}
 
-	// 10. Verify: check files exist and content hashes match (H1).
+	// 11. Verify: every file must exist and match its expected content hash. A
+	// verification failure is a late failure and must compensate.
 	verification := verifyTargets(s.projectRoot, targetEntries, writtenContents)
-
-	// 11. On verification failure, rollback.
-	allVerified := true
 	for _, v := range verification {
 		if !v.Pass {
-			allVerified = false
-			break
+			return nil, s.compensate(journal, backupMgr, backupEntries, pubID, input.LearningID, targetEntries, backupPaths,
+				"verification failed",
+				domain.NewValidationError(domain.ErrVerificationFailed, "verification failed: "+v.Check+" ("+v.Note+")"))
 		}
 	}
 
+	// 12. Persist result and mark published atomically. The publication record
+	// and the published status commit in ONE transaction: either both land or
+	// neither does, so a commit failure never leaves a false `published`.
 	now := utcNowPublish()
-	pubStatus := domain.PubStatusCompleted
-	var errorCode, errorMsg *string
-
-	if !allVerified {
-		pubStatus = domain.PubStatusFailed
-		code := string(domain.ErrVerificationFailed)
-		errorCode = &code
-		msg := "verification failed — files have been rolled back"
-		errorMsg = &msg
-
-		if rbErr := rollbackAll(backupMgr, backupEntries); rbErr != nil {
-			rbCode := "rollback_failed"
-			errorCode = &rbCode
-			rbMsg := fmt.Sprintf("verification failed AND rollback failed — files may be in corrupt state: %v", rbErr)
-			errorMsg = &rbMsg
-		}
-	}
-
-	// 12. Build publication record.
-	pubID := domain.PublicationID(uuid.Must(uuid.NewV7()).String())
 	learning.Status = domain.StatusPublished
-
 	var approvalID *domain.ApprovalID
 	if approval != nil {
 		approvalID = &approval.ID
 	}
-
 	pub := &domain.Publication{
 		ID:           pubID,
 		LearningID:   input.LearningID,
@@ -329,50 +303,172 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 		Targets:      targetEntries,
 		Verification: verification,
 		Rollback:     rollbackEntries,
-		Status:       pubStatus,
+		Status:       domain.PubStatusCompleted,
 		StartedAt:    now,
 		CompletedAt:  &now,
-		ErrorCode:    errorCode,
-		ErrorMessage: errorMsg,
 	}
 
-	// 13. Write journal entry BEFORE DB commit (M2).
-	journal, err := NewJournal(s.journalDir)
-	if err != nil {
-		return nil, fmt.Errorf("Publish: create journal: %w", err)
+	if s.faults != nil && s.faults.BeforeDBCommit != nil {
+		if fErr := s.faults.BeforeDBCommit(); fErr != nil {
+			return nil, s.compensate(journal, backupMgr, backupEntries, pubID, input.LearningID, targetEntries, backupPaths,
+				"persist publication", fErr)
+		}
 	}
-	jEntry := JournalEntry{
-		PublicationID: string(pubID),
-		LearningID:    string(input.LearningID),
-		Targets:       targetEntries,
-		Verification:  verification,
-	}
-	for _, be := range backupEntries {
-		jEntry.BackupPaths = append(jEntry.BackupPaths, be.BackupPath)
-	}
-	if err := journal.Append(jEntry); err != nil {
-		return nil, fmt.Errorf("Publish: journal: %w", err)
-	}
-
-	// 14. Persist publication record (DB commit).
-	if err := storage.WithTx(ctx, s.db, func(tx *sql.Tx) error {
+	if pErr := storage.WithTx(ctx, s.db, func(tx *sql.Tx) error {
 		if saveErr := storage.SavePublication(ctx, tx, pub); saveErr != nil {
 			return fmt.Errorf("save publication: %w", saveErr)
 		}
-		if allVerified {
-			if updateErr := storage.UpdateLearning(ctx, tx, learning); updateErr != nil {
-				return fmt.Errorf("update learning: %w", updateErr)
-			}
+		if updateErr := storage.UpdateLearning(ctx, tx, learning); updateErr != nil {
+			return fmt.Errorf("update learning: %w", updateErr)
 		}
 		return nil
-	}); err != nil {
-		return nil, fmt.Errorf("Publish: persist publication: %w", err)
+	}); pErr != nil {
+		return nil, s.compensate(journal, backupMgr, backupEntries, pubID, input.LearningID, targetEntries, backupPaths,
+			"persist publication", pErr)
 	}
+
+	// 13. Close the journal with the successful outcome.
+	_ = journal.Append(JournalEntry{
+		PublicationID:  string(pubID),
+		LearningID:     string(input.LearningID),
+		Targets:        targetEntries,
+		Verification:   verification,
+		RollbackStatus: "completed",
+	})
 
 	return &PublishResult{
 		Publication: pub,
 		JournalID:   string(pubID),
+		Targets:     targetEntries,
 	}, nil
+}
+
+// composeTargetContent produces the exact bytes to write for a target, applying
+// managed-block/AGENTS.md merge rules for managed destinations.
+func (s *Service) composeTargetContent(target TargetResolution, proposed string, learningID domain.LearningID, targetCtx *TargetContext) (string, error) {
+	if !target.IsManaged {
+		return proposed, nil
+	}
+
+	targetFullPath := filepath.Join(s.projectRoot, target.Root, target.Path)
+
+	if target.Exists {
+		existingContent, readErr := os.ReadFile(targetFullPath)
+		if readErr != nil {
+			return "", readErr
+		}
+		if target.Path == "AGENTS.md" && targetCtx != nil {
+			newContent, _ := InsertAgentsRef(string(existingContent), targetCtx.ProjectKey)
+			return newContent, nil
+		}
+		managedContent := fmt.Sprintf("<!-- royo-learn:managed id:%s -->\n%s", learningID, proposed)
+		return InsertManagedBlock(string(existingContent), managedContent), nil
+	}
+
+	// Create a new managed file.
+	if target.Path == "AGENTS.md" && targetCtx != nil {
+		content := BuildAgentsRefManagedBlock(targetCtx.ProjectKey)
+		if !strings.HasSuffix(content, "\n") {
+			content += "\n"
+		}
+		return content, nil
+	}
+	managedContent := fmt.Sprintf("<!-- royo-learn:managed id:%s -->\n%s", learningID, proposed)
+	return InsertManagedBlock("", managedContent), nil
+}
+
+// validateCurrentHashes refuses the publication if any destination changed on
+// disk after the preview was taken. It compares each destination's current
+// content hash against the prior hash the preview recorded. A bare preview with
+// no recorded targets skips the check (backward compatibility).
+func (s *Service) validateCurrentHashes(preview *domain.PublicationPreview, targets []TargetResolution) error {
+	if preview == nil || len(preview.Plan.Targets) == 0 {
+		return nil
+	}
+	priorByKey := make(map[string]string, len(preview.Plan.Targets))
+	for _, pt := range preview.Plan.Targets {
+		priorByKey[filepath.Join(pt.Root, pt.Path)] = pt.PriorHash
+	}
+	for _, target := range targets {
+		key := filepath.Join(target.Root, target.Path)
+		recorded, ok := priorByKey[key]
+		if !ok {
+			continue
+		}
+		var current string
+		if data, err := os.ReadFile(filepath.Join(s.projectRoot, key)); err == nil {
+			current = HashContent(data)
+		}
+		if current != recorded {
+			return domain.NewConflictError(domain.ErrTargetChanged,
+				fmt.Sprintf("destination %s changed on disk after the preview was taken — regenerate the preview and re-approve", target.Path))
+		}
+	}
+	return nil
+}
+
+// compensate rolls back every backed-up file after a post-write failure,
+// records the outcome in the journal, and returns a structured error. It NEVER
+// marks the learning published. When the rollback itself fails, the returned
+// error carries a recovery instruction (the backup paths and the journal ID) so
+// a human or `doctor` can restore the tree manually (H2).
+func (s *Service) compensate(journal *Journal, backupMgr *BackupManager, backups []BackupEntry,
+	pubID domain.PublicationID, learningID domain.LearningID, targets []domain.TargetEntry, backupPaths []string,
+	stage string, cause error) error {
+
+	rbErr := s.rollbackBackups(backupMgr, backups)
+	status := "rolled_back"
+	if rbErr != nil {
+		status = "rollback_failed"
+	}
+	if journal != nil {
+		_ = journal.Append(JournalEntry{
+			PublicationID:  string(pubID),
+			LearningID:     string(learningID),
+			Targets:        targets,
+			BackupPaths:    backupPaths,
+			RollbackStatus: status,
+		})
+	}
+
+	if rbErr != nil {
+		var restorable []string
+		for _, p := range backupPaths {
+			if p != "" {
+				restorable = append(restorable, p)
+			}
+		}
+		return &domain.DomainError{
+			Code: domain.ErrRollbackFailed,
+			Message: fmt.Sprintf("%s failed and the compensating rollback also failed — the tree may be partially modified",
+				stage),
+			Recoverable: false,
+			Details: map[string]any{
+				"journal_id": string(pubID),
+				"backups":    restorable,
+			},
+			NextAction: fmt.Sprintf("restore the listed backup files manually or run 'royo-learn rollback --journal-id %s', then verify with 'royo-learn doctor'",
+				pubID),
+			Cause: cause,
+		}
+	}
+
+	return &domain.DomainError{
+		Code:        domain.ErrPublicationFailed,
+		Message:     fmt.Sprintf("%s — all files were rolled back to their prior state; nothing was published", stage),
+		Recoverable: true,
+		NextAction:  "inspect the cause, fix it, then retry the publication",
+		Cause:       cause,
+	}
+}
+
+// rollbackBackups performs the actual restore, honoring the FailRollback fault
+// hook so a test can prove the recovery instruction path.
+func (s *Service) rollbackBackups(backupMgr *BackupManager, entries []BackupEntry) error {
+	if s.faults != nil && s.faults.FailRollback != nil {
+		return s.faults.FailRollback()
+	}
+	return rollbackAll(backupMgr, entries)
 }
 
 // buildPublishContents builds the content for each target during publish.
