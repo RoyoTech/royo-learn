@@ -214,6 +214,7 @@ func TestApprovalGate_ValidApprovalIsAccepted(t *testing.T) {
 		"learning_id":  learningID,
 		"preview_hash": hash,
 		"approval_id":  approvalID,
+		"apply":        true,
 		"actor":        map[string]any{"kind": "agent", "name": "recorrido-c"},
 	})
 	if status, _ := published["status"].(string); status != "completed" {

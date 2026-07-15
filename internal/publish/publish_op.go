@@ -133,6 +133,20 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 		return nil, fmt.Errorf("Publish: resolve targets: %w", err)
 	}
 
+	// Dry-run gate (D7): validation has passed, but a write requires an explicit
+	// Apply. Without it, return the plan and touch NO file. This runs AFTER the
+	// approval and preview checks so a dry run still reports "this would be
+	// blocked" instead of silently succeeding.
+	planEntries := make([]domain.TargetEntry, 0, len(targets))
+	for _, t := range targets {
+		planEntries = append(planEntries, domain.TargetEntry{
+			Root: t.Root, Path: t.Path, Operation: t.Operation,
+		})
+	}
+	if !input.Apply {
+		return &PublishResult{DryRun: true, Targets: planEntries}, nil
+	}
+
 	// 6. Check dirty worktree (unless --force).
 	if !input.Force {
 		dirty, err := CheckDirtyWorktree(s.projectRoot, targets)

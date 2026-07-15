@@ -89,6 +89,7 @@ func TestCLI_ApprovalGate(t *testing.T) {
 		"--learning-id", learningID,
 		"--preview-hash", previewHash,
 		"--approval-id", approvalID,
+		"--apply",
 		"--json")
 	if status, _ := published["status"].(string); status != "completed" {
 		t.Fatalf("publication status = %q, want completed (%v)", status, published)

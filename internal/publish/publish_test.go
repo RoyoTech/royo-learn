@@ -1240,6 +1240,7 @@ func TestPublish_RollbackFailureObserved(t *testing.T) {
 
 	svc := NewService(db, projectRoot, backupDir, journalDir)
 	_, pubErr := svc.Publish(ctx, projectID, &PublishInput{
+		Apply:      true,
 		LearningID: learningID, PreviewHash: previewHash,
 		Force: true, Actor: actor,
 	})
@@ -1548,6 +1549,7 @@ func TestPublish_E2E(t *testing.T) {
 	// --- Publish ---
 	svc := NewService(db, projectRoot, backupDir, journalDir)
 	result, err := svc.Publish(ctx, projectID, &PublishInput{
+		Apply:       true,
 		LearningID:  learningID,
 		PreviewHash: previewHash,
 		Force:       true,
@@ -1709,6 +1711,7 @@ func TestPublish_BeginTxErrorsChecked(t *testing.T) {
 
 	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
 	_, pubErr := svc.Publish(ctx, env.projectID, &PublishInput{
+		Apply:       true,
 		LearningID:  env.learningID,
 		PreviewHash: env.previewHash,
 		Force:       true,
@@ -1733,6 +1736,7 @@ func TestPublish_JournalWrittenBeforeDBCommit(t *testing.T) {
 
 	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
 	result, err := svc.Publish(ctx, env.projectID, &PublishInput{
+		Apply:       true,
 		LearningID:  env.learningID,
 		PreviewHash: env.previewHash,
 		Force:       true,
@@ -1783,6 +1787,7 @@ func TestPublish_JournalFailurePreventsDBCommit(t *testing.T) {
 
 	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
 	_, pubErr := svc.Publish(ctx, env.projectID, &PublishInput{
+		Apply:       true,
 		LearningID:  env.learningID,
 		PreviewHash: env.previewHash,
 		Force:       true,
@@ -1874,6 +1879,7 @@ func TestPublish_OptimisticLock_NoFalsePositive(t *testing.T) {
 
 	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
 	result, err := svc.Publish(ctx, env.projectID, &PublishInput{
+		Apply:       true,
 		LearningID:  env.learningID,
 		PreviewHash: env.previewHash,
 		Force:       false, // no force → optimistic lock check runs
@@ -1904,6 +1910,7 @@ func TestPublish_ForceSkipsOptimisticLock(t *testing.T) {
 
 	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
 	result, err := svc.Publish(ctx, env.projectID, &PublishInput{
+		Apply:       true,
 		LearningID:  env.learningID,
 		PreviewHash: env.previewHash,
 		Force:       true, // force → hash check is skipped

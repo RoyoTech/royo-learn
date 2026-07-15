@@ -1311,6 +1311,8 @@ func runPublish(args []string, stdout, stderr io.Writer) int {
 	learningID := fs.String("learning-id", "", "learning ID to publish (required)")
 	previewHash := fs.String("preview-hash", "", "preview hash to confirm (required)")
 	approvalID := fs.String("approval-id", "", "approval ID (required when the preview reports requires_approval=true)")
+	apply := fs.Bool("apply", false, "actually write the files; without it publish is a dry run (D7)")
+	dryRun := fs.Bool("dry-run", true, "when false, equivalent to --apply; the default is a dry run")
 	force := fs.Bool("force", false, "bypass dirty worktree check")
 	projectRoot := fs.String("project-root", "", "project root directory")
 	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
@@ -1326,6 +1328,9 @@ func runPublish(args []string, stdout, stderr io.Writer) int {
 		return writePublishError(stderr, "invalid_argument", "publish: --preview-hash is required")
 	}
 
+	// --apply and --dry-run=false are equivalent; either one enables the write.
+	writeRequested := *apply || !*dryRun
+
 	root, db, projectID, exitCode := resolvePublishContext(*projectRoot, stderr)
 	if exitCode != exitSuccess {
 		return exitCode
@@ -1339,6 +1344,7 @@ func runPublish(args []string, stdout, stderr io.Writer) int {
 	pubIn := &publish.PublishInput{
 		LearningID:  domain.LearningID(*learningID),
 		PreviewHash: *previewHash,
+		Apply:       writeRequested,
 		Force:       *force,
 		Actor: domain.Actor{
 			Kind: "human", Name: "cli-user", Model: "", SessionID: "",
@@ -1353,6 +1359,24 @@ func runPublish(args []string, stdout, stderr io.Writer) int {
 	result, err := svc.Publish(ctx, projectID, pubIn)
 	if err != nil {
 		return writePublishError(stderr, "invalid_argument", "publish: %v", err)
+	}
+
+	// Dry run: report the plan without any write (D7).
+	if result.DryRun {
+		if *jsonFlag {
+			data, _ := json.MarshalIndent(map[string]interface{}{
+				"dry_run":      true,
+				"learning_id":  *learningID,
+				"preview_hash": *previewHash,
+				"targets":      result.Targets,
+				"next_action":  "re-run with --apply to write the files",
+			}, "", "  ")
+			_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+		} else {
+			_, _ = fmt.Fprintf(stdout, "Dry run: %d target(s) would change. Re-run with --apply to write.\n",
+				len(result.Targets))
+		}
+		return exitSuccess
 	}
 
 	if *jsonFlag {

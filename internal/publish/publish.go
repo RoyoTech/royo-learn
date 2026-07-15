@@ -68,14 +68,23 @@ type PublishInput struct {
 	LearningID  domain.LearningID
 	PreviewHash string
 	ApprovalID  *domain.ApprovalID
-	Force       bool
-	Actor       domain.Actor
+	// Apply gates the actual write. When false (the default) Publish validates
+	// the plan and returns a dry-run result WITHOUT touching any file (D7): the
+	// write path is the second, independent line of defence after approval.
+	Apply bool
+	Force bool
+	Actor domain.Actor
 }
 
 // PublishResult is the output of a publish operation.
 type PublishResult struct {
+	// Publication is nil for a dry run.
 	Publication *domain.Publication
 	JournalID   string
+	// DryRun is true when the request validated the plan but wrote nothing.
+	DryRun bool
+	// Targets lists the destinations the plan would (or did) write.
+	Targets []domain.TargetEntry
 }
 
 // PolicyEvaluation records the result of a policy check.

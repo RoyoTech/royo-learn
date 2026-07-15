@@ -122,6 +122,7 @@ func TestCaptureCuratePublishFlow(t *testing.T) {
 	}
 
 	published, err := publishService.Publish(ctx, project.ID, &publish.PublishInput{
+		Apply:       true,
 		LearningID:  captured.LearningID,
 		PreviewHash: preview.Preview.PreviewHash,
 		Force:       true,

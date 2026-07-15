@@ -218,6 +218,7 @@ func TestP1_E2E_ProcedurePreservedOnRepublish(t *testing.T) {
 	}
 
 	pubA, err := publishService.Publish(ctx, project.ID, &publish.PublishInput{
+		Apply:       true,
 		LearningID:  learningA.LearningID,
 		PreviewHash: previewA.Preview.PreviewHash,
 		Force:       true,
@@ -241,6 +242,7 @@ func TestP1_E2E_ProcedurePreservedOnRepublish(t *testing.T) {
 	}
 
 	pubB, err := publishService.Publish(ctx, project.ID, &publish.PublishInput{
+		Apply:       true,
 		LearningID:  learningB.LearningID,
 		PreviewHash: previewB.Preview.PreviewHash,
 		Force:       true,

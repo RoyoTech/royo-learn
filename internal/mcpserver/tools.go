@@ -210,6 +210,7 @@ type publishLearningInput struct {
 	LearningID  string     `json:"learning_id" jsonschema:"required"`
 	PreviewHash string     `json:"preview_hash" jsonschema:"required"`
 	ApprovalID  string     `json:"approval_id,omitempty" jsonschema:"required when the preview reports requires_approval=true"`
+	Apply       bool       `json:"apply,omitempty" jsonschema:"when false (default) the call is a dry run and writes nothing (D7)"`
 	Actor       actorInput `json:"actor" jsonschema:"required"`
 }
 
@@ -491,6 +492,7 @@ func handlePublishLearning(srv *Server) func(ctx context.Context, req *mcp.CallT
 		pubIn := &publish.PublishInput{
 			LearningID:  domain.LearningID(in.LearningID),
 			PreviewHash: in.PreviewHash,
+			Apply:       in.Apply,
 			Actor:       toActor(in.Actor),
 		}
 		if in.ApprovalID != "" {
@@ -504,6 +506,17 @@ func handlePublishLearning(srv *Server) func(ctx context.Context, req *mcp.CallT
 		result, err := svc.Publish(ctx, srv.projectID, pubIn)
 		if err != nil {
 			return toolError("publish_failed", err.Error())
+		}
+
+		// Dry run (D7): report the plan without any write.
+		if result.DryRun {
+			return toolResultJSON(map[string]any{
+				"dry_run":      true,
+				"learning_id":  in.LearningID,
+				"preview_hash": in.PreviewHash,
+				"targets":      result.Targets,
+				"next_action":  "call again with apply=true to write the files",
+			})
 		}
 
 		return toolResultJSON(map[string]any{

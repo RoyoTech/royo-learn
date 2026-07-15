@@ -646,6 +646,7 @@ func TestRunPublishAndRollbackEndToEnd(t *testing.T) {
 		"--project-root", root,
 		"--learning-id", learningID,
 		"--preview-hash", previewHash,
+		"--apply",
 		"--force",
 		"--json",
 	}, &pubOut, &pubErr)

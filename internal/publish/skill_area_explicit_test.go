@@ -148,6 +148,7 @@ func (h *p2Harness) previewAndPublish(t *testing.T, lid domain.LearningID) domai
 		t.Fatalf("preview %s: %v", lid, err)
 	}
 	pub, err := h.publishSvc.Publish(h.ctx, h.project.ID, &PublishInput{
+		Apply:       true,
 		LearningID:  lid,
 		PreviewHash: prev.Preview.PreviewHash,
 		Force:       true,
@@ -405,6 +406,7 @@ func TestP2_PreviewMatchesPublishPath(t *testing.T) {
 	// Publish using the SAME preview (do not re-preview — that would conflict)
 	// and confirm the file lands at the exact path preview reported.
 	pub, err := h.publishSvc.Publish(h.ctx, h.project.ID, &PublishInput{
+		Apply:       true,
 		LearningID:  lidA,
 		PreviewHash: prev.Preview.PreviewHash,
 		Force:       true,
