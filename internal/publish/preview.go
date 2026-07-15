@@ -94,6 +94,7 @@ func (s *Service) Preview(ctx context.Context, projectID domain.ProjectID, input
 	// Generate per-target content.
 	var diffLines []string
 	var targetContents []TargetContent
+	var planTargets []domain.PublicationPlanTarget
 
 	for _, target := range targets {
 		var proposedContent string
@@ -114,6 +115,23 @@ func (s *Service) Preview(ctx context.Context, projectID domain.ProjectID, input
 
 		diff := GenerateDiff(existingContent, []byte(proposedContent), target.Path, target.Exists)
 		diffLines = append(diffLines, diff)
+
+		// Record the prior and posterior content hashes for this destination.
+		// The prior hash is the on-disk content at preview time (empty when the
+		// destination does not exist yet). The posterior hash is the content the
+		// plan would write. Both feed the preview hash and the publish-time
+		// prior-hash check.
+		var priorHash string
+		if len(existingContent) > 0 || target.Exists {
+			priorHash = HashContent(existingContent)
+		}
+		planTargets = append(planTargets, domain.PublicationPlanTarget{
+			Root:          target.Root,
+			Path:          target.Path,
+			Operation:     target.Operation,
+			PriorHash:     priorHash,
+			PosteriorHash: HashContent([]byte(proposedContent)),
+		})
 	}
 
 	combinedDiff := strings.Join(diffLines, "\n")
@@ -121,13 +139,15 @@ func (s *Service) Preview(ctx context.Context, projectID domain.ProjectID, input
 	// Evaluate policies.
 	policies := EvaluatePolicies(learning, curation)
 
-	// Build preview record. The preview hash binds the full plan the approval
-	// authorizes: the combined diff (which already reflects the destinations and
-	// the prior file content) AND the policy outcome. A change to any of these
-	// yields a different hash, so an approval bound to the old hash no longer
-	// applies (D11 §11.1 invalidation conditions).
+	// Build preview record. The preview hash binds the WHOLE plan the approval
+	// authorizes: every destination's root, path, operation, prior file hash and
+	// posterior content hash (PlanSignature) AND the policy outcome
+	// (PolicySignature). A change to any of these yields a different hash, so an
+	// approval bound to the old hash no longer applies (D11 §11.1 invalidation
+	// conditions, Recorrido D). The prior/posterior hashes subsume the combined
+	// diff, so this broadens the binding rather than narrowing it.
 	previewID := domain.PreviewID(uuid.Must(uuid.NewV7()).String())
-	previewHash := HashContent([]byte(combinedDiff + "\x00policy:" + PolicySignature(policies)))
+	previewHash := HashContent([]byte(PlanSignature(planTargets) + "\x00policy:" + PolicySignature(policies)))
 
 	preview := &domain.PublicationPreview{
 		ID:         previewID,
@@ -141,6 +161,7 @@ func (s *Service) Preview(ctx context.Context, projectID domain.ProjectID, input
 			Patch:            combinedDiff,
 			RequiresApproval: RequiresHumanApproval(policies),
 			Risk:             evaluateRisk(learning, curation),
+			Targets:          planTargets,
 		},
 		PreviewHash:      previewHash,
 		Risk:             evaluateRisk(learning, curation),

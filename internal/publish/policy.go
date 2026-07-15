@@ -45,6 +45,22 @@ func PolicySignature(evaluations []PolicyEvaluation) string {
 		RequiresHumanApproval(evaluations), strings.Join(parts, ","))
 }
 
+// PlanSignature renders the per-destination plan as a deterministic, order-
+// independent string so it can be folded into the preview hash. It binds the
+// WHOLE plan — every destination's root, path, operation, prior file hash and
+// posterior content hash — not merely the combined diff text (Recorrido D). A
+// change to any field yields a different signature, which invalidates an
+// approval bound to the old plan.
+func PlanSignature(targets []domain.PublicationPlanTarget) string {
+	parts := make([]string, 0, len(targets))
+	for _, t := range targets {
+		parts = append(parts, fmt.Sprintf("root=%s;path=%s;op=%s;prior=%s;posterior=%s",
+			t.Root, t.Path, t.Operation, t.PriorHash, t.PosteriorHash))
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "\n")
+}
+
 // policyPreferenceTypeRequiresHuman: preference-type learnings routed to shared
 // scope or AGENTS.md always require explicit human approval (D11 §11.3).
 func policyPreferenceTypeRequiresHuman(learning *domain.Learning, curation *domain.Curation) PolicyEvaluation {

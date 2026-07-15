@@ -341,16 +341,33 @@ type PreviewID string
 
 // PublicationPlan describes the planned publication operation.
 type PublicationPlan struct {
-	LearningID       LearningID           `json:"learning_id"`
-	TargetRoot       string               `json:"target_root"`
-	TargetPath       string               `json:"target_path"`
-	Operation        PublicationOperation `json:"operation"`
-	Content          string               `json:"content"`
-	Patch            string               `json:"patch"`
-	ManagedBlockID   string               `json:"managed_block_id"`
-	Verification     []CommandSpec        `json:"verification"`
-	RequiresApproval bool                 `json:"requires_approval"`
-	Risk             RiskLevel            `json:"risk"`
+	LearningID       LearningID              `json:"learning_id"`
+	TargetRoot       string                  `json:"target_root"`
+	TargetPath       string                  `json:"target_path"`
+	Operation        PublicationOperation    `json:"operation"`
+	Content          string                  `json:"content"`
+	Patch            string                  `json:"patch"`
+	ManagedBlockID   string                  `json:"managed_block_id"`
+	Verification     []CommandSpec           `json:"verification"`
+	RequiresApproval bool                    `json:"requires_approval"`
+	Risk             RiskLevel               `json:"risk"`
+	Targets          []PublicationPlanTarget `json:"targets,omitempty"`
+}
+
+// PublicationPlanTarget records one destination of a publication plan together
+// with the prior and posterior content hashes captured when the preview was
+// generated. The prior hash lets publish refuse a destination that changed on
+// disk after the preview was taken; the whole set feeds the preview hash so an
+// approval binds the exact plan it authorized (Recorrido D).
+type PublicationPlanTarget struct {
+	Root      string               `json:"root"`
+	Path      string               `json:"path"`
+	Operation PublicationOperation `json:"operation"`
+	// PriorHash is the SHA-256 of the destination file at preview time. Empty
+	// when the destination did not exist yet.
+	PriorHash string `json:"prior_hash"`
+	// PosteriorHash is the SHA-256 of the content the plan would write.
+	PosteriorHash string `json:"posterior_hash"`
 }
 
 // CommandSpec describes a verification command.
