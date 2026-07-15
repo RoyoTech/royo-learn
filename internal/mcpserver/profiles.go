@@ -175,10 +175,12 @@ func withDeprecationNotice[In any](alias, canonical string, handler mcp.ToolHand
 // The server instructions (D14) and every contract test are derived from this
 // table. Nothing about the tool surface is written by hand anywhere else.
 //
-// learning_publish is confined to admin. D2 places it in agent, but the binding
-// clause of D2 ("D2 y D11 entran en la misma versión") forbids that move until
-// the destination-based approval policies and learning_approve exist, which is
-// Recorrido C. Until then it stays where v0.1.9 put it.
+// learning_publish lives in agent (D2). The binding clause of D2 ("D2 y D11
+// entran en la misma versión") gated that move on the destination-based approval
+// policies and learning_approve existing. Recorrido C delivers both: sensitive
+// destinations now report requires_approval=true and publish refuses without a
+// matching approval_id, so the profile is no longer the protection — the
+// approval is. learning_publish therefore moves out of admin into agent.
 // ---------------------------------------------------------------------------
 
 var allTools = []profileTool{
@@ -263,6 +265,15 @@ var allTools = []profileTool{
 		},
 	},
 	{
+		name:        "learning_approve",
+		description: "Record explicit human approval bound to a publication preview hash. Required before publishing to AGENTS.md, shared scope, or an existing Skill.",
+		access:      accessWrite,
+		profiles:    map[string]bool{profileAgent: true, profileAdmin: true},
+		register: func(ms *mcp.Server, srv *Server, t profileTool) {
+			bind(ms, t, handleApprove(srv))
+		},
+	},
+	{
 		name:        "learning_list_recurrences",
 		aliases:     []string{"list_recurrences"},
 		description: "List recurrence records for a learning, tracking when the same pattern appears across captures.",
@@ -285,9 +296,9 @@ var allTools = []profileTool{
 	{
 		name:        "learning_publish",
 		aliases:     []string{"publish_learning"},
-		description: "Publish an approved learning. Requires a preview hash to confirm the intended publication.",
+		description: "Publish an approved learning. Requires a preview hash, and an approval_id when the preview reports requires_approval=true.",
 		access:      accessWrite,
-		profiles:    map[string]bool{profileAdmin: true},
+		profiles:    map[string]bool{profileAgent: true, profileAdmin: true},
 		register: func(ms *mcp.Server, srv *Server, t profileTool) {
 			bind(ms, t, handlePublishLearning(srv))
 		},

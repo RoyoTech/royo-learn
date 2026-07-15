@@ -70,6 +70,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runEvidence(args[1:], stdout, stderr)
 	case "preview":
 		return runPreview(args[1:], stdout, stderr)
+	case "approve":
+		return runApprove(args[1:], stdout, stderr)
 	case "publish":
 		return runPublish(args[1:], stdout, stderr)
 	case "rollback":
@@ -107,6 +109,7 @@ Commands:
   capture        Capture a new learning
   curate         Curate an existing learning
   preview        Preview publication of a learning
+  approve        Approve a publication preview (human authorization)
   publish        Publish a curated learning
   rollback       Rollback a published learning
   doctor         Run system diagnostics
@@ -1208,6 +1211,98 @@ func runPreview(args []string, stdout, stderr io.Writer) int {
 }
 
 // ---------------------------------------------------------------------------
+// approve
+// ---------------------------------------------------------------------------
+
+// runApprove records explicit human approval bound to a publication preview.
+// The learning id is the first positional argument. In --json mode there are no
+// interactive prompts and every field is required; the response carries the
+// approval_id (D11 §11.1).
+func runApprove(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return writePublishError(stderr, "invalid_argument", "approve: a learning id is required as the first argument")
+	}
+	learningID := args[0]
+
+	fs := flag.NewFlagSet("approve", flag.ContinueOnError)
+	previewHash := fs.String("preview-hash", "", "hash of the exact preview being authorized (required)")
+	approvedBy := fs.String("approved-by", "", "identity of the human granting approval (required)")
+	reason := fs.String("reason", "", "why the publication is authorized (required)")
+	approvalEvidence := fs.String("approval-evidence", "", "reference to the consent record: link, message id or ticket (required)")
+	expiresAt := fs.String("expires-at", "", "optional RFC3339 instant after which the approval is rejected")
+	projectRoot := fs.String("project-root", "", "project root directory")
+	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
+
+	if err := fs.Parse(args[1:]); err != nil {
+		return writePublishError(stderr, "invalid_argument", "approve: %v", err)
+	}
+
+	if *previewHash == "" {
+		return writePublishError(stderr, "invalid_argument", "approve: --preview-hash is required")
+	}
+	if *approvedBy == "" {
+		return writePublishError(stderr, "invalid_argument", "approve: --approved-by is required")
+	}
+	if *reason == "" {
+		return writePublishError(stderr, "invalid_argument", "approve: --reason is required")
+	}
+	if *approvalEvidence == "" {
+		return writePublishError(stderr, "invalid_argument", "approve: --approval-evidence is required")
+	}
+
+	apprIn := &publish.ApproveInput{
+		LearningID:       domain.LearningID(learningID),
+		PreviewHash:      *previewHash,
+		ApprovedBy:       *approvedBy,
+		Reason:           *reason,
+		ApprovalEvidence: *approvalEvidence,
+		Actor:            domain.Actor{Kind: "human", Name: "cli-user"},
+	}
+	if *expiresAt != "" {
+		t, err := time.Parse(time.RFC3339, *expiresAt)
+		if err != nil {
+			return writePublishError(stderr, "invalid_argument", "approve: --expires-at must be RFC3339: %v", err)
+		}
+		apprIn.ExpiresAt = &t
+	}
+
+	root, db, projectID, exitCode := resolvePublishContext(*projectRoot, stderr)
+	if exitCode != exitSuccess {
+		return exitCode
+	}
+	defer db.Close()
+
+	svc := publish.NewService(db, root,
+		filepath.Join(root, ".royo-learn", "backups"),
+		filepath.Join(root, ".royo-learn"))
+
+	ctx := context.Background()
+	approval, err := svc.Approve(ctx, projectID, apprIn)
+	if err != nil {
+		return writePublishError(stderr, "invalid_argument", "approve: %v", err)
+	}
+
+	if *jsonFlag {
+		out := map[string]interface{}{
+			"approval_id":  string(approval.ID),
+			"learning_id":  string(approval.LearningID),
+			"preview_hash": approval.PreviewHash,
+			"approved_by":  approval.ApprovedBy,
+		}
+		if approval.ExpiresAt != nil {
+			out["expires_at"] = approval.ExpiresAt.Format(time.RFC3339)
+		}
+		data, _ := json.MarshalIndent(out, "", "  ")
+		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+	} else {
+		_, _ = fmt.Fprintf(stdout, "Approved preview %s for learning %s (approval: %s)\n",
+			approval.PreviewHash, approval.LearningID, approval.ID)
+	}
+
+	return exitSuccess
+}
+
+// ---------------------------------------------------------------------------
 // publish
 // ---------------------------------------------------------------------------
 
@@ -1215,6 +1310,7 @@ func runPublish(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("publish", flag.ContinueOnError)
 	learningID := fs.String("learning-id", "", "learning ID to publish (required)")
 	previewHash := fs.String("preview-hash", "", "preview hash to confirm (required)")
+	approvalID := fs.String("approval-id", "", "approval ID (required when the preview reports requires_approval=true)")
 	force := fs.Bool("force", false, "bypass dirty worktree check")
 	projectRoot := fs.String("project-root", "", "project root directory")
 	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
@@ -1240,15 +1336,21 @@ func runPublish(args []string, stdout, stderr io.Writer) int {
 		filepath.Join(root, ".royo-learn", "backups"),
 		filepath.Join(root, ".royo-learn"))
 
-	ctx := context.Background()
-	result, err := svc.Publish(ctx, projectID, &publish.PublishInput{
+	pubIn := &publish.PublishInput{
 		LearningID:  domain.LearningID(*learningID),
 		PreviewHash: *previewHash,
 		Force:       *force,
 		Actor: domain.Actor{
 			Kind: "human", Name: "cli-user", Model: "", SessionID: "",
 		},
-	})
+	}
+	if *approvalID != "" {
+		id := domain.ApprovalID(*approvalID)
+		pubIn.ApprovalID = &id
+	}
+
+	ctx := context.Background()
+	result, err := svc.Publish(ctx, projectID, pubIn)
 	if err != nil {
 		return writePublishError(stderr, "invalid_argument", "publish: %v", err)
 	}

@@ -47,9 +47,14 @@ func (s *Service) Approve(ctx context.Context, projectID domain.ProjectID, input
 
 	now := utcNowPublish()
 
-	// Calculate expiry if requested.
+	// Calculate expiry. An absolute ExpiresAt wins over the relative ExpiresIn;
+	// a past instant produces an immediately-expired approval on purpose.
 	var expiresAt *time.Time
-	if input.ExpiresIn > 0 {
+	switch {
+	case input.ExpiresAt != nil:
+		t := input.ExpiresAt.UTC()
+		expiresAt = &t
+	case input.ExpiresIn > 0:
 		t := now.Add(time.Duration(input.ExpiresIn) * time.Second)
 		expiresAt = &t
 	}

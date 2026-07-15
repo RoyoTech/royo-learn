@@ -198,7 +198,8 @@ func TestListTools_ReturnsAllTools_StandardProfile(t *testing.T) {
 		t.Fatalf("ListTools: %v", err)
 	}
 
-	// Standard profile includes all tools except publish_learning (full only).
+	// Standard maps to the agent profile, which serves the normal cycle
+	// including publish and approve (D2/Recorrido C).
 	expectedTools := []string{
 		"capture_learning",
 		"search_learnings",

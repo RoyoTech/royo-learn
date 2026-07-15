@@ -75,11 +75,18 @@ func newPublishSvc(db *storage.DB, projectRoot, journalDir string) *publishSvc {
 	return &publishSvc{db: db, projectRoot: projectRoot}
 }
 
-func (s *publishSvc) Preview(ctx context.Context, projectID domain.ProjectID, input *publish.PreviewInput) (*publish.PreviewResult, error) {
-	svc := publish.NewService(s.db, s.projectRoot,
+func (s *publishSvc) service() *publish.Service {
+	return publish.NewService(s.db, s.projectRoot,
 		s.projectRoot+"/.royo-learn/backups",
 		s.projectRoot+"/.royo-learn")
-	return svc.Preview(ctx, projectID, input)
+}
+
+func (s *publishSvc) Preview(ctx context.Context, projectID domain.ProjectID, input *publish.PreviewInput) (*publish.PreviewResult, error) {
+	return s.service().Preview(ctx, projectID, input)
+}
+
+func (s *publishSvc) Approve(ctx context.Context, projectID domain.ProjectID, input *publish.ApproveInput) (*domain.Approval, error) {
+	return s.service().Approve(ctx, projectID, input)
 }
 
 // ---------------------------------------------------------------------------
@@ -189,9 +196,20 @@ type previewPublicationInput struct {
 	Actor      actorInput `json:"actor" jsonschema:"required"`
 }
 
+type approveInput struct {
+	LearningID       string     `json:"learning_id" jsonschema:"required,learning being approved"`
+	PreviewHash      string     `json:"preview_hash" jsonschema:"required,hash of the exact preview being authorized"`
+	ApprovedBy       string     `json:"approved_by" jsonschema:"required,identity of the human granting approval"`
+	Reason           string     `json:"reason" jsonschema:"required,why the publication is authorized"`
+	ApprovalEvidence string     `json:"approval_evidence" jsonschema:"required,reference to the consent record (link, message id, ticket)"`
+	ExpiresAt        string     `json:"expires_at,omitempty" jsonschema:"optional RFC3339 instant after which the approval is rejected"`
+	Actor            actorInput `json:"actor,omitempty"`
+}
+
 type publishLearningInput struct {
 	LearningID  string     `json:"learning_id" jsonschema:"required"`
 	PreviewHash string     `json:"preview_hash" jsonschema:"required"`
+	ApprovalID  string     `json:"approval_id,omitempty" jsonschema:"required when the preview reports requires_approval=true"`
 	Actor       actorInput `json:"actor" jsonschema:"required"`
 }
 
@@ -419,12 +437,65 @@ func handlePreviewPublication(srv *Server) func(ctx context.Context, req *mcp.Ca
 	}
 }
 
+func handleApprove(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in approveInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in approveInput) (*mcp.CallToolResult, any, error) {
+		if in.PreviewHash == "" {
+			return toolError("invalid_argument", "preview_hash is required")
+		}
+		if in.ApprovedBy == "" {
+			return toolError("invalid_argument", "approved_by is required")
+		}
+		if in.Reason == "" {
+			return toolError("invalid_argument", "reason is required")
+		}
+		if in.ApprovalEvidence == "" {
+			return toolError("invalid_argument", "approval_evidence is required")
+		}
+
+		apprIn := &publish.ApproveInput{
+			LearningID:       domain.LearningID(in.LearningID),
+			PreviewHash:      in.PreviewHash,
+			ApprovedBy:       in.ApprovedBy,
+			Reason:           in.Reason,
+			ApprovalEvidence: in.ApprovalEvidence,
+			Actor:            toActor(in.Actor),
+		}
+		if in.ExpiresAt != "" {
+			expiresAt, err := time.Parse(time.RFC3339, in.ExpiresAt)
+			if err != nil {
+				return toolError("invalid_argument", "expires_at must be an RFC3339 timestamp: "+err.Error())
+			}
+			apprIn.ExpiresAt = &expiresAt
+		}
+
+		approval, err := srv.publishSvc.Approve(ctx, srv.projectID, apprIn)
+		if err != nil {
+			return toolError("approve_failed", err.Error())
+		}
+
+		out := map[string]any{
+			"approval_id":  string(approval.ID),
+			"learning_id":  string(approval.LearningID),
+			"preview_hash": approval.PreviewHash,
+			"approved_by":  approval.ApprovedBy,
+		}
+		if approval.ExpiresAt != nil {
+			out["expires_at"] = approval.ExpiresAt.Format(time.RFC3339)
+		}
+		return toolResultJSON(out)
+	}
+}
+
 func handlePublishLearning(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in publishLearningInput) (*mcp.CallToolResult, any, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest, in publishLearningInput) (*mcp.CallToolResult, any, error) {
 		pubIn := &publish.PublishInput{
 			LearningID:  domain.LearningID(in.LearningID),
 			PreviewHash: in.PreviewHash,
 			Actor:       toActor(in.Actor),
+		}
+		if in.ApprovalID != "" {
+			id := domain.ApprovalID(in.ApprovalID)
+			pubIn.ApprovalID = &id
 		}
 
 		svc := publish.NewService(srv.db, srv.projectRoot,

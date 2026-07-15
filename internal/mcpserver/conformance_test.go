@@ -51,13 +51,13 @@ func TestMCPConformance_ListToolsAllProfiles(t *testing.T) {
 				"search_learnings",
 				"curate_learning",
 				"preview_publication",
+				"publish_learning",
 				"list_learnings",
 				"get_learning",
 				"doctor",
 				"list_recurrences",
 				"compute_metrics",
 			},
-			forbidden: []string{"publish_learning"},
 		},
 		{
 			name:         "full",
@@ -131,13 +131,15 @@ func TestMCPConformance_ListToolsAllProfiles(t *testing.T) {
 				"learning_list",
 				"learning_curate",
 				"learning_publication_preview",
+				// D2: learning_publish moves into agent now that Recorrido C's
+				// approval gate protects sensitive publications, together with
+				// the human-approval tool that authorizes them.
+				"learning_approve",
+				"learning_publish",
 				"learning_doctor",
 				"learning_list_recurrences",
 				"learning_compute_metrics",
 			},
-			// learning_publish stays in admin until Recorrido C lands the
-			// approval gate (binding clause of D2).
-			forbidden: []string{"learning_publish", "publish_learning"},
 		},
 		{
 			name:         "canonical admin profile",
@@ -150,6 +152,7 @@ func TestMCPConformance_ListToolsAllProfiles(t *testing.T) {
 				"learning_list",
 				"learning_curate",
 				"learning_publication_preview",
+				"learning_approve",
 				"learning_publish",
 				"learning_doctor",
 				"learning_list_recurrences",

@@ -1,6 +1,8 @@
 package publish
 
 import (
+	"time"
+
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/storage"
 )
@@ -53,8 +55,12 @@ type ApproveInput struct {
 	ApprovedBy       string
 	Reason           string
 	ApprovalEvidence string
-	ExpiresIn        int // seconds; 0 = no expiry
-	Actor            domain.Actor
+	// ExpiresAt is an absolute expiry instant. When set it takes precedence over
+	// ExpiresIn. A value already in the past yields an immediately-expired
+	// approval, which CheckApproval rejects.
+	ExpiresAt *time.Time
+	ExpiresIn int // seconds; 0 = no expiry
+	Actor     domain.Actor
 }
 
 // PublishInput carries the input for publishing.

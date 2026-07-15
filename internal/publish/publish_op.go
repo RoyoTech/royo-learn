@@ -57,17 +57,23 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 			"preview has been invalidated — regenerate before publishing")
 	}
 
-	// 3. Check approval if required.
+	// 3. Check approval if required. When the preview requires approval the
+	// caller MUST name the specific approval_id: finding "some compatible"
+	// approval is not enough (D11 §11.1). The approval must be the one bound to
+	// THIS preview hash, and CheckApproval enforces its expiry and revocation.
 	var approval *domain.Approval
 	if preview.RequiresApproval {
+		if input.ApprovalID == nil || *input.ApprovalID == "" {
+			return nil, domain.NewValidationError(domain.ErrApprovalRequired,
+				"approval_id is required to publish this preview — obtain one with 'royo-learn approve' / learning_approve")
+		}
 		approval, err = s.CheckApproval(ctx, input.PreviewHash)
 		if err != nil {
 			return nil, err
 		}
-		// If a specific approval ID was provided, verify it.
-		if input.ApprovalID != nil && approval.ID != *input.ApprovalID {
+		if approval.ID != *input.ApprovalID {
 			return nil, domain.NewValidationError(domain.ErrApprovalInvalid,
-				"provided approval_id does not match the valid approval for this preview")
+				"provided approval_id does not match the valid approval bound to this preview")
 		}
 	}
 
