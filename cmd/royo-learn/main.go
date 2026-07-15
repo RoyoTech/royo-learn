@@ -66,6 +66,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runCapture(args[1:], stdout, stderr)
 	case "curate":
 		return runCurate(args[1:], stdout, stderr)
+	case "get":
+		return runGet(args[1:], stdout, stderr)
+	case "search":
+		return runSearch(args[1:], stdout, stderr)
+	case "occurrence":
+		return runOccurrence(args[1:], stdout, stderr)
 	case "evidence":
 		return runEvidence(args[1:], stdout, stderr)
 	case "preview":
@@ -108,6 +114,8 @@ Commands:
   mcp-serve      Start the MCP server over stdio
   capture        Capture a new learning
   curate         Curate an existing learning
+  get            Retrieve a single learning by ID
+  occurrence     Record a recurrence of a learning's pattern
   preview        Preview publication of a learning
   approve        Approve a publication preview (human authorization)
   publish        Publish a curated learning

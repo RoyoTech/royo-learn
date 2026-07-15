@@ -268,8 +268,13 @@ Valida que el destino no haya cambiado desde la publicación. Si cambió, bloque
 --retrieved <true|false>
 --skill-activated <true|false>
 --evidence-file
+--idempotency-key
 --json
 ```
+
+`--idempotency-key` aplica la semántica D5: la misma clave en un reintento
+devuelve el registro existente y no crea una segunda recurrencia. La respuesta
+incluye `new` (`true` si se creó, `false` si fue un reintento técnico).
 
 ### `royo-learn review`
 

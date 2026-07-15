@@ -445,6 +445,18 @@ type RecurrenceRecord struct {
 	ProjectID             ProjectID
 	Summary               string
 	OccurredAt            time.Time
+
+	// Occurrence detail (plan 4.4), populated by an explicit occurrence report.
+	// Older recurrence rows leave these at their zero values.
+	Outcome        string
+	Retrieved      bool
+	SkillActivated bool
+	Evidence       string
+	ActorKind      string
+	ActorName      string
+	// IdempotencyKey guards technical retries of a report (D5). Nil means the
+	// record was not created through an idempotent report.
+	IdempotencyKey *string
 }
 
 // RecurrenceMetrics computes frequency, interval, and trend for a recurrence pattern.
