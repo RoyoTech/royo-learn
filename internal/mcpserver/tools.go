@@ -369,9 +369,16 @@ func handleSearchLearnings(srv *Server) func(ctx context.Context, req *mcp.CallT
 
 func handleCurateLearning(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in curateLearningInput) (*mcp.CallToolResult, any, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest, in curateLearningInput) (*mcp.CallToolResult, any, error) {
+		// Validate against the single canonical allowlist shared with the CLI
+		// (D11 §11.2). The server no longer passes the decision raw.
+		decision, err := domain.ParseCurationDecision(in.Decision)
+		if err != nil {
+			return toolError("invalid_argument", err.Error())
+		}
+
 		curIn := &curate.CurateInput{
 			LearningID: domain.LearningID(in.LearningID),
-			Decision:   domain.CurationDecision(in.Decision),
+			Decision:   decision,
 			Rationale:  in.Rationale,
 			Actor:      toActor(in.Actor),
 			Area:       in.Area,

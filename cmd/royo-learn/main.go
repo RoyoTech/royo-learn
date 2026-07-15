@@ -931,22 +931,16 @@ func runCurate(args []string, stdout, stderr io.Writer) int {
 	return exitSuccess
 }
 
-// parseCurateAction maps a CLI action string to a CurationDecision.
+// parseCurateAction maps a CLI action string to a CurationDecision. Every value
+// is validated against the single canonical allowlist in internal/domain
+// (D11 §11.2), so the CLI and the MCP server accept exactly the same decisions.
+// The historical shortcut "approve" is kept as a deprecated alias of
+// approve_project_knowledge; "relate" is handled by the caller before this point.
 func parseCurateAction(action string) (domain.CurationDecision, error) {
-	switch action {
-	case "approve":
+	if action == "approve" {
 		return domain.CurationApproveProjectKnowledge, nil
-	case "approve_new_skill":
-		return domain.CurationApproveNewSkill, nil
-	case "approve_skill_update":
-		return domain.CurationApproveSkillUpdate, nil
-	case "reject":
-		return domain.CurationReject, nil
-	case "needs_evidence":
-		return domain.CurationNeedsEvidence, nil
-	default:
-		return "", fmt.Errorf("unknown action %q: must be one of approve, approve_new_skill, approve_skill_update, reject, needs_evidence, relate", action)
 	}
+	return domain.ParseCurationDecision(action)
 }
 
 func writeCurateError(stderr io.Writer, code, format string, args ...interface{}) int {
