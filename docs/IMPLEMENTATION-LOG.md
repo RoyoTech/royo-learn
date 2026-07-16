@@ -855,3 +855,121 @@ y ajena a este recorrido; en `-race` no aparece.
 
 Recorrido E — reemplazar el E2E permisivo (`cmd/royo-learn/e2e.go`) por los
 escenarios CLI (19 pasos) y MCP reales. **No tocado en este recorrido.**
+
+---
+
+## 2026-07-14 — Recorrido E: E2E que demuestra el producto (+ expansión Hito 1)
+
+Sesión reanudada dos veces tras corte por límite de sesión del ejecutor. El
+trabajo se retomó desde los commits reales, sin descartar ni rehacer nada.
+
+### Decisión de alcance previa (Bloque 0)
+
+El escenario literal del Recorrido E exige seis operaciones públicas (`get`,
+`search`, `occurrence` por CLI; `learning_report_occurrence`, `learning_status`,
+`learning_rollback` por MCP) que los Recorridos A–D no construyeron, y sobre las
+que el contrato se contradecía (D1/D12 las ponían en Hito 1; D8/§4 las diferían
+a Hito 2). Se resolvió con **D17**: se adelantan al Hito 1, reusando los motores
+existentes. El humano aprobó explícitamente esta expansión antes de ejecutarla.
+
+### Commits creados
+
+- `2b15f55` docs: pull six public operations into Hito 1 (D17)
+- `073d78c` test: require public CLI get, search and occurrence
+- `86da1ba` feat: add public CLI get, search and occurrence (D17)
+- `8796596` test: require MCP report_occurrence, status and rollback
+- `29cc171` feat: add MCP learning_report_occurrence, learning_status and learning_rollback (D17)
+- `6a96171` test: replace permissive e2e with strict CLI and MCP scenarios
+
+### E2E nuevo (37 pasos, sin soft-passes)
+
+Tres escenarios en `cmd/royo-learn/e2e.go`:
+
+1. **CLI sensible** (19 pasos): repo Git temporal → init → doctor → captura con
+   evidencia → get → search → curate → preview → publish sin aprobación
+   (rechazado) → approve → publish `--apply` → verificar archivo escrito →
+   verificar estado published → report occurrence → métricas → rollback →
+   restauración byte a byte → occurrence listada → doctor final.
+2. **CLI bajo impacto** (6 pasos): publicación a scope de proyecto que NO exige
+   aprobación; prueba que la política no sobre-bloquea.
+3. **MCP sensible** (12 pasos): cliente real por stdio ejecutando el ciclo
+   completo hasta `learning_rollback`, verificando schemas, nombres canónicos,
+   códigos de error y cambios de estado.
+
+Cada paso asevera un efecto de negocio. El cuerpo permisivo anterior (9 pasos,
+soft-passes en `:151/:154/:157`) fue eliminado por completo; la única aparición
+de «acceptable» es un comentario que describe lo que se reemplazó.
+
+### Dos bugs reales encontrados al reanudar (arreglados)
+
+El ejecutor reportó «37 pasos verdes» corriendo solo el binario suelto, pero
+murió antes de correr `go test`. La verificación posterior encontró dos defectos
+que el ejecutor no llegó a ver:
+
+1. **`os.Executable()` bajo `go test`**: el escenario MCP lanzaba `mcp-serve`
+   sobre `os.Executable()`, que bajo `go test` es el binario de test, no
+   `royo-learn` → `mcp-sensitive/connect` fallaba y el test Go daba 26/1-fallo
+   mientras el binario suelto daba 37/0. Corregido: el spawn honra
+   `ROYO_LEARN_E2E_BIN`; el test compila un binario real y lo apunta ahí. El
+   path del binario suelto queda intacto (`os.Executable()`).
+2. **Código muerto en `TestRunE2ETempCompletesAllSteps`**: `t.Fatalf` precedía
+   al bucle que listaba los pasos fallidos, que por `runtime.Goexit` nunca
+   corría. Reordenado: se registran las fallas antes del `Fatalf`.
+
+### Eliminación de los falsos positivos FP-1…FP-9 (§0.4 del gap report)
+
+| FP | Comportamiento permisivo original | Cómo se caza ahora |
+|----|-----------------------------------|--------------------|
+| FP-1 | `curate`: fallo obligatorio aceptado (`e2e.go:150-158`) | Paso `curate` (CLI y MCP) asevera el efecto real de curación; sin soft-pass |
+| FP-2 | `preview`: ausencia de efecto aceptada | Paso `preview` asevera preview real con hash; `preview-not-over-blocked` en bajo impacto |
+| FP-3 | `recurrences`: solo valida que el JSON sea JSON | Pasos `report-occurrence` + `check-metrics` + `verify-occurrence-listed` aseveran registro y conteo |
+| FP-4 | seguridad path-traversal: no ejecuta el ataque | Tests dedicados que SÍ ejecutan el ataque: `curate_test.go:846` (`../escape`), `evidence/blob_test.go:197`, `evidence/path_test.go:18-20`, `config_test.go:85` |
+| FP-5 | redacción de secretos: no se comprueba | Tests dedicados: `evidence/redact_test.go`, `mcpserver/evidence_test.go:196`, más el CLI del Recorrido B — recorren cada sink |
+| FP-6 | el estado nunca se verifica | Pasos `verify-status-published` (CLI) y `status` (MCP) |
+| FP-7 | operaciones críticas nunca ejercitadas | publish/approve/rollback/occurrence ejercitadas en ambos escenarios |
+| FP-8 | pasos arrastran estado vacío sin fallar | Cada paso asevera efecto; sin cascada de soft-passes |
+| FP-9 | `capture-idempotent` no prueba idempotencia | Test dedicado `mcpserver/occurrence_status_rollback_test.go:48` (D5: reintento técnico, sin segundo registro) |
+
+Seis FP se eliminan con aserciones directas del E2E; FP-4, FP-5 y FP-9 con
+tests dedicados que ejecutan el ataque/escenario de verdad — más fuertes que un
+paso de E2E. No se afirma que el E2E los cubra todos: se documenta dónde cae
+cada uno.
+
+### Prueba de mutación (el E2E muerde)
+
+Se rompió el gate de aprobación (`internal/publish/publish_op.go`, forzando
+`if false && preview.RequiresApproval`). El E2E se puso rojo tanto por binario
+como por `go test`: cayeron exactamente `cli-sensitive/publish-without-approval-refused`
+y `mcp-sensitive/publish-without-approval-refused`, mientras el paso de bajo
+impacto `publish-apply-without-approval` siguió verde (proyecto no exige
+aprobación). El E2E distingue las dos políticas. Revertido y confirmado.
+
+### Comandos ejecutados — resultado real
+
+- `go build ./...` limpio; `go vet ./...` limpio.
+- `go test -p 1 -count=1 -run TestRunE2ETempCompletesAllSteps ./cmd/royo-learn/`
+  → **ok** (37 pasos).
+- `go test -p 1 -count=1 ./...` → exit 1, pero las TRES fallas son de la clase
+  teardown/AV de Windows (`TempDir RemoveAll: directory not empty` en
+  `TestCLI_CaptureAcceptsEmbeddedEvidence` y `TestUpdateFullFlowZipWindows` —
+  este último en `internal/selfupdate`, paquete no tocado — y `Access is denied`
+  en `internal/buildinfo`). Las tres pasan aisladas. Ninguna es una aserción.
+
+### Puerta de salida del Recorrido E
+
+- [x] E2E CLI de 19 pasos, sin soft-passes, con efectos de negocio → **PASS**
+- [x] E2E MCP real por stdio → **PASS**
+- [x] Dos políticas separadas (bajo impacto / sensible) → **PASS**
+- [x] Cada FP-1…FP-9 del Tramo 0 eliminado y mapeado → **PASS**
+- [x] Prueba de mutación demuestra que el E2E falla ante ruptura real → **PASS**
+- [x] Cuerpo permisivo anterior eliminado por completo → **PASS**
+
+**Resultado del Recorrido E: PASS. Sin FAIL.** Las tres fallas de la suite
+completa son ambientales de Windows (teardown/AV), pasan aisladas, y quedan
+registradas para endurecer en el Tramo 5 junto con las de los Recorridos B y D.
+
+### Siguiente paso
+
+Recorrido F — actualización segura de Skills instaladas
+(`setup status` / `upgrade-skills --dry-run` / `--apply`). **No tocado en este
+recorrido.**
