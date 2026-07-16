@@ -297,7 +297,7 @@ func writeInitError(stderr io.Writer, code, format string, args ...interface{}) 
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn init --project-root <dir>"`,
 	})
-	return exitFailure
+	return domain.ErrorCode(code).ExitCode()
 }
 
 // ---------------------------------------------------------------------------
@@ -431,7 +431,7 @@ func writeDoctorError(stderr io.Writer, code, format string, args ...interface{}
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn doctor"`,
 	})
-	return exitFailure
+	return domain.ErrorCode(code).ExitCode()
 }
 
 // ---------------------------------------------------------------------------
@@ -581,7 +581,7 @@ func runCapture(args []string, stdout, stderr io.Writer) int {
 
 	result, err := svc.Capture(ctx, projectID, input)
 	if err != nil {
-		return writeCaptureError(stderr, "invalid_argument", "capture: %v", err)
+		return writeDomainError(stderr, err, "invalid_argument", `run "royo-learn capture --help"`, "capture: ")
 	}
 
 	if *jsonFlag {
@@ -748,7 +748,7 @@ func writeCaptureError(stderr io.Writer, code, format string, args ...interface{
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn capture --help"`,
 	})
-	return exitFailure
+	return domain.ErrorCode(code).ExitCode()
 }
 
 // ---------------------------------------------------------------------------
@@ -891,7 +891,7 @@ func runCurate(args []string, stdout, stderr io.Writer) int {
 
 	result, curErr := svc.Curate(ctx, projectID, curateInput)
 	if curErr != nil {
-		return writeCurateError(stderr, "invalid_argument", "curate: %v", curErr)
+		return writeDomainError(stderr, curErr, "invalid_argument", `run "royo-learn curate --help"`, "curate: ")
 	}
 
 	if *jsonFlag {
@@ -930,7 +930,7 @@ func writeCurateError(stderr io.Writer, code, format string, args ...interface{}
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn curate --help"`,
 	})
-	return exitFailure
+	return domain.ErrorCode(code).ExitCode()
 }
 
 // ---------------------------------------------------------------------------
@@ -1015,7 +1015,7 @@ func runEvidenceAdd(args []string, stdout, stderr io.Writer) int {
 		Actor:         domain.Actor{Kind: "human", Name: "cli-user"},
 	})
 	if err != nil {
-		return writeEvidenceError(stderr, "invalid_argument", "evidence add: %v", err)
+		return writeDomainError(stderr, err, "invalid_argument", `run "royo-learn evidence add --help"`, "evidence add: ")
 	}
 
 	if *jsonFlag {
@@ -1120,7 +1120,7 @@ func writeEvidenceError(stderr io.Writer, code, format string, args ...interface
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn evidence add <learning-id> --summary <text>"`,
 	})
-	return exitFailure
+	return domain.ErrorCode(code).ExitCode()
 }
 
 // ---------------------------------------------------------------------------
@@ -1159,7 +1159,7 @@ func runPreview(args []string, stdout, stderr io.Writer) int {
 		},
 	})
 	if err != nil {
-		return writePublishError(stderr, "invalid_argument", "preview: %v", err)
+		return writeDomainError(stderr, err, "invalid_argument", `run "royo-learn preview --help"`, "preview: ")
 	}
 
 	if *jsonFlag {
@@ -1254,7 +1254,7 @@ func runApprove(args []string, stdout, stderr io.Writer) int {
 	ctx := context.Background()
 	approval, err := svc.Approve(ctx, projectID, apprIn)
 	if err != nil {
-		return writePublishError(stderr, "invalid_argument", "approve: %v", err)
+		return writeDomainError(stderr, err, "invalid_argument", `run "royo-learn approve --help"`, "approve: ")
 	}
 
 	if *jsonFlag {
@@ -1333,7 +1333,7 @@ func runPublish(args []string, stdout, stderr io.Writer) int {
 	ctx := context.Background()
 	result, err := svc.Publish(ctx, projectID, pubIn)
 	if err != nil {
-		return writePublishError(stderr, "invalid_argument", "publish: %v", err)
+		return writeDomainError(stderr, err, "invalid_argument", `run "royo-learn publish --help"`, "publish: ")
 	}
 
 	// Dry run: report the plan without any write (D7).
@@ -1406,7 +1406,7 @@ func runRollback(args []string, stdout, stderr io.Writer) int {
 		},
 	})
 	if err != nil {
-		return writePublishError(stderr, "invalid_argument", "rollback: %v", err)
+		return writeDomainError(stderr, err, "invalid_argument", `run "royo-learn rollback --help"`, "rollback: ")
 	}
 
 	if *jsonFlag {
@@ -1509,7 +1509,7 @@ func writePublishError(stderr io.Writer, code, format string, args ...interface{
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn preview --help"`,
 	})
-	return exitFailure
+	return domain.ErrorCode(code).ExitCode()
 }
 
 // ---------------------------------------------------------------------------
@@ -1650,7 +1650,7 @@ func writeEngramError(stderr io.Writer, code, format string, args ...interface{}
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn engram-health"`,
 	})
-	return exitFailure
+	return domain.ErrorCode(code).ExitCode()
 }
 
 // ---------------------------------------------------------------------------
@@ -1826,7 +1826,7 @@ func writeRecurrenceError(stderr io.Writer, code, format string, args ...interfa
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn recurrences --learning-id <id>"`,
 	})
-	return exitFailure
+	return domain.ErrorCode(code).ExitCode()
 }
 
 // ---------------------------------------------------------------------------
@@ -1926,5 +1926,5 @@ func writeSelfUpdateError(stderr io.Writer, code, format string, args ...interfa
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn self-update --check" or use the installer`,
 	})
-	return exitFailure
+	return domain.ErrorCode(code).ExitCode()
 }

@@ -278,17 +278,46 @@ func toolResultJSON(v any) (*mcp.CallToolResult, any, error) {
 	}, nil, nil
 }
 
-func toolError(code, message string) (*mcp.CallToolResult, any, error) {
-	errJSON, _ := json.Marshal(map[string]string{
-		"code":    code,
-		"message": message,
+// toolErrorEnvelope writes the nested error envelope docs/05-MCP-SPEC.md
+// specifies: { "error": { code, message, recoverable, details, next_action } }.
+// It is the single MCP error path; the code is never interpreted by string
+// matching and the CLI mirrors the same fields (§4.3).
+func toolErrorEnvelope(code, message string, recoverable bool, details map[string]any, next string) (*mcp.CallToolResult, any, error) {
+	if details == nil {
+		details = map[string]any{}
+	}
+	body, _ := json.Marshal(map[string]any{
+		"error": map[string]any{
+			"code":        code,
+			"message":     message,
+			"recoverable": recoverable,
+			"details":     details,
+			"next_action": next,
+		},
 	})
 	return &mcp.CallToolResult{
 		IsError: true,
 		Content: []mcp.Content{
-			&mcp.TextContent{Text: string(errJSON)},
+			&mcp.TextContent{Text: string(body)},
 		},
 	}, nil, nil
+}
+
+// toolError emits the nested envelope for a hand-set code (validation performed
+// in the handler itself, before any service call).
+func toolError(code, message string) (*mcp.CallToolResult, any, error) {
+	return toolErrorEnvelope(code, message, true, nil, "")
+}
+
+// toolDomainError surfaces a service error faithfully: it extracts the domain
+// error's real code, message, recoverability, details and next action, so
+// approval_required, learning_not_found and the rest reach the client with their
+// true code. Non-domain errors fall back to the supplied code.
+func toolDomainError(err error, fallbackCode string) (*mcp.CallToolResult, any, error) {
+	if de, ok := domain.AsDomainError(err); ok {
+		return toolErrorEnvelope(string(de.Code), de.Message, de.Recoverable, de.Details, de.NextAction)
+	}
+	return toolError(fallbackCode, err.Error())
 }
 
 func toActor(a actorInput) domain.Actor {
@@ -339,7 +368,7 @@ func handleCaptureLearning(srv *Server) func(ctx context.Context, req *mcp.CallT
 
 		result, err := srv.capSvc.Capture(ctx, srv.projectID, capIn)
 		if err != nil {
-			return toolError("capture_failed", err.Error())
+			return toolDomainError(err, "capture_failed")
 		}
 
 		return toolResultJSON(map[string]any{
@@ -375,7 +404,7 @@ func handleAddEvidence(srv *Server) func(ctx context.Context, req *mcp.CallToolR
 
 		result, err := srv.capSvc.AddEvidence(ctx, srv.projectID, addIn)
 		if err != nil {
-			return toolError("add_evidence_failed", err.Error())
+			return toolDomainError(err, "add_evidence_failed")
 		}
 
 		return toolResultJSON(map[string]any{
@@ -396,7 +425,7 @@ func handleSearchLearnings(srv *Server) func(ctx context.Context, req *mcp.CallT
 
 		results, err := storage.Search(ctx, srv.db, srv.projectID, in.Query)
 		if err != nil {
-			return toolError("search_failed", err.Error())
+			return toolDomainError(err, "search_failed")
 		}
 
 		if in.Limit > 0 && in.Limit < len(results) {
@@ -430,7 +459,7 @@ func handleCurateLearning(srv *Server) func(ctx context.Context, req *mcp.CallTo
 
 		result, err := srv.curateSvc.Curate(ctx, srv.projectID, curIn)
 		if err != nil {
-			return toolError("curate_failed", err.Error())
+			return toolDomainError(err, "curate_failed")
 		}
 
 		return toolResultJSON(map[string]any{
@@ -450,7 +479,7 @@ func handlePreviewPublication(srv *Server) func(ctx context.Context, req *mcp.Ca
 
 		result, err := srv.publishSvc.Preview(ctx, srv.projectID, previewIn)
 		if err != nil {
-			return toolError("preview_failed", err.Error())
+			return toolDomainError(err, "preview_failed")
 		}
 
 		return toolResultJSON(map[string]any{
@@ -496,7 +525,7 @@ func handleApprove(srv *Server) func(ctx context.Context, req *mcp.CallToolReque
 
 		approval, err := srv.publishSvc.Approve(ctx, srv.projectID, apprIn)
 		if err != nil {
-			return toolError("approve_failed", err.Error())
+			return toolDomainError(err, "approve_failed")
 		}
 
 		out := map[string]any{
@@ -530,7 +559,7 @@ func handlePublishLearning(srv *Server) func(ctx context.Context, req *mcp.CallT
 			srv.projectRoot+"/.royo-learn")
 		result, err := svc.Publish(ctx, srv.projectID, pubIn)
 		if err != nil {
-			return toolError("publish_failed", err.Error())
+			return toolDomainError(err, "publish_failed")
 		}
 
 		// Dry run (D7): report the plan without any write.
@@ -578,7 +607,7 @@ func handleListLearnings(srv *Server) func(ctx context.Context, req *mcp.CallToo
 
 		learnings, err := storage.ListLearnings(ctx, tx, srv.projectID, filter)
 		if err != nil {
-			return toolError("list_failed", err.Error())
+			return toolDomainError(err, "list_failed")
 		}
 
 		items := make([]map[string]any, 0, len(learnings))
@@ -599,7 +628,7 @@ func handleGetLearning(srv *Server) func(ctx context.Context, req *mcp.CallToolR
 
 		learning, err := storage.GetLearning(ctx, tx, domain.LearningID(in.LearningID))
 		if err != nil {
-			return toolError("get_failed", err.Error())
+			return toolDomainError(err, "get_failed")
 		}
 		if learning == nil {
 			return toolError("learning_not_found", fmt.Sprintf("learning %q not found", in.LearningID))
@@ -656,7 +685,7 @@ func handleListRecurrences(srv *Server) func(ctx context.Context, req *mcp.CallT
 		}
 		records, err := recurrence.ListRecurrencesForLearning(ctx, srv.db, domain.LearningID(in.LearningID), limit)
 		if err != nil {
-			return toolError("list_recurrences_failed", err.Error())
+			return toolDomainError(err, "list_recurrences_failed")
 		}
 
 		items := make([]map[string]any, 0, len(records))
@@ -684,7 +713,7 @@ func handleComputeMetrics(srv *Server) func(ctx context.Context, req *mcp.CallTo
 
 		learning, err := storage.GetLearning(ctx, tx, domain.LearningID(in.LearningID))
 		if err != nil {
-			return toolError("get_learning_failed", err.Error())
+			return toolDomainError(err, "get_learning_failed")
 		}
 		if learning == nil {
 			return toolError("learning_not_found", fmt.Sprintf("learning %q not found", in.LearningID))
@@ -694,7 +723,7 @@ func handleComputeMetrics(srv *Server) func(ctx context.Context, req *mcp.CallTo
 		fp := recurrence.RecurrenceFingerprint(learning)
 		metrics, err := recurrence.ComputeMetrics(ctx, srv.db, srv.projectID, fp)
 		if err != nil {
-			return toolError("compute_metrics_failed", err.Error())
+			return toolDomainError(err, "compute_metrics_failed")
 		}
 
 		status, _ := recurrence.CheckNeedsReview(ctx, srv.db, srv.projectID, learning)
@@ -733,7 +762,7 @@ func handleReportOccurrence(srv *Server) func(ctx context.Context, req *mcp.Call
 		learning, err := storage.GetLearning(ctx, tx, domain.LearningID(in.LearningID))
 		tx.Rollback()
 		if err != nil {
-			return toolError("get_learning_failed", err.Error())
+			return toolDomainError(err, "get_learning_failed")
 		}
 		if learning == nil {
 			return toolError("learning_not_found", fmt.Sprintf("learning %q not found", in.LearningID))
@@ -750,7 +779,7 @@ func handleReportOccurrence(srv *Server) func(ctx context.Context, req *mcp.Call
 			IdempotencyKey: in.IdempotencyKey,
 		})
 		if err != nil {
-			return toolError("report_occurrence_failed", err.Error())
+			return toolDomainError(err, "report_occurrence_failed")
 		}
 
 		return toolResultJSON(map[string]any{
@@ -778,7 +807,7 @@ func handleStatus(srv *Server) func(ctx context.Context, req *mcp.CallToolReques
 		learning, err := storage.GetLearning(ctx, tx, domain.LearningID(in.LearningID))
 		tx.Rollback()
 		if err != nil {
-			return toolError("get_learning_failed", err.Error())
+			return toolDomainError(err, "get_learning_failed")
 		}
 		if learning == nil {
 			return toolError("learning_not_found", fmt.Sprintf("learning %q not found", in.LearningID))
@@ -804,7 +833,7 @@ func handleRollback(srv *Server) func(ctx context.Context, req *mcp.CallToolRequ
 			Actor:         toActor(in.Actor),
 		})
 		if err != nil {
-			return toolError("rollback_failed", err.Error())
+			return toolDomainError(err, "rollback_failed")
 		}
 		return toolResultJSON(map[string]any{
 			"publication_id": in.PublicationID,

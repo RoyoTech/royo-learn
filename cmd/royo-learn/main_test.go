@@ -551,9 +551,11 @@ func TestRunPreviewMissingLearningID(t *testing.T) {
 	t.Parallel()
 
 	var stdout, stderr bytes.Buffer
+	// invalid_argument maps to exit 2 (docs/04 §Exit codes), derived from the
+	// error code by the one error model (§4.3), not a hand-picked constant.
 	exitCode := run([]string{"preview"}, &stdout, &stderr)
-	if exitCode != exitFailure {
-		t.Fatalf("preview without --learning-id exit = %d, want %d", exitCode, exitFailure)
+	if exitCode != exitInvalidArguments {
+		t.Fatalf("preview without --learning-id exit = %d, want %d", exitCode, exitInvalidArguments)
 	}
 	if stdout.Len() != 0 {
 		t.Errorf("stdout = %q, want empty", stdout.String())
@@ -566,8 +568,8 @@ func TestRunPublishMissingLearningID(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	exitCode := run([]string{"publish"}, &stdout, &stderr)
-	if exitCode != exitFailure {
-		t.Fatalf("publish without --learning-id exit = %d, want %d", exitCode, exitFailure)
+	if exitCode != exitInvalidArguments {
+		t.Fatalf("publish without --learning-id exit = %d, want %d", exitCode, exitInvalidArguments)
 	}
 	if stdout.Len() != 0 {
 		t.Errorf("stdout = %q, want empty", stdout.String())
@@ -580,8 +582,8 @@ func TestRunRollbackMissingPublicationID(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	exitCode := run([]string{"rollback"}, &stdout, &stderr)
-	if exitCode != exitFailure {
-		t.Fatalf("rollback without --journal-id exit = %d, want %d", exitCode, exitFailure)
+	if exitCode != exitInvalidArguments {
+		t.Fatalf("rollback without --journal-id exit = %d, want %d", exitCode, exitInvalidArguments)
 	}
 	if stdout.Len() != 0 {
 		t.Errorf("stdout = %q, want empty", stdout.String())
