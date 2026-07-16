@@ -1,0 +1,6 @@
+{
+  "approval_id": "\u003cuuid\u003e",
+  "approved_by": "release-owner",
+  "learning_id": "\u003cuuid\u003e",
+  "preview_hash": "\u003csha256\u003e"
+}

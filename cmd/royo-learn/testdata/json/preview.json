@@ -1,0 +1,24 @@
+{
+  "diff": "--- a/knowledge/\u003cuuid\u003e.md\n+++ b/knowledge/\u003cuuid\u003e.md (new file)\n+---\n+name: json-payloads-are-a-public-contract\n+description: Tramo 5 pins the shape agents parse\n+license: MIT\n+---\n+\n+# JSON payloads are a public contract\n+\n+Every public payload carries a versioned snapshot\n",
+  "policies": [
+    {
+      "Passed": true,
+      "PolicyName": "preference_shared_requires_human_approval",
+      "Reason": "either not a preference type or not a shared/agents destination"
+    },
+    {
+      "Passed": false,
+      "PolicyName": "shared_scope_requires_human_approval",
+      "Reason": "shared-scope publications always require explicit human approval bound to the preview"
+    },
+    {
+      "Passed": true,
+      "PolicyName": "agents_rule_requires_human_approval",
+      "Reason": "not an AGENTS.md destination"
+    }
+  ],
+  "preview_hash": "\u003csha256\u003e",
+  "preview_id": "\u003cuuid\u003e",
+  "requires_approval": true,
+  "risk": "high"
+}

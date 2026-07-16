@@ -1,0 +1,15 @@
+{
+  "confidence": "medium",
+  "context": "Tramo 5 pins the shape agents parse",
+  "created_at": "\u003ctimestamp\u003e",
+  "evidence_level": "moderate",
+  "id": "\u003cuuid\u003e",
+  "observation": "A renamed key breaks every consumer silently",
+  "project_id": "\u003cuuid\u003e",
+  "reusable_lesson": "Every public payload carries a versioned snapshot",
+  "scope_guess": "project",
+  "status": "published",
+  "title": "JSON payloads are a public contract",
+  "type": "procedure",
+  "updated_at": "\u003ctimestamp\u003e"
+}

@@ -1,0 +1,8 @@
+{
+  "evidence_count": "\u003cnumber\u003e",
+  "evidence_ids": [],
+  "learning_id": "\u003cuuid\u003e",
+  "new": true,
+  "redacted": false,
+  "status": "captured"
+}

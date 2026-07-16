@@ -1,0 +1,10 @@
+{
+  "fingerprint": "\u003csha256\u003e",
+  "learning_id": "\u003cuuid\u003e",
+  "new": true,
+  "occurred_at": "\u003ctimestamp\u003e",
+  "outcome": "",
+  "recurrence_id": "\u003cuuid\u003e",
+  "retrieved": false,
+  "skill_activated": false
+}

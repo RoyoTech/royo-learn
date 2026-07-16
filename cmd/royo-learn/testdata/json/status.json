@@ -1,0 +1,8 @@
+{
+  "learning_id": "\u003cuuid\u003e",
+  "revision": "\u003cnumber\u003e",
+  "status": "published",
+  "title": "JSON payloads are a public contract",
+  "type": "procedure",
+  "updated_at": "\u003ctimestamp\u003e"
+}

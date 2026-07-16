@@ -1,0 +1,7 @@
+{
+  "code": "approval_required",
+  "details": {},
+  "message": "publish: approval_id is required to publish this preview — obtain one with 'royo-learn approve' / learning_approve",
+  "next_action": "fix the input and try again",
+  "recoverable": true
+}
