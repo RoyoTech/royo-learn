@@ -23,9 +23,9 @@ func TestRollbackListDiscoversInterruptedPublication(t *testing.T) {
 	}
 	publication := &domain.Publication{
 		ID: "interrupted-publication", LearningID: learningID, PreviewHash: "preview",
-		Targets: []domain.TargetEntry{{Root: "skills", Path: "demo/SKILL.md", Operation: domain.OpCreate}},
+		Targets:  []domain.TargetEntry{{Root: "skills", Path: "demo/SKILL.md", Operation: domain.OpCreate}},
 		Rollback: []domain.RollbackEntry{{Path: "skills/demo/SKILL.md", RecoveryState: domain.RecoveryPending}},
-		Status: domain.PubStatusInProgress, StartedAt: time.Now().UTC(),
+		Status:   domain.PubStatusInProgress, StartedAt: time.Now().UTC(),
 	}
 	if err := storage.WithTx(context.Background(), db, func(tx *sql.Tx) error {
 		return storage.SavePublication(context.Background(), tx, publication)

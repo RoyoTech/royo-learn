@@ -1413,6 +1413,7 @@ func runPublish(args []string, stdout, stderr io.Writer) int {
 func runRollback(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("rollback", flag.ContinueOnError)
 	journalID := fs.String("journal-id", "", "publication ID to rollback (required)")
+	listRecoverable := fs.Bool("list", false, "list interrupted publications that require recovery")
 	projectRoot := fs.String("project-root", "", "project root directory")
 	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
 
@@ -1420,7 +1421,10 @@ func runRollback(args []string, stdout, stderr io.Writer) int {
 		return writePublishError(stderr, "invalid_argument", "rollback: %v", err)
 	}
 
-	if *journalID == "" {
+	if *listRecoverable && *journalID != "" {
+		return writePublishError(stderr, "invalid_argument", "rollback: --list cannot be combined with --journal-id")
+	}
+	if !*listRecoverable && *journalID == "" {
 		return writePublishError(stderr, "invalid_argument", "rollback: --journal-id is required")
 	}
 
@@ -1436,6 +1440,23 @@ func runRollback(args []string, stdout, stderr io.Writer) int {
 		filepath.Join(root, ".royo-learn", "records"))
 
 	ctx := context.Background()
+	if *listRecoverable {
+		candidates, err := svc.RecoverablePublications(ctx)
+		if err != nil {
+			return writeDomainError(stderr, err, "rollback_failed", `run "royo-learn doctor --json"`, "rollback: ")
+		}
+		if *jsonFlag {
+			data, _ := json.MarshalIndent(candidates, "", "  ")
+			_, _ = fmt.Fprintf(stdout, "%s\n", data)
+		} else if len(candidates) == 0 {
+			_, _ = fmt.Fprintln(stdout, "No interrupted publications require recovery.")
+		} else {
+			for _, candidate := range candidates {
+				_, _ = fmt.Fprintf(stdout, "%s\t%s\t%s\n", candidate.PublicationID, candidate.Status, candidate.JournalStatus)
+			}
+		}
+		return exitSuccess
+	}
 	err := svc.Rollback(ctx, projectID, &publish.RollbackPublicationInput{
 		PublicationID: domain.PublicationID(*journalID),
 		Actor: domain.Actor{
@@ -1443,7 +1464,7 @@ func runRollback(args []string, stdout, stderr io.Writer) int {
 		},
 	})
 	if err != nil {
-		return writeDomainError(stderr, err, "invalid_argument", `run "royo-learn rollback --help"`, "rollback: ")
+		return writeDomainError(stderr, err, "rollback_failed", `run "royo-learn rollback --help"`, "rollback: ")
 	}
 
 	if *jsonFlag {
