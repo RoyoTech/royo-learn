@@ -117,14 +117,22 @@ func TestCaptureCuratePublishFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("preview: %v", err)
 	}
-	if preview.Preview.RequiresApproval {
-		t.Fatal("new project skill unexpectedly requires human approval")
+	if !preview.Preview.RequiresApproval {
+		t.Fatal("multi-target project skill must require human approval")
+	}
+	approval, err := publishService.Approve(ctx, project.ID, &publish.ApproveInput{
+		LearningID: captured.LearningID, PreviewHash: preview.Preview.PreviewHash,
+		ApprovedBy: "integration-test", Reason: "authorize multi-target fixture", ApprovalEvidence: "test", Actor: actor,
+	})
+	if err != nil {
+		t.Fatalf("approve: %v", err)
 	}
 
 	published, err := publishService.Publish(ctx, project.ID, &publish.PublishInput{
 		Apply:       true,
 		LearningID:  captured.LearningID,
 		PreviewHash: preview.Preview.PreviewHash,
+		ApprovalID:  &approval.ID,
 		Force:       true,
 		Actor:       actor,
 	})

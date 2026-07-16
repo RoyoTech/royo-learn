@@ -216,11 +216,19 @@ func TestP1_E2E_ProcedurePreservedOnRepublish(t *testing.T) {
 	if err != nil {
 		t.Fatalf("preview A: %v", err)
 	}
+	approvalA, err := publishService.Approve(ctx, project.ID, &publish.ApproveInput{
+		LearningID: learningA.LearningID, PreviewHash: previewA.Preview.PreviewHash,
+		ApprovedBy: "integration-test", Reason: "authorize multi-target fixture", ApprovalEvidence: "test", Actor: actor,
+	})
+	if err != nil {
+		t.Fatalf("approve A: %v", err)
+	}
 
 	pubA, err := publishService.Publish(ctx, project.ID, &publish.PublishInput{
 		Apply:       true,
 		LearningID:  learningA.LearningID,
 		PreviewHash: previewA.Preview.PreviewHash,
+		ApprovalID:  &approvalA.ID,
 		Force:       true,
 		Actor:       actor,
 	})
@@ -240,11 +248,19 @@ func TestP1_E2E_ProcedurePreservedOnRepublish(t *testing.T) {
 	if err != nil {
 		t.Fatalf("preview B: %v", err)
 	}
+	approvalB, err := publishService.Approve(ctx, project.ID, &publish.ApproveInput{
+		LearningID: learningB.LearningID, PreviewHash: previewB.Preview.PreviewHash,
+		ApprovedBy: "integration-test", Reason: "authorize existing Skill replacement", ApprovalEvidence: "test", Actor: actor,
+	})
+	if err != nil {
+		t.Fatalf("approve B: %v", err)
+	}
 
 	pubB, err := publishService.Publish(ctx, project.ID, &publish.PublishInput{
 		Apply:       true,
 		LearningID:  learningB.LearningID,
 		PreviewHash: previewB.Preview.PreviewHash,
+		ApprovalID:  &approvalB.ID,
 		Force:       true,
 		Actor:       actor,
 	})
