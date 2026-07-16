@@ -217,31 +217,6 @@ func inspectRootRegularFile(root *os.Root, relative string) (*FileSnapshot, erro
 	return &FileSnapshot{Exists: true, Content: content, Hash: HashContent(content), Mode: opened.Mode()}, nil
 }
 
-func inspectMovedRegularFile(path string) (*FileSnapshot, error) {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return nil, err
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("moved target is not a regular non-symlink file")
-	}
-	content, err := readFileOnce(path)
-	if err != nil {
-		return nil, err
-	}
-	return &FileSnapshot{Exists: true, Content: content, Hash: HashContent(content), Mode: info.Mode()}, nil
-}
-
-func restoreMovedFile(movedPath, targetPath string) error {
-	if err := os.Link(movedPath, targetPath); err != nil {
-		return fmt.Errorf("original preserved at %s: %w", movedPath, err)
-	}
-	if err := os.Remove(movedPath); err != nil {
-		return fmt.Errorf("remove preserved link %s: %w", movedPath, err)
-	}
-	return nil
-}
-
 func targetChanged(message, path, preserved string) error {
 	details := map[string]any{"path": path}
 	if preserved != "" {

@@ -115,29 +115,6 @@ func SkillPath(skillName string) string {
 	return filepath.Join(SkillsDir, skillName, "SKILL.md")
 }
 
-// ExtractSection extracts the section for a specific learning from a skill file.
-// Returns nil if the learning is not found.
-func ExtractSection(content string, learningID domain.LearningID) *SkillSection {
-	idStr := string(learningID)
-	sections := parseSkillSections(content)
-	for _, sec := range sections {
-		if string(sec.LearningID) == idStr {
-			return &sec
-		}
-	}
-	return nil
-}
-
-// ListSkillLearningIDs returns all learning IDs referenced in a skill file.
-func ListSkillLearningIDs(content string) []domain.LearningID {
-	sections := parseSkillSections(content)
-	ids := make([]domain.LearningID, 0, len(sections))
-	for _, sec := range sections {
-		ids = append(ids, sec.LearningID)
-	}
-	return ids
-}
-
 // --- Content generation ---
 
 // GenerateSkillContent builds the full content of a skill file from frontmatter

@@ -198,62 +198,6 @@ type TargetContent struct {
 	Content string
 }
 
-// buildTargetContent builds the proposed content for a specific target.
-func (s *Service) buildTargetContent(target TargetResolution, learning *domain.Learning, curation *domain.Curation, ctx *TargetContext) string {
-	if ctx == nil || ctx.ProjectKey == "" {
-		return BuildSkillContent(learning.Title, learning.Context,
-			learning.ReusableLesson, strings.Join(learning.RecommendedProcedure, "\n"))
-	}
-
-	// Determine which kind of target this is.
-	indexName := IndexSkillName(ctx.ProjectKey)
-	targetName := filepath.Base(filepath.Dir(target.Path)) // skill name from path
-
-	if targetName == indexName {
-		// Index skill: regenerate catalog.
-		entries, err := DiscoverChildSkills(s.projectRoot, ctx.ProjectKey)
-		if err != nil {
-			entries = nil
-		}
-		return GenerateIndexContent(ctx.ProjectKey, entries)
-	}
-
-	if target.Path == "AGENTS.md" {
-		return BuildAgentsRefManagedBlock(ctx.ProjectKey)
-	}
-
-	// Child skill: merge learning into existing skill content.
-	var sections []SkillSection
-
-	targetFullPath := filepath.Join(s.projectRoot, target.Root, target.Path)
-	if existing, err := os.ReadFile(targetFullPath); err == nil {
-		sections = parseSkillSections(string(existing))
-	}
-
-	sections = MergeLearningIntoSections(sections, learning)
-
-	// Collect all learning IDs.
-	ids := make([]domain.LearningID, 0, len(sections))
-	for _, sec := range sections {
-		ids = append(ids, sec.LearningID)
-	}
-
-	area := ctx.Area
-	if area == "" {
-		area = SkillArea(learning)
-	}
-	fm := SkillFrontmatter{
-		Name:        SkillName(ctx.ProjectKey, area),
-		Description: BuildDescription(ctx.ProjectKey, area, []*domain.Learning{learning}),
-		Source:      "royo-learn",
-		Project:     ctx.ProjectKey,
-		LearningIDs: ids,
-		UpdatedAt:   utcNowPublish().Format("2006-01-02"),
-	}
-
-	return GenerateSkillContent(fm, sections)
-}
-
 // loadProject loads the project from the database.
 func (s *Service) loadProject(ctx context.Context, projectID domain.ProjectID) (*domain.Project, error) {
 	tx, err := s.db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})

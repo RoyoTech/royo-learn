@@ -94,21 +94,10 @@ func (s *Service) CheckApproval(ctx context.Context, previewHash string) (*domai
 		return nil, domain.NewValidationError(domain.ErrApprovalRequired,
 			"no valid approval found for this preview hash — approval is required before publishing")
 	}
-	if approval == nil {
-		return nil, domain.NewValidationError(domain.ErrApprovalRequired,
-			"no approval found for preview")
-	}
-
 	// Check expiry.
 	if approval.ExpiresAt != nil && approval.ExpiresAt.Before(utcNowPublish()) {
 		return nil, domain.NewValidationError(domain.ErrApprovalExpired,
 			fmt.Sprintf("approval expired at %s", approval.ExpiresAt.Format(time.RFC3339)))
-	}
-
-	// Check revocation.
-	if approval.RevokedAt != nil {
-		return nil, domain.NewValidationError(domain.ErrApprovalInvalid,
-			"approval has been revoked")
 	}
 
 	return approval, nil
