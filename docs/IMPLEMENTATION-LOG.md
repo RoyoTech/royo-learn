@@ -1536,3 +1536,115 @@ base del Tramo 4 · Parte 1.
 
 Tramo 4 · Parte 3 (§4.6 export/import/rebuild-index/review, §4.7 coherencia
 SQLite–Markdown, §4.8 migraciones). Fuera del alcance de esta parte.
+
+---
+
+## 2026-07-16 — Tramo 4 · Parte 3 (§4.6, §4.7, §4.8) — CERRADA CON UN FAIL
+
+La sesión del ejecutor murió por límite de sesión durante el trabajo final.
+Se retomó desde los commits reales. Los seis commits de §4.6/§4.7/§4.8 quedaron
+íntegros; el working tree solo contenía un import sin usar
+(`internal/capture` en `internal/publish/publish_op.go`), que rompía el build y
+fue revertido: introducía una dependencia de capa dudosa (publish → capture) y
+correspondía a un arreglo que la sesión no llegó a escribir. Ver el FAIL abajo.
+
+### Commits creados
+
+- `4ffd15b` test: require versioned export/import round-trip with conflict guard
+- `600043d` feat: add export/import/rebuild-index/review with deterministic rebuild
+- `78905b7` test: require SQLite-Markdown coherence detection, repair, and outbox cut
+- `cc06ae9` feat: detect SQLite-Markdown divergences in doctor and prove recovery
+- `76d4e28` test: require full migration chain over a real v0.1.9 base
+- `34a8b50` feat: back up an existing store before applying pending migrations
+
+Paquetes nuevos: `internal/portability` (export/import), `internal/coherence`
+(auditoría y reparación SQLite–Markdown).
+
+### §4.6 — Export/import/rebuild-index/review — PASS
+
+Pruebas en `internal/portability`:
+`TestRoundTrip_ExportDeleteImportIsIdentical` (exportar → borrar base temporal →
+importar → aprendizajes, evidencias, relaciones y estados idénticos),
+`TestImport_DryRunByDefaultWritesNothing`,
+`TestImport_ConflictIsNotSilentlyOverwritten`,
+`TestImport_RejectsUnknownFormatVersion`. Los marcadores «declared-but-pending»
+del registro CLI y `pendingTools` del MCP quedaron **vacíos**: ninguna
+superficie declara hoy algo que no exista.
+
+### §4.7 — Coherencia SQLite–Markdown — PASS (con la regla dura respetada)
+
+`TestAudit_DetectsEveryDivergenceKind` y `TestRepair_RestoresCoherence` en
+`internal/coherence`: `doctor` detecta las divergencias y `rebuild-index` las
+repara.
+
+**Determinación sobre el outbox: NO se introdujo.** `TestOutbox_MaterializationWindowIsRecoverable`
+es la prueba de corte que el plan exigía: reproduce la ventana exacta y
+demuestra que es **recuperable** con journal + compensación + doctor +
+rebuild-index, sin cola ni outbox. Verificado: la palabra «outbox» no aparece
+en ningún archivo de producción, solo en esa prueba.
+
+### §4.8 — Migraciones — PASS
+
+`TestMigrate_FromRealV019Base`: la cadena completa de migraciones corre sobre
+una base con esquema **v0.1.9 real**, sin pérdida de datos, con respaldo previo
+del store (`34a8b50`), idempotente al re-ejecutar, y sin auto-aprobar registros
+antiguos.
+
+### FAIL — el rollback deja un estado que no es verdad
+
+**`TestRunE2ETempCompletesAllSteps` está en rojo: 36/37 pasos pasan; falla
+`cli-sensitive/final-doctor` con `[doctor] exited 1`.**
+
+No es un test roto ni ruido ambiental: es un **defecto real del producto que la
+detección de coherencia de §4.7 acaba de exponer**.
+
+`internal/publish/rollback.go:54` actualiza el estado de la **publicación**
+(`pub.Status = domain.PubStatusRolledback`) pero **nunca revierte el estado del
+aprendizaje**. Tras un rollback exitoso el aprendizaje sigue en `published`
+aunque el archivo publicado ya no exista, y el registro materializado en
+Markdown queda obsoleto respecto de SQLite. El `doctor` nuevo detecta esa
+divergencia y sale 1 — haciendo exactamente su trabajo.
+
+Es la misma enfermedad que el Recorrido D vino a curar («estados verdaderos»):
+D probó que un **fallo** no deja un `published` falso, pero nadie probó el
+inverso — que un **rollback exitoso** revoque el `published`.
+
+**Qué hay que decidir antes de arreglarlo** (no resolver en silencio): a qué
+estado vuelve un aprendizaje revertido (`approved` es lo esperable, pero es una
+decisión de contrato que toca `docs/03` y `docs/14`), y quién re-materializa el
+registro. La dependencia `publish → capture` que la sesión muerta empezó a
+introducir NO es el camino: viola las capas.
+
+**Con este FAIL, el Tramo 4 no puede declararse terminado.** Corresponde
+reabrir §4.7 (o abrir un recorrido corto de estados) con TDD: test rojo que
+exija que tras `rollback` el aprendizaje no siga `published` y que `doctor`
+quede limpio, después el arreglo mínimo.
+
+### Comandos ejecutados — resultado real
+
+- `go build ./...` y `go vet ./...` limpios (tras revertir el import sin usar).
+- `go test -race -p 1 -count=1 ./...` → **16 paquetes ok, 2 fallas**:
+  - `TestCLI_IdempotencyKeyDoesNotDuplicateEvidence` → `TempDir RemoveAll
+    cleanup: directory not empty`. **Ambiental** (flake de teardown de Windows
+    ya conocido); pasa aislado.
+  - `TestRunE2ETempCompletesAllSteps` → **FAIL real**, ver arriba.
+
+### Puerta de salida del Tramo 4 · Parte 3
+
+- [x] §4.6 export/import/rebuild-index/review con round-trip → **PASS**
+- [x] §4.7 doctor detecta / rebuild-index repara → **PASS**
+- [x] §4.7 outbox NO introducido, prueba de corte demuestra recuperabilidad → **PASS**
+- [x] §4.8 migraciones sobre base v0.1.9 real → **PASS**
+- [ ] Suite completa en verde → **FAIL** (rollback deja `published` falso)
+
+**Resultado del Tramo 4 · Parte 3: FAIL.** Cuatro de cinco ítems en PASS, pero
+el defecto de estado tras rollback deja la suite en rojo por una razón legítima.
+No se avanza al Tramo 5 hasta cerrarlo.
+
+### Siguiente paso
+
+Reabrir el defecto de estado tras rollback (TDD, decisión de contrato previa en
+`docs/CONTRACT-DECISIONS.md`). Recién después: Tramo 5 (pruebas de contrato
+permanentes + CI) y Tramo 6 (documentación final, `v0.2.0` preparado sin
+publicar). El punto de release de `v0.1.10` sigue siendo `66a90da`, intacto y
+sin etiquetar.
