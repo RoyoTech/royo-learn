@@ -585,14 +585,26 @@ func runCapture(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if *jsonFlag {
-		data, _ := json.MarshalIndent(map[string]interface{}{
+		payload := map[string]interface{}{
 			"learning_id":    result.LearningID,
 			"status":         result.Status,
 			"new":            result.New,
 			"evidence_count": len(result.EvidenceIDs),
 			"evidence_ids":   evidenceIDStrings(result.EvidenceIDs),
 			"redacted":       result.Redacted,
-		}, "", "  ")
+		}
+		if len(result.SimilarCandidates) > 0 {
+			candidates := make([]map[string]any, 0, len(result.SimilarCandidates))
+			for _, c := range result.SimilarCandidates {
+				candidates = append(candidates, map[string]any{
+					"learning_id": string(c.LearningID),
+					"title":       c.Title,
+					"status":      string(c.Status),
+				})
+			}
+			payload["similar_candidates"] = candidates
+		}
+		data, _ := json.MarshalIndent(payload, "", "  ")
 		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
 	} else {
 		statusLabel := "new"
@@ -601,6 +613,9 @@ func runCapture(args []string, stdout, stderr io.Writer) int {
 		}
 		_, _ = fmt.Fprintf(stdout, "captured %s learning %s (status: %s, evidence: %d)\n",
 			statusLabel, result.LearningID, result.Status, len(result.EvidenceIDs))
+		for _, c := range result.SimilarCandidates {
+			_, _ = fmt.Fprintf(stdout, "  similar candidate (suggestion): %s %s\n", c.LearningID, c.Title)
+		}
 	}
 
 	return exitSuccess
@@ -758,9 +773,10 @@ func writeCaptureError(stderr io.Writer, code, format string, args ...interface{
 func runCurate(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("curate", flag.ContinueOnError)
 	learningID := fs.String("learning-id", "", "learning ID to curate (required)")
-	action := fs.String("action", "", "curation action: approve, approve_new_skill, approve_skill_update, reject, needs_evidence, relate (required)")
+	action := fs.String("action", "", "curation action: approve, approve_new_skill, approve_skill_update, reject, needs_evidence, relate, confirm-relation (required)")
 	targetID := fs.String("target-id", "", "target learning ID for relate action")
 	relation := fs.String("relation", "related", "relation type for relate action")
+	relationID := fs.String("relation-id", "", "relation ID to confirm for confirm-relation action")
 	rationale := fs.String("rationale", "", "rationale for the curation decision")
 	area := fs.String("area", "", "explicit skill area (sanitized+lowercased); overrides automatic derivation from retrieval_terms for skill decisions")
 	projectRoot := fs.String("project-root", "", "project root directory")
@@ -770,11 +786,13 @@ func runCurate(args []string, stdout, stderr io.Writer) int {
 		return writeCurateError(stderr, "invalid_argument", "curate: %v", err)
 	}
 
-	if *learningID == "" {
-		return writeCurateError(stderr, "invalid_argument", "curate: --learning-id is required")
-	}
 	if *action == "" {
 		return writeCurateError(stderr, "invalid_argument", "curate: --action is required")
+	}
+	// confirm-relation targets a relation ID, not a learning; every other action
+	// operates on a learning.
+	if *learningID == "" && *action != "confirm-relation" {
+		return writeCurateError(stderr, "invalid_argument", "curate: --learning-id is required")
 	}
 
 	// Resolve project root.
@@ -845,7 +863,8 @@ func runCurate(args []string, stdout, stderr io.Writer) int {
 		SessionID: "",
 	}
 
-	// Handle "relate" action.
+	// Handle "relate" action: propose a relation (plan 4.5). The agent proposes;
+	// curation confirms via confirm-relation.
 	if *action == "relate" {
 		if *targetID == "" {
 			return writeCurateError(stderr, "invalid_argument", "curate: --target-id is required for relate action")
@@ -857,7 +876,7 @@ func runCurate(args []string, stdout, stderr io.Writer) int {
 			Rationale:        *rationale,
 			Actor:            actor,
 		}
-		result, relErr := svc.Relate(ctx, relateInput)
+		result, relErr := svc.ProposeRelation(ctx, relateInput)
 		if relErr != nil {
 			return writeCurateError(stderr, "invalid_argument", "curate: %v", relErr)
 		}
@@ -867,10 +886,31 @@ func runCurate(args []string, stdout, stderr io.Writer) int {
 				"source_learning_id": *learningID,
 				"target_learning_id": *targetID,
 				"relation":           *relation,
+				"status":             string(domain.RelationProposed),
 			}, "", "  ")
 			_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
 		} else {
-			_, _ = fmt.Fprintf(stdout, "relation %s created between %s and %s\n", result.RelationID, *learningID, *targetID)
+			_, _ = fmt.Fprintf(stdout, "relation %s proposed between %s and %s (awaiting confirmation)\n", result.RelationID, *learningID, *targetID)
+		}
+		return exitSuccess
+	}
+
+	// Handle "confirm-relation" action: curation confirms a proposed relation.
+	if *action == "confirm-relation" {
+		if *relationID == "" {
+			return writeCurateError(stderr, "invalid_argument", "curate: --relation-id is required for confirm-relation action")
+		}
+		if confErr := svc.ConfirmRelation(ctx, domain.RelationID(*relationID), actor); confErr != nil {
+			return writeCurateError(stderr, "invalid_argument", "curate: %v", confErr)
+		}
+		if *jsonFlag {
+			data, _ := json.MarshalIndent(map[string]interface{}{
+				"relation_id": *relationID,
+				"status":      string(domain.RelationConfirmed),
+			}, "", "  ")
+			_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+		} else {
+			_, _ = fmt.Fprintf(stdout, "relation %s confirmed\n", *relationID)
 		}
 		return exitSuccess
 	}

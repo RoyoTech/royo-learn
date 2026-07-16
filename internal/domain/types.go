@@ -283,6 +283,18 @@ type EvidenceRef struct {
 	Summary    string     `json:"summary"`
 }
 
+// RelationStatus is the propose/confirm lifecycle of a learning relation
+// (plan 4.5). The agent proposes; curation confirms. The system never treats a
+// proposal as a confirmed equivalence.
+type RelationStatus string
+
+const (
+	// RelationProposed is a suggested relation awaiting human confirmation.
+	RelationProposed RelationStatus = "proposed"
+	// RelationConfirmed is a relation a curator has confirmed.
+	RelationConfirmed RelationStatus = "confirmed"
+)
+
 // LearningRelation describes a semantic relationship between two learnings.
 type LearningRelation struct {
 	ID               RelationID
@@ -291,9 +303,18 @@ type LearningRelation struct {
 	Relation         RelationType
 	Confidence       *float64
 	Rationale        string
-	Actor            Actor
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	Status           RelationStatus
+	// ProposedBy is who proposed the relation (agent or human). Actor mirrors it
+	// for backward compatibility.
+	ProposedBy Actor
+	// ConfirmedBy is who confirmed the relation; nil while the relation is only
+	// proposed.
+	ConfirmedBy *Actor
+	Actor       Actor
+	CreatedAt   time.Time
+	// ConfirmedAt is when the relation was confirmed; nil while only proposed.
+	ConfirmedAt *time.Time
+	UpdatedAt   time.Time
 }
 
 // Curation represents a curator's decision on a learning.

@@ -27,8 +27,18 @@ type RelateResult struct {
 	RelationID domain.RelationID
 }
 
-// Relate creates a semantic relationship between two learnings.
+// Relate proposes a semantic relationship between two learnings. It is retained
+// as the historical name for ProposeRelation: the agent proposes, curation
+// confirms (plan 4.5). A newly created relation is always `proposed`.
 func (s *Service) Relate(ctx context.Context, input *RelateInput) (*RelateResult, error) {
+	return s.ProposeRelation(ctx, input)
+}
+
+// ProposeRelation proposes a semantic relationship between two learnings. The
+// relation is created in the `proposed` state with the caller recorded as the
+// proposer; it is never auto-confirmed. A curator confirms it via
+// ConfirmRelation.
+func (s *Service) ProposeRelation(ctx context.Context, input *RelateInput) (*RelateResult, error) {
 	if input == nil {
 		return nil, domain.NewValidationError(domain.ErrInvalidArgument, "relate: input is nil")
 	}
@@ -96,6 +106,8 @@ func (s *Service) Relate(ctx context.Context, input *RelateInput) (*RelateResult
 		Relation:         input.RelationType,
 		Confidence:       input.Confidence,
 		Rationale:        input.Rationale,
+		Status:           domain.RelationProposed,
+		ProposedBy:       input.Actor,
 		Actor:            input.Actor,
 		CreatedAt:        now,
 		UpdatedAt:        now,
@@ -116,7 +128,7 @@ func (s *Service) Relate(ctx context.Context, input *RelateInput) (*RelateResult
 		ID:         domain.AuditEventID(uuid.Must(uuid.NewV7()).String()),
 		OccurredAt: now,
 		Actor:      input.Actor,
-		Operation:  "relate",
+		Operation:  "propose_relation",
 		EntityType: "learning_relation",
 		EntityID:   string(relation.ID),
 		Result:     "success",
@@ -125,6 +137,7 @@ func (s *Service) Relate(ctx context.Context, input *RelateInput) (*RelateResult
 			"target_learning_id": string(input.TargetLearningID),
 			"relation_type":      string(input.RelationType),
 			"rationale":          input.Rationale,
+			"status":             string(domain.RelationProposed),
 		},
 	}
 	if err := storage.RecordEvent(ctx, s.db.DB, auditEvt); err != nil {
@@ -134,6 +147,40 @@ func (s *Service) Relate(ctx context.Context, input *RelateInput) (*RelateResult
 	return &RelateResult{
 		RelationID: relation.ID,
 	}, nil
+}
+
+// ConfirmRelation confirms a proposed relation, recording who confirmed it. It
+// is the curation half of the plan 4.5 propose/confirm lifecycle. Confirming a
+// missing or already-confirmed relation is an explicit error, never a silent
+// no-op.
+func (s *Service) ConfirmRelation(ctx context.Context, relationID domain.RelationID, confirmedBy domain.Actor) error {
+	if relationID == "" {
+		return domain.NewValidationError(domain.ErrInvalidArgument, "confirm relation: relation_id is required")
+	}
+
+	now := time.Now().UTC()
+	if err := storage.WithTx(ctx, s.db, func(tx *sql.Tx) error {
+		return storage.ConfirmRelation(ctx, tx, relationID, confirmedBy, now)
+	}); err != nil {
+		return err
+	}
+
+	auditEvt := &domain.AuditEvent{
+		ID:         domain.AuditEventID(uuid.Must(uuid.NewV7()).String()),
+		OccurredAt: now,
+		Actor:      confirmedBy,
+		Operation:  "confirm_relation",
+		EntityType: "learning_relation",
+		EntityID:   string(relationID),
+		Result:     "success",
+		Details: map[string]any{
+			"status": string(domain.RelationConfirmed),
+		},
+	}
+	if err := storage.RecordEvent(ctx, s.db.DB, auditEvt); err != nil {
+		return fmt.Errorf("confirm relation: record audit: %w", err)
+	}
+	return nil
 }
 
 // listExistingRelations checks for existing relations between two learnings

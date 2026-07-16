@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"agent-royo-learn/internal/domain"
@@ -53,6 +54,18 @@ type CaptureResult struct {
 	// different idempotency key over the same content hash). It stays false for
 	// a technical retry (same key) and for a conservative keyless dedup.
 	RecurrenceRecorded bool
+	// SimilarCandidates are existing learnings FTS5 surfaces as possibly related
+	// to this capture (plan 4.5). They are SUGGESTIONS only: capture never
+	// autonomously decides two learnings are equivalent or creates a relation.
+	// A human proposes and curation confirms any relation.
+	SimilarCandidates []SimilarCandidate
+}
+
+// SimilarCandidate is a suggested-similar existing learning (plan 4.5).
+type SimilarCandidate struct {
+	LearningID domain.LearningID
+	Title      string
+	Status     domain.LearningStatus
 }
 
 // Service provides the capture operation.
@@ -274,12 +287,33 @@ func (s *Service) Capture(ctx context.Context, projectID domain.ProjectID, input
 	}
 
 	return &CaptureResult{
-		LearningID:  learning.ID,
-		Status:      learning.Status,
-		New:         true,
-		EvidenceIDs: evidence.IDs(records),
-		Redacted:    evidence.AnyRedacted(records),
+		LearningID:        learning.ID,
+		Status:            learning.Status,
+		New:               true,
+		EvidenceIDs:       evidence.IDs(records),
+		Redacted:          evidence.AnyRedacted(records),
+		SimilarCandidates: s.suggestSimilar(ctx, projectID, learning),
 	}, nil
+}
+
+// suggestSimilar returns existing learnings FTS5 surfaces as similar to the just
+// -captured one (plan 4.5). It is best-effort: a search failure yields no
+// suggestions rather than failing the capture, because a suggestion is advisory.
+func (s *Service) suggestSimilar(ctx context.Context, projectID domain.ProjectID, learning *domain.Learning) []SimilarCandidate {
+	query := strings.Join([]string{learning.Title, learning.Observation, learning.ReusableLesson}, " ")
+	hits, err := storage.SuggestSimilar(ctx, s.db, projectID, query, learning.ID, 10)
+	if err != nil || len(hits) == 0 {
+		return nil
+	}
+	out := make([]SimilarCandidate, 0, len(hits))
+	for _, h := range hits {
+		out = append(out, SimilarCandidate{
+			LearningID: h.ID,
+			Title:      h.Title,
+			Status:     h.Status,
+		})
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------

@@ -371,14 +371,28 @@ func handleCaptureLearning(srv *Server) func(ctx context.Context, req *mcp.CallT
 			return toolDomainError(err, "capture_failed")
 		}
 
-		return toolResultJSON(map[string]any{
+		out := map[string]any{
 			"learning_id":    string(result.LearningID),
 			"status":         string(result.Status),
 			"new":            result.New,
 			"evidence_count": len(result.EvidenceIDs),
 			"evidence_ids":   evidenceIDStrings(result.EvidenceIDs),
 			"redacted":       result.Redacted,
-		})
+		}
+		if len(result.SimilarCandidates) > 0 {
+			// Suggestions only: the caller (human/curation) decides whether any is
+			// truly related; the server never auto-relates (plan 4.5).
+			candidates := make([]map[string]any, 0, len(result.SimilarCandidates))
+			for _, c := range result.SimilarCandidates {
+				candidates = append(candidates, map[string]any{
+					"learning_id": string(c.LearningID),
+					"title":       c.Title,
+					"status":      string(c.Status),
+				})
+			}
+			out["similar_candidates"] = candidates
+		}
+		return toolResultJSON(out)
 	}
 }
 

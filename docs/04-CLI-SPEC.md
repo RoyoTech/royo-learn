@@ -218,6 +218,28 @@ Solo acepta un archivo de decisión o flags completos. No “piensa” la curaci
 --json
 ```
 
+#### Relaciones explícitas (propuesta y confirmación)
+
+Las relaciones entre aprendizajes siguen un ciclo de propuesta y confirmación
+(plan 4.5): el agente propone y la curación confirma. El sistema nunca decide de
+forma autónoma que dos aprendizajes son equivalentes.
+
+```text
+curate --learning-id <src> --action relate --target-id <tgt> --relation <tipo> --rationale <texto>
+curate --action confirm-relation --relation-id <id>
+```
+
+- `--relation` acepta: `duplicate_of`, `extends`, `supersedes`, `contradicts`,
+  `narrows`, `related`.
+- `relate` crea la relación en estado `proposed` y registra al proponente.
+- `confirm-relation` transiciona la relación a `confirmed` y registra al
+  confirmante; confirmar una relación inexistente o ya confirmada es un error
+  explícito, nunca un no-op silencioso.
+
+Durante la captura, `capture` puede devolver `similar_candidates`: aprendizajes
+existentes que FTS5 sugiere como parecidos. Son solo sugerencias para que una
+persona decida; la captura nunca crea una relación por su cuenta.
+
 ### `royo-learn preview <id>`
 
 Genera diff y preview hash.
