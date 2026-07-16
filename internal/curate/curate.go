@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"agent-royo-learn/internal/capture"
+	"agent-royo-learn/internal/record"
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/storage"
 
@@ -175,7 +175,7 @@ func (s *Service) Curate(ctx context.Context, projectID domain.ProjectID, input 
 	}
 
 	// Update Markdown record.
-	if err := capture.WriteRecord(s.recordsDir, learning); err != nil {
+	if err := record.WriteRecord(s.recordsDir, learning); err != nil {
 		return nil, fmt.Errorf("curate: write record: %w", err)
 	}
 

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"agent-royo-learn/internal/capture"
+	"agent-royo-learn/internal/record"
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/storage"
 )
@@ -135,7 +135,7 @@ func Import(ctx context.Context, db *storage.DB, b *Bundle, opts ImportOptions) 
 	// ---- Re-materialize the derived Markdown records (D6). ------------------
 	if opts.RecordsDir != "" {
 		for _, l := range plan.learnings {
-			if err := capture.WriteRecord(opts.RecordsDir, l); err != nil {
+			if err := record.WriteRecord(opts.RecordsDir, l); err != nil {
 				return res, fmt.Errorf("import: materialize record %s: %w", l.ID, err)
 			}
 		}

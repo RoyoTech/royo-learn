@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"agent-royo-learn/internal/capture"
+	"agent-royo-learn/internal/record"
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/storage"
 	"agent-royo-learn/internal/testutil"
@@ -101,10 +101,10 @@ func TestAudit_DetectsEveryDivergenceKind(t *testing.T) {
 	l3 := saveLearning(t, db, projectID, "missing")
 
 	// l1: a faithful record. l2: a record, then mutate SQLite so it diverges.
-	if err := capture.WriteRecord(recordsDir, l1); err != nil {
+	if err := record.WriteRecord(recordsDir, l1); err != nil {
 		t.Fatalf("WriteRecord l1: %v", err)
 	}
-	if err := capture.WriteRecord(recordsDir, l2); err != nil {
+	if err := record.WriteRecord(recordsDir, l2); err != nil {
 		t.Fatalf("WriteRecord l2: %v", err)
 	}
 	// Change l2's title in SQLite WITHOUT rewriting its record -> divergence.
@@ -117,7 +117,7 @@ func TestAudit_DetectsEveryDivergenceKind(t *testing.T) {
 		ID: domain.LearningID(uuid.Must(uuid.NewV7()).String()), Status: domain.StatusCaptured,
 		Type: domain.TypeProcedure, Title: "orphan", Context: "c", Observation: "o", ReusableLesson: "l",
 	}
-	if err := capture.WriteRecord(recordsDir, orphan); err != nil {
+	if err := record.WriteRecord(recordsDir, orphan); err != nil {
 		t.Fatalf("WriteRecord orphan: %v", err)
 	}
 	_ = l3
@@ -152,7 +152,7 @@ func TestRepair_RestoresCoherence(t *testing.T) {
 	l1 := saveLearning(t, db, projectID, "one")
 	saveLearning(t, db, projectID, "two")
 	// Only l1 gets a (stale) record; the rest are missing; add an orphan too.
-	if err := capture.WriteRecord(recordsDir, l1); err != nil {
+	if err := record.WriteRecord(recordsDir, l1); err != nil {
 		t.Fatalf("WriteRecord: %v", err)
 	}
 	if _, err := db.DB.Exec("UPDATE learnings SET title = 'changed' WHERE id = ?", string(l1.ID)); err != nil {
@@ -162,7 +162,7 @@ func TestRepair_RestoresCoherence(t *testing.T) {
 		ID: domain.LearningID(uuid.Must(uuid.NewV7()).String()), Status: domain.StatusCaptured,
 		Type: domain.TypeProcedure, Title: "orphan", Context: "c", Observation: "o", ReusableLesson: "l",
 	}
-	if err := capture.WriteRecord(recordsDir, orphan); err != nil {
+	if err := record.WriteRecord(recordsDir, orphan); err != nil {
 		t.Fatalf("WriteRecord orphan: %v", err)
 	}
 

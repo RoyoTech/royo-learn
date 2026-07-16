@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"agent-royo-learn/internal/capture"
+	"agent-royo-learn/internal/record"
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/storage"
 )
@@ -56,7 +56,7 @@ func Audit(ctx context.Context, db *storage.DB, projectID domain.ProjectID, reco
 	for _, l := range learnings {
 		live[string(l.ID)] = true
 		path := filepath.Join(recordsDir, string(l.ID)+".md")
-		stored, found, rerr := capture.ReadRecordHash(path)
+		stored, found, rerr := record.ReadRecordHash(path)
 		if rerr != nil {
 			return nil, fmt.Errorf("coherence: audit: read record %s: %w", l.ID, rerr)
 		}
@@ -67,7 +67,7 @@ func Audit(ctx context.Context, db *storage.DB, projectID domain.ProjectID, reco
 			})
 			continue
 		}
-		if stored != capture.RecordHash(l) {
+		if stored != record.RecordHash(l) {
 			divergences = append(divergences, Divergence{
 				Kind: DivergentRecord, LearningID: string(l.ID),
 				Detail: "the Markdown record hash disagrees with SQLite",
@@ -126,7 +126,7 @@ func Repair(ctx context.Context, db *storage.DB, projectID domain.ProjectID, rec
 	live := make(map[string]bool, len(learnings))
 	for _, l := range learnings {
 		live[string(l.ID)] = true
-		if err := capture.WriteRecord(recordsDir, l); err != nil {
+		if err := record.WriteRecord(recordsDir, l); err != nil {
 			return nil, fmt.Errorf("coherence: repair: write record %s: %w", l.ID, err)
 		}
 		res.RecordsWritten++

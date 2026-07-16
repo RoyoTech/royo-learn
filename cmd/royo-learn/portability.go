@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"agent-royo-learn/internal/capture"
+	"agent-royo-learn/internal/record"
 	"agent-royo-learn/internal/coherence"
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/logging"
@@ -56,7 +56,7 @@ func runExport(args []string, stdout, stderr io.Writer) int {
 			return writePortabilityError(stderr, "invalid_argument", "export: markdown format requires --output <dir>")
 		}
 		for _, l := range bundle.Learnings {
-			if werr := capture.WriteRecord(dir, l); werr != nil {
+			if werr := record.WriteRecord(dir, l); werr != nil {
 				return writePortabilityError(stderr, "invalid_argument", "export: write record %s: %v", l.ID, werr)
 			}
 		}

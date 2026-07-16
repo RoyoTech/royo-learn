@@ -1,19 +1,52 @@
-package capture
+package record
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/testutil"
 )
+
+func newTestLearning() *domain.Learning {
+	now := time.Now().UTC().Truncate(time.Second)
+	return &domain.Learning{
+		ID:                   "learn-rec-001",
+		ProjectID:            "proj-rec-001",
+		Status:               domain.StatusCaptured,
+		Type:                 domain.TypeProcedure,
+		Title:                "Test Record",
+		Context:              "Testing the record materializer",
+		Observation:          "The record is written correctly",
+		ReusableLesson:       "A derived record must follow the truth it derives from",
+		RecommendedProcedure: []string{"verify dedup", "check markdown"},
+		Limits:               "n/a",
+		ScopeGuess:           domain.ScopeProject,
+		Confidence:           domain.ConfidenceHigh,
+		EvidenceLevel:        domain.EvidenceModerate,
+		ProposedDestination:  domain.DestProject,
+		RetrievalTerms:       []string{"record", "test"},
+		Fingerprint:          "fp-rec-001",
+		Actor: domain.Actor{
+			Kind:      "agent",
+			Name:      "test-agent",
+			Model:     "test-model",
+			SessionID: "sess-001",
+		},
+		Revision:  1,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+}
 
 func TestWriteRecord(t *testing.T) {
 	t.Parallel()
 
 	dir := testutil.TempDir(t)
-	l := newTestCaptureLearning()
+	l := newTestLearning()
 	l.NormalizedHash = "abc123def456"
 
 	recordsDir := filepath.Join(dir, "records")
@@ -60,7 +93,7 @@ func TestWriteRecordCreatesDir(t *testing.T) {
 	t.Parallel()
 
 	dir := testutil.TempDir(t)
-	l := newTestCaptureLearning()
+	l := newTestLearning()
 	recordsDir := filepath.Join(dir, "new-records")
 
 	if err := WriteRecord(recordsDir, l); err != nil {

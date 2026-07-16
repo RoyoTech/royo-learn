@@ -1,4 +1,13 @@
-package capture
+// Package record materializes the Markdown record derived from a learning.
+//
+// SQLite is the source of truth (D6); the record on disk is derived from it.
+// This package lives below the application services on purpose: every service
+// that mutates the truth of a learning — capture, curate, publish, rollback —
+// must re-materialize its record, and a derived artifact that is not
+// regenerated when the truth changes is a stale artifact (D18). Keeping the
+// materializer here, depending on internal/domain alone, is what lets
+// internal/publish re-materialize without importing internal/capture.
+package record
 
 import (
 	"crypto/sha256"
