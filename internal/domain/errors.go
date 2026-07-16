@@ -1,6 +1,9 @@
 package domain
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // ErrorCode is a stable machine-readable error identifier.
 type ErrorCode string
@@ -46,6 +49,87 @@ const (
 	ErrExternalCommandFailed ErrorCode = "external_command_failed"
 	ErrTimeout               ErrorCode = "timeout"
 )
+
+// AllErrorCodes returns every stable error code modeled by the domain.
+func AllErrorCodes() []ErrorCode {
+	return []ErrorCode{
+		ErrInvalidArgument, ErrInvalidConfig, ErrProjectNotFound, ErrAmbiguousProject,
+		ErrUnknownProject, ErrLearningNotFound, ErrInvalidTransition, ErrDuplicateLearning,
+		ErrEvidenceMissing, ErrEvidenceTooLarge, ErrSecretDetected, ErrPathOutsideRoot,
+		ErrSymlinkEscape, ErrProtectedPath, ErrTargetAmbiguous, ErrTargetChanged,
+		ErrDirtyTarget, ErrApprovalRequired, ErrApprovalInvalid, ErrApprovalExpired,
+		ErrPreviewNotFound, ErrPreviewHashMismatch, ErrPublicationConflict, ErrVerificationFailed,
+		ErrRollbackConflict, ErrRollbackFailed, ErrPublicationFailed, ErrDatabaseLocked,
+		ErrDatabaseCorrupt, ErrMigrationChecksum, ErrRecordHashMismatch, ErrEngramUnavailable,
+		ErrEngramAmbiguous, ErrGentleAIUnavailable, ErrSkillRegistryFailed, ErrMCPProtocolError,
+		ErrPayloadTooLarge, ErrExternalCommandFailed, ErrTimeout,
+	}
+}
+
+// ExitCode maps a stable error code to docs/04-CLI-SPEC.md exit codes.
+func (c ErrorCode) ExitCode() int {
+	switch c {
+	case ErrInvalidArgument, ErrEvidenceMissing, ErrEvidenceTooLarge, ErrPayloadTooLarge:
+		return 2
+	case ErrInvalidConfig:
+		return 3
+	case ErrProjectNotFound, ErrAmbiguousProject, ErrUnknownProject:
+		return 4
+	case ErrLearningNotFound, ErrPreviewNotFound:
+		return 5
+	case ErrInvalidTransition:
+		return 6
+	case ErrApprovalRequired, ErrApprovalInvalid, ErrApprovalExpired:
+		return 7
+	case ErrDuplicateLearning, ErrTargetAmbiguous, ErrTargetChanged, ErrDirtyTarget,
+		ErrPublicationConflict, ErrPreviewHashMismatch, ErrRollbackConflict:
+		return 8
+	case ErrVerificationFailed:
+		return 9
+	case ErrEngramUnavailable, ErrEngramAmbiguous, ErrGentleAIUnavailable, ErrSkillRegistryFailed:
+		return 10
+	case ErrPathOutsideRoot, ErrSymlinkEscape, ErrProtectedPath, ErrSecretDetected:
+		return 11
+	case ErrDatabaseCorrupt, ErrMigrationChecksum, ErrRecordHashMismatch:
+		return 12
+	case ErrDatabaseLocked, ErrRollbackFailed, ErrPublicationFailed:
+		return 13
+	case ErrMCPProtocolError:
+		return 14
+	case ErrExternalCommandFailed, ErrTimeout:
+		return 15
+	default:
+		return 1
+	}
+}
+
+// AsDomainError extracts a DomainError from typed wrappers and error chains.
+func AsDomainError(err error) (*DomainError, bool) {
+	if err == nil {
+		return nil, false
+	}
+	var (
+		notFound   *NotFoundError
+		conflict   *ConflictError
+		validation *ValidationError
+		permission *PermissionError
+	)
+	switch {
+	case errors.As(err, &notFound):
+		return notFound.DomainError, true
+	case errors.As(err, &conflict):
+		return conflict.DomainError, true
+	case errors.As(err, &validation):
+		return validation.DomainError, true
+	case errors.As(err, &permission):
+		return permission.DomainError, true
+	}
+	var domainErr *DomainError
+	if errors.As(err, &domainErr) {
+		return domainErr, true
+	}
+	return nil, false
+}
 
 // DomainError is a typed error with a stable code and human-readable message.
 type DomainError struct {

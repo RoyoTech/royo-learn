@@ -552,8 +552,8 @@ func TestRunPreviewMissingLearningID(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	exitCode := run([]string{"preview"}, &stdout, &stderr)
-	if exitCode != exitFailure {
-		t.Fatalf("preview without --learning-id exit = %d, want %d", exitCode, exitFailure)
+	if exitCode != exitInvalidArguments {
+		t.Fatalf("preview without --learning-id exit = %d, want %d", exitCode, exitInvalidArguments)
 	}
 	if stdout.Len() != 0 {
 		t.Errorf("stdout = %q, want empty", stdout.String())
@@ -566,8 +566,8 @@ func TestRunPublishMissingLearningID(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	exitCode := run([]string{"publish"}, &stdout, &stderr)
-	if exitCode != exitFailure {
-		t.Fatalf("publish without --learning-id exit = %d, want %d", exitCode, exitFailure)
+	if exitCode != exitInvalidArguments {
+		t.Fatalf("publish without --learning-id exit = %d, want %d", exitCode, exitInvalidArguments)
 	}
 	if stdout.Len() != 0 {
 		t.Errorf("stdout = %q, want empty", stdout.String())
@@ -580,8 +580,8 @@ func TestRunRollbackMissingPublicationID(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	exitCode := run([]string{"rollback"}, &stdout, &stderr)
-	if exitCode != exitFailure {
-		t.Fatalf("rollback without --journal-id exit = %d, want %d", exitCode, exitFailure)
+	if exitCode != exitInvalidArguments {
+		t.Fatalf("rollback without --journal-id exit = %d, want %d", exitCode, exitInvalidArguments)
 	}
 	if stdout.Len() != 0 {
 		t.Errorf("stdout = %q, want empty", stdout.String())
@@ -673,6 +673,93 @@ func TestRunPublishAndRollbackEndToEnd(t *testing.T) {
 	}, &rbOut, &rbErr)
 	if rbExit != exitSuccess {
 		t.Fatalf("rollback exit = %d, want %d\nstderr: %s", rbExit, exitSuccess, rbErr.String())
+	}
+}
+
+func TestRunRollbackConflictReturnsRecoveryArtifact(t *testing.T) {
+	root := t.TempDir()
+	learningID := setupApprovedLearning(t, root)
+
+	var previewOut, previewErr bytes.Buffer
+	if exit := run([]string{
+		"preview", "--project-root", root, "--learning-id", learningID, "--json",
+	}, &previewOut, &previewErr); exit != exitSuccess {
+		t.Fatalf("preview failed: exit=%d stderr=%s", exit, previewErr.String())
+	}
+	var preview map[string]any
+	if err := json.Unmarshal(previewOut.Bytes(), &preview); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+
+	var publishOut, publishErr bytes.Buffer
+	if exit := run([]string{
+		"publish", "--project-root", root, "--learning-id", learningID,
+		"--preview-hash", preview["preview_hash"].(string), "--apply", "--force", "--json",
+	}, &publishOut, &publishErr); exit != exitSuccess {
+		t.Fatalf("publish failed: exit=%d stderr=%s", exit, publishErr.String())
+	}
+	var published map[string]any
+	if err := json.Unmarshal(publishOut.Bytes(), &published); err != nil {
+		t.Fatalf("decode publication: %v", err)
+	}
+	publicationID := domain.PublicationID(published["publication_id"].(string))
+
+	db, err := storage.Open(filepath.Join(root, ".royo-learn", "royo-learn.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+	tx, err := db.DB.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("begin publication read: %v", err)
+	}
+	publication, err := storage.GetPublication(context.Background(), tx, publicationID)
+	tx.Rollback()
+	if err != nil || len(publication.Rollback) == 0 {
+		t.Fatalf("load publication recovery metadata: publication=%v err=%v", publication, err)
+	}
+	target := filepath.Join(root, publication.Rollback[0].Path)
+	publishedContent, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read published target: %v", err)
+	}
+	if err := os.WriteFile(target, append(publishedContent, []byte("\nexternal edit\n")...), 0o644); err != nil {
+		t.Fatalf("modify published target: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	exit := run([]string{
+		"rollback", "--project-root", root, "--journal-id", string(publicationID), "--json",
+	}, &stdout, &stderr)
+	if exit != domain.ErrRollbackFailed.ExitCode() {
+		t.Fatalf("rollback conflict exit = %d, want %d; stderr=%s", exit, domain.ErrRollbackFailed.ExitCode(), stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("rollback conflict wrote stdout: %q", stdout.String())
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(stderr.Bytes(), &envelope); err != nil {
+		t.Fatalf("rollback error is not JSON: %v\n%s", err, stderr.String())
+	}
+	details, _ := envelope["details"].(map[string]any)
+	artifact, _ := details["recovery_artifact"].(string)
+	if envelope["code"] != string(domain.ErrRollbackFailed) || artifact == "" {
+		t.Fatalf("rollback envelope lost recovery details: %v", envelope)
+	}
+	if _, err := os.Stat(artifact); err != nil {
+		t.Fatalf("recovery artifact is not reachable: %s: %v", artifact, err)
+	}
+
+	// Restore the exact published identity so the retry can converge and clean up.
+	if err := os.WriteFile(target, publishedContent, 0o644); err != nil {
+		t.Fatalf("restore published target identity: %v", err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if exit := run([]string{
+		"rollback", "--project-root", root, "--journal-id", string(publicationID), "--json",
+	}, &stdout, &stderr); exit != exitSuccess {
+		t.Fatalf("rollback retry failed: exit=%d stderr=%s", exit, stderr.String())
 	}
 }
 

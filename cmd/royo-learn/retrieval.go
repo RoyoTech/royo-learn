@@ -324,5 +324,5 @@ func writeRetrievalError(stderr io.Writer, code, format string, args ...interfac
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn get <id>", "royo-learn search <query>" or "royo-learn occurrence --learning-id <id>"`,
 	})
-	return exitFailure
+	return domain.ErrorCode(code).ExitCode()
 }

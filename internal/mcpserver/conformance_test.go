@@ -564,12 +564,16 @@ func TestMCPConformance_ErrorResponseFormat(t *testing.T) {
 	if err := json.Unmarshal([]byte(txt.Text), &errData); err != nil {
 		t.Fatalf("error content not valid JSON: %v\n%s", err, txt.Text)
 	}
-	code, hasCode := errData["code"].(string)
-	if !hasCode || code == "" {
-		t.Errorf("error response missing 'code' field: %v", errData)
+	inner, nested := errData["error"].(map[string]any)
+	if !nested {
+		t.Fatalf("error response is not nested under error: %v", errData)
 	}
-	msg, hasMsg := errData["message"].(string)
+	code, hasCode := inner["code"].(string)
+	if !hasCode || code == "" {
+		t.Errorf("error response missing 'code' field: %v", inner)
+	}
+	msg, hasMsg := inner["message"].(string)
 	if !hasMsg || msg == "" {
-		t.Errorf("error response missing 'message' field: %v", errData)
+		t.Errorf("error response missing 'message' field: %v", inner)
 	}
 }

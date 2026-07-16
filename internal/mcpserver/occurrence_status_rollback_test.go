@@ -164,6 +164,36 @@ func TestMCP_Rollback_RestoresAndBlocksDoubleRollback(t *testing.T) {
 
 	// Find the file that was written so we can prove rollback removes it.
 	writtenFiles := filesUnder(t, filepath.Join(ts.root, ".royo-learn", "knowledge"))
+	if len(writtenFiles) == 0 {
+		t.Fatal("publish wrote no project knowledge file")
+	}
+	publishedContent, err := os.ReadFile(writtenFiles[0])
+	if err != nil {
+		t.Fatalf("read published file: %v", err)
+	}
+	if err := os.WriteFile(writtenFiles[0], append(publishedContent, []byte("\nexternal edit\n")...), 0o644); err != nil {
+		t.Fatalf("modify published file: %v", err)
+	}
+
+	conflict, err := ts.callTool(ctx, "learning_rollback", map[string]any{
+		"publication_id": pubID,
+		"actor":          map[string]any{"kind": "human", "name": "publisher"},
+	})
+	if err != nil {
+		t.Fatalf("rollback conflict: transport error: %v", err)
+	}
+	inner := mcpErrorBody(t, conflict)
+	details, _ := inner["details"].(map[string]any)
+	artifact, _ := details["recovery_artifact"].(string)
+	if inner["code"] != "rollback_failed" || artifact == "" {
+		t.Fatalf("rollback conflict lost recovery details: %v", inner)
+	}
+	if _, err := os.Stat(artifact); err != nil {
+		t.Fatalf("recovery artifact is not reachable: %s: %v", artifact, err)
+	}
+	if err := os.WriteFile(writtenFiles[0], publishedContent, 0o644); err != nil {
+		t.Fatalf("restore published identity for retry: %v", err)
+	}
 
 	rolled := mustCallJSON(t, ts, ctx, "learning_rollback", map[string]any{
 		"publication_id": pubID,
