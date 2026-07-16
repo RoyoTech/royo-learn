@@ -210,7 +210,8 @@ func TestMCP_Rollback_RestoresAndBlocksDoubleRollback(t *testing.T) {
 		}
 	}
 
-	// A retry after the target is already restored is an idempotent success.
+	// Once rollback and all derived state are complete, the canonical contract
+	// reports a second rollback as a publication conflict.
 	again, err := ts.callTool(ctx, "learning_rollback", map[string]any{
 		"publication_id": pubID,
 		"actor":          map[string]any{"kind": "human", "name": "publisher"},
@@ -218,8 +219,12 @@ func TestMCP_Rollback_RestoresAndBlocksDoubleRollback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second rollback: transport error: %v", err)
 	}
-	if again.IsError {
-		t.Fatal("rolling back an already-restored publication must converge successfully")
+	if !again.IsError {
+		t.Fatal("rolling back an already-restored publication must return a conflict")
+	}
+	inner = mcpErrorBody(t, again)
+	if inner["code"] != "publication_conflict" {
+		t.Fatalf("second rollback code = %v, want publication_conflict", inner["code"])
 	}
 }
 

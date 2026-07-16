@@ -284,6 +284,11 @@ func toolErrorEnvelope(code, message string, recoverable bool, details map[strin
 		details = map[string]any{}
 	}
 	body, _ := json.Marshal(map[string]any{
+		"code":        code,
+		"message":     message,
+		"recoverable": recoverable,
+		"details":     details,
+		"next_action": nextAction,
 		"error": map[string]any{
 			"code":        code,
 			"message":     message,

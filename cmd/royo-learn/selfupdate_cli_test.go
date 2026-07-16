@@ -45,8 +45,8 @@ func TestRunSelfUpdateCheckRejectsExplicitVersion(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	exitCode := run([]string{"self-update", "--check", "--version", "v0.2.0"}, &stdout, &stderr)
 
-	if exitCode != exitInvalidArguments {
-		t.Fatalf("self-update --check --version exit = %d, want %d", exitCode, exitInvalidArguments)
+	if exitCode != exitFailure {
+		t.Fatalf("self-update --check --version exit = %d, want %d", exitCode, exitFailure)
 	}
 	if stdout.Len() != 0 {
 		t.Errorf("stdout = %q, want empty", stdout.String())

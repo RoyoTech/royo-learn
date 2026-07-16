@@ -1984,5 +1984,5 @@ func writeSelfUpdateError(stderr io.Writer, code, format string, args ...interfa
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn self-update --check" or use the installer`,
 	})
-	return domain.ErrorCode(code).ExitCode()
+	return exitFailure
 }
