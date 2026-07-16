@@ -720,6 +720,7 @@ func TestBackupAndRestore(t *testing.T) {
 	if err := os.WriteFile(srcPath, []byte("modified content v2"), 0o644); err != nil {
 		t.Fatalf("modify source: %v", err)
 	}
+	entry.ExpectedPublishedHash = HashContent([]byte("modified content v2"))
 
 	// Restore from backup.
 	if err := mgr.RestoreFile(*entry); err != nil {
@@ -764,8 +765,12 @@ func TestRestoreAll_MixedResults(t *testing.T) {
 	entry1, _ := mgr.BackupFile(filepath.Join("src", "real.txt"))
 	entry2, _ := mgr.BackupFile("nonexistent.txt")
 
-	// Delete the real file.
-	os.Remove(srcPath)
+	// Replace the real file with the exact published identity.
+	if err := os.WriteFile(srcPath, []byte("published"), 0o644); err != nil {
+		t.Fatalf("write published target: %v", err)
+	}
+	entry1.ExpectedPublishedHash = HashContent([]byte("published"))
+	entry2.ExpectedPublishedHash = HashContent([]byte("unused published identity"))
 
 	results := mgr.RestoreAll([]BackupEntry{*entry1, *entry2})
 	if len(results) != 2 {
@@ -1089,8 +1094,11 @@ func TestRollbackAll_Success(t *testing.T) {
 	mgr := NewBackupManager(tmpDir, backupDir)
 	entry, _ := mgr.BackupFile(filepath.Join("src", "file.txt"))
 
-	// Delete original.
-	os.Remove(srcPath)
+	// Replace original with the published identity.
+	if err := os.WriteFile(srcPath, []byte("published"), 0o644); err != nil {
+		t.Fatalf("write published target: %v", err)
+	}
+	entry.ExpectedPublishedHash = HashContent([]byte("published"))
 
 	err := rollbackAll(mgr, []BackupEntry{*entry})
 	if err != nil {
@@ -1109,10 +1117,11 @@ func TestRollbackAll_NonexistentBackup(t *testing.T) {
 	mgr := NewBackupManager(tmpDir, backupDir)
 
 	// BackupEntry with empty BackupPath (file didn't exist before publish).
+	absent := false
 	entry := BackupEntry{
-		OriginalPath: "nonexistent.txt",
-		BackupPath:   "",
-		Checksum:     "",
+		OriginalPath:          "nonexistent.txt",
+		OriginalExisted:       &absent,
+		ExpectedPublishedHash: HashContent([]byte("unused published identity")),
 	}
 	err := rollbackAll(mgr, []BackupEntry{entry})
 	if err != nil {
@@ -1128,9 +1137,11 @@ func TestRollbackAll_AggregatesFailures(t *testing.T) {
 	mgr := NewBackupManager(tmpDir, backupDir)
 
 	// Entries with non-existent backup paths — RestoreFile will fail for each.
+	existed := true
+	mode := uint32(0o644)
 	entries := []BackupEntry{
-		{OriginalPath: "file1.txt", BackupPath: filepath.Join(backupDir, "missing1.bak"), Checksum: "h1"},
-		{OriginalPath: "file2.txt", BackupPath: filepath.Join(backupDir, "missing2.bak"), Checksum: "h2"},
+		{OriginalPath: "file1.txt", BackupPath: filepath.Join(backupDir, "missing1.bak"), Checksum: "h1", OriginalHash: "o1", OriginalMode: &mode, OriginalExisted: &existed, ExpectedPublishedHash: "p1"},
+		{OriginalPath: "file2.txt", BackupPath: filepath.Join(backupDir, "missing2.bak"), Checksum: "h2", OriginalHash: "o2", OriginalMode: &mode, OriginalExisted: &existed, ExpectedPublishedHash: "p2"},
 	}
 	err := rollbackAll(mgr, entries)
 	if err == nil {
@@ -1163,8 +1174,8 @@ func TestPublish_RollbackFailureObserved(t *testing.T) {
 	ctx := context.Background()
 
 	projectRoot := t.TempDir()
-	backupDir := filepath.Join(t.TempDir(), "backups")
-	journalDir := filepath.Join(t.TempDir(), "journal")
+	backupDir := filepath.Join(projectRoot, ".royo-learn", "backups")
+	journalDir := filepath.Join(projectRoot, ".royo-learn")
 
 	// Create a target file that EXISTS so backup gets a real backup.
 	skillDir := filepath.Join(projectRoot, "skills", "rb-skill")
@@ -1268,9 +1279,19 @@ func TestRollbackFromBackup(t *testing.T) {
 
 	// Modify.
 	os.WriteFile(srcPath, []byte("v2"), 0o644)
+	entry.ExpectedPublishedHash = HashContent([]byte("v2"))
 
 	rollbackEntries := []domain.RollbackEntry{
-		{Path: filepath.Join("src", "file.txt"), Backup: entry.BackupPath},
+		{
+			Path:                  filepath.Join("src", "file.txt"),
+			Backup:                entry.BackupPath,
+			OriginalExisted:       entry.OriginalExisted,
+			OriginalSHA256:        entry.OriginalHash,
+			BackupSHA256:          entry.Checksum,
+			OriginalMode:          entry.OriginalMode,
+			ExpectedPublishedHash: entry.ExpectedPublishedHash,
+			RecoveryState:         domain.RecoveryPublished,
+		},
 	}
 	results := RollbackFromBackup(mgr, rollbackEntries)
 	if len(results) != 1 {
@@ -1462,8 +1483,8 @@ func TestPublish_E2E(t *testing.T) {
 
 	// --- Temp filesystem ---
 	projectRoot := t.TempDir()
-	backupDir := filepath.Join(t.TempDir(), "backups")
-	journalDir := filepath.Join(t.TempDir(), "journal")
+	backupDir := filepath.Join(projectRoot, ".royo-learn", "backups")
+	journalDir := filepath.Join(projectRoot, ".royo-learn")
 	if err := os.MkdirAll(filepath.Join(projectRoot, "skills"), 0o755); err != nil {
 		t.Fatalf("mkdir skills: %v", err)
 	}
@@ -1626,8 +1647,8 @@ func seedPublishEnv(t *testing.T, skillPath string, precreateFile bool, initialC
 	ctx := context.Background()
 
 	projectRoot := t.TempDir()
-	backupDir := filepath.Join(t.TempDir(), "backups")
-	journalDir := filepath.Join(t.TempDir(), "journal")
+	backupDir := filepath.Join(projectRoot, ".royo-learn", "backups")
+	journalDir := filepath.Join(projectRoot, ".royo-learn")
 	os.MkdirAll(filepath.Join(projectRoot, "skills"), 0o755)
 
 	if precreateFile {

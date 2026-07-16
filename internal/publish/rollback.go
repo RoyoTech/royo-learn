@@ -13,17 +13,14 @@ import (
 func RollbackFromBackup(backupMgr *BackupManager, rollbackEntries []domain.RollbackEntry) []RestoreResult {
 	entries := make([]BackupEntry, len(rollbackEntries))
 	for i, re := range rollbackEntries {
-		// Compute checksum from the backup file if it exists.
-		var checksum string
-		if re.Backup != "" {
-			if h, err := HashFile(re.Backup); err == nil {
-				checksum = h
-			}
-		}
 		entries[i] = BackupEntry{
-			OriginalPath: re.Path,
-			BackupPath:   re.Backup,
-			Checksum:     checksum,
+			OriginalPath:          re.Path,
+			BackupPath:            re.Backup,
+			Checksum:              re.BackupSHA256,
+			OriginalHash:          re.OriginalSHA256,
+			OriginalMode:          re.OriginalMode,
+			OriginalExisted:       re.OriginalExisted,
+			ExpectedPublishedHash: re.ExpectedPublishedHash,
 		}
 	}
 	return backupMgr.RestoreAll(entries)

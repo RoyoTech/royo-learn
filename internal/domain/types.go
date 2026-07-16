@@ -170,6 +170,16 @@ const (
 	PubStatusRolledback PublicationStatus = "rolled_back"
 )
 
+// RecoveryState records durable per-target publication/rollback progress.
+type RecoveryState string
+
+const (
+	RecoveryPending   RecoveryState = "pending"
+	RecoveryPublished RecoveryState = "published"
+	RecoveryRestored  RecoveryState = "restored"
+	RecoveryConflict  RecoveryState = "conflict"
+)
+
 // OccurrenceOutcome represents the outcome of an occurrence check.
 type OccurrenceOutcome string
 
@@ -415,9 +425,17 @@ type TargetEntry struct {
 
 // RollbackEntry describes a rollback step.
 type RollbackEntry struct {
-	Path    string `json:"path"`
-	Backup  string `json:"backup"`
-	Success bool   `json:"success"`
+	Path                  string        `json:"path"`
+	Backup                string        `json:"backup,omitempty"`
+	Success               bool          `json:"success"`
+	OriginalExisted       *bool         `json:"original_existed"`
+	OriginalSHA256        string        `json:"original_sha256,omitempty"`
+	BackupSHA256          string        `json:"backup_sha256,omitempty"`
+	OriginalMode          *uint32       `json:"original_mode,omitempty"`
+	ExpectedPublishedHash string        `json:"expected_published_hash"`
+	RecoveryState         RecoveryState `json:"recovery_state"`
+	FailureReason         string        `json:"failure_reason,omitempty"`
+	RecoveryArtifact      string        `json:"recovery_artifact,omitempty"`
 }
 
 // Occurrence records an occurrence (or non-occurrence) of a learning's pattern.

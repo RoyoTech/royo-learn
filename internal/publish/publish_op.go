@@ -169,30 +169,47 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 		}
 	}
 
-	// 8. Create backups of every target file.
+	// 8. Capture one snapshot per target and create each backup from those exact
+	// bytes. The snapshot also supplies the CAS identity used by the writer.
 	backupMgr := NewBackupManager(s.projectRoot, s.backupDir)
-	var backupEntries []BackupEntry
+	backupEntries := make([]BackupEntry, 0, len(targets))
+	snapshots := make([]FileSnapshot, 0, len(targets))
 	for _, target := range targets {
-		// target.Root is RELATIVE to projectRoot; join gives the full relative path.
 		relPath := filepath.Join(target.Root, target.Path)
-		entry, berr := backupMgr.BackupFile(relPath)
+		snapshot, snapshotErr := backupMgr.SnapshotFile(relPath)
+		if snapshotErr != nil {
+			return nil, fmt.Errorf("Publish: snapshot %s: %w", target.Path, snapshotErr)
+		}
+		entry, berr := backupMgr.BackupSnapshot(snapshot)
 		if berr != nil {
 			return nil, fmt.Errorf("Publish: backup %s: %w", target.Path, berr)
 		}
+		snapshots = append(snapshots, *snapshot)
 		backupEntries = append(backupEntries, *entry)
 	}
 
-	// 8b. Optimistic-lock baseline: capture hashes after backup so a concurrent
-	// edit during the write loop is still detected.
-	fileHashes := make(map[string]string)
-	for _, target := range targets {
-		if target.Exists {
-			relPath := filepath.Join(target.Root, target.Path)
-			h, herr := HashFile(filepath.Join(s.projectRoot, relPath))
-			if herr != nil {
-				return nil, fmt.Errorf("Publish: hash target %s: %w", target.Path, herr)
-			}
-			fileHashes[relPath] = h
+	// 8b. Compose every output before recording the attempt so rollback metadata
+	// can contain the exact expected post-publication identity before any write.
+	targetContents := s.buildPublishContents(ctx, targets, learning, curation, targetCtx)
+	composedContents := make([]string, len(targets))
+	rollbackEntries := make([]domain.RollbackEntry, len(targets))
+	for i, target := range targets {
+		contentToWrite, composeErr := s.composeTargetContent(target, targetContents[i].Content, input.LearningID, targetCtx)
+		if composeErr != nil {
+			return nil, fmt.Errorf("Publish: compose %s: %w", target.Path, composeErr)
+		}
+		composedContents[i] = contentToWrite
+		expectedHash := HashContent([]byte(contentToWrite))
+		backupEntries[i].ExpectedPublishedHash = expectedHash
+		rollbackEntries[i] = domain.RollbackEntry{
+			Path:                  backupEntries[i].OriginalPath,
+			Backup:                backupEntries[i].BackupPath,
+			OriginalExisted:       backupEntries[i].OriginalExisted,
+			OriginalSHA256:        backupEntries[i].OriginalHash,
+			BackupSHA256:          backupEntries[i].Checksum,
+			OriginalMode:          backupEntries[i].OriginalMode,
+			ExpectedPublishedHash: expectedHash,
+			RecoveryState:         domain.RecoveryPending,
 		}
 	}
 
@@ -231,47 +248,29 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 		return nil, fmt.Errorf("Publish: journal: %w", aErr)
 	}
 
-	// 10. Build per-target content and write files. Any failure after this point
+	// 10. Write files with compare-and-swap against the captured snapshots. Any
+	// final-boundary replacement is preserved and reported as a conflict.
 	// compensates (rolls back) and returns a structured error; it never marks
 	// the learning published.
-	targetContents := s.buildPublishContents(ctx, targets, learning, curation, targetCtx)
 	writer := s.fileWriter()
-	var rollbackEntries []domain.RollbackEntry
 	writtenContents := make(map[string]string)
 
 	for i, target := range targets {
 		relPath := filepath.Join(target.Root, target.Path)
-		targetFullPath := filepath.Join(s.projectRoot, relPath)
-
-		contentToWrite, cErr := s.composeTargetContent(target, targetContents[i].Content, input.LearningID, targetCtx)
-		if cErr != nil {
-			return nil, s.compensate(journal, backupMgr, backupEntries, pubID, input.LearningID, targetEntries, backupPaths,
-				fmt.Sprintf("read existing file %s", target.Path), cErr)
+		contentToWrite := composedContents[i]
+		expected := TargetIdentity{Exists: snapshots[i].Exists, Hash: snapshots[i].Hash}
+		perm := os.FileMode(0o644)
+		if snapshots[i].Exists {
+			mode := uint32(snapshots[i].Mode)
+			expected.Mode = &mode
+			perm = snapshots[i].Mode
 		}
-
-		// Optimistic locking (M3): detect a concurrent edit since the baseline.
-		if !input.Force && target.Exists {
-			changed, hErr := hashChanged(targetFullPath, relPath, fileHashes)
-			if hErr != nil {
-				return nil, s.compensate(journal, backupMgr, backupEntries, pubID, input.LearningID, targetEntries, backupPaths,
-					fmt.Sprintf("re-hash %s", target.Path), hErr)
-			}
-			if changed {
-				conflictErr := domain.NewConflictError(domain.ErrDirtyTarget,
-					fmt.Sprintf("target file was modified after backup: %s — retry or use --force", target.Path))
-				return nil, s.compensate(journal, backupMgr, backupEntries, pubID, input.LearningID, targetEntries, backupPaths,
-					fmt.Sprintf("concurrent edit on %s", target.Path), conflictErr)
-			}
-		}
-
-		if wErr := writer.WriteFile(relPath, []byte(contentToWrite), 0o644); wErr != nil {
+		if wErr := writer.WriteFileCAS(relPath, []byte(contentToWrite), perm, expected); wErr != nil {
 			return nil, s.compensate(journal, backupMgr, backupEntries, pubID, input.LearningID, targetEntries, backupPaths,
 				fmt.Sprintf("write %s", target.Path), wErr)
 		}
 
-		rollbackEntries = append(rollbackEntries, domain.RollbackEntry{
-			Path: relPath, Backup: backupEntries[i].BackupPath, Success: true,
-		})
+		rollbackEntries[i].RecoveryState = domain.RecoveryPublished
 		writtenContents[relPath] = contentToWrite
 	}
 

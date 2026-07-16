@@ -23,15 +23,15 @@ type faultyWriter struct {
 	calls     int
 }
 
-func (w *faultyWriter) WriteFile(path string, content []byte, perm os.FileMode) error {
+func (w *faultyWriter) WriteFileCAS(path string, content []byte, perm os.FileMode, expected TargetIdentity) error {
 	w.calls++
 	if w.failAt == w.calls {
 		return errors.New("injected write failure at call for " + path)
 	}
 	if w.corruptAt == w.calls {
-		return w.real.WriteFile(path, append([]byte("CORRUPTED "), content...), perm)
+		return w.real.WriteFileCAS(path, append([]byte("CORRUPTED "), content...), perm, expected)
 	}
-	return w.real.WriteFile(path, content, perm)
+	return w.real.WriteFileCAS(path, content, perm, expected)
 }
 
 // assertApproved asserts a learning is still Approved (never falsely published).
@@ -129,8 +129,12 @@ func TestFault_VerificationFails(t *testing.T) {
 		t.Fatal("expected verification to fail")
 	}
 	got, _ := os.ReadFile(target)
-	if string(got) != original {
-		t.Errorf("file not restored byte-for-byte after verification failure.\n got: %q\nwant: %q", string(got), original)
+	if !strings.HasPrefix(string(got), "CORRUPTED ") {
+		t.Errorf("conflicting destination should be preserved for recovery, got: %q", string(got))
+	}
+	var domainErr *domain.DomainError
+	if !errors.As(err, &domainErr) || domainErr.Code != domain.ErrRollbackFailed {
+		t.Fatalf("verification conflict error = %v, want rollback_failed", err)
 	}
 	assertApproved(t, env)
 }

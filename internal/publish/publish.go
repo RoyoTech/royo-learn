@@ -13,7 +13,7 @@ import (
 // write to prove the compensation path runs through the real service code
 // (not by mutating storage behind the service's back).
 type FileWriter interface {
-	WriteFile(targetPath string, content []byte, perm os.FileMode) error
+	WriteFileCAS(targetPath string, content []byte, perm os.FileMode, expected TargetIdentity) error
 }
 
 // FaultHooks injects deterministic failures at named points of the publish

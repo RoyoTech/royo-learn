@@ -15,7 +15,7 @@ func TestBackupSnapshotUsesOneOriginalRead(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		t.Fatalf("create target directory: %v", err)
 	}
-	if err := os.WriteFile(target, []byte("original bytes"), 0o440); err != nil {
+	if err := os.WriteFile(target, []byte("original bytes"), 0o640); err != nil {
 		t.Fatalf("write original: %v", err)
 	}
 
@@ -45,8 +45,11 @@ func TestBackupSnapshotUsesOneOriginalRead(t *testing.T) {
 	if entry.Checksum != entry.OriginalHash {
 		t.Fatalf("backup checksum = %q, want original hash %q", entry.Checksum, entry.OriginalHash)
 	}
-	if entry.OriginalMode == nil || os.FileMode(*entry.OriginalMode).Perm() != 0o440 {
-		t.Fatalf("original mode = %v, want 0440", entry.OriginalMode)
+	if entry.OriginalMode == nil {
+		t.Fatal("original mode was not captured")
+	}
+	if runtime.GOOS != "windows" && os.FileMode(*entry.OriginalMode).Perm() != 0o640 {
+		t.Fatalf("original mode = %o, want 0640", os.FileMode(*entry.OriginalMode).Perm())
 	}
 }
 
