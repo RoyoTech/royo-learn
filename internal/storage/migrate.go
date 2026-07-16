@@ -7,8 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 //go:embed migrations/*.sql
@@ -49,7 +52,67 @@ func Migrate(db *DB) error {
 	}
 	defer db.mu.Unlock()
 
+	// Back up an EXISTING store before applying pending migrations (plan 4.8
+	// "respaldadas"). A brand-new store (nothing applied yet) has nothing to
+	// protect, and the common no-op path (nothing pending) is never penalized.
+	if err := backupBeforeUpgrade(db); err != nil {
+		return err
+	}
+
 	return migrateDB(db.DB)
+}
+
+// backupBeforeUpgrade takes a consistent snapshot of a file-based store into its
+// sibling backups/ directory when, and only when, there is at least one applied
+// migration AND at least one pending migration. It uses VACUUM INTO, which is
+// safe against the open WAL connection.
+func backupBeforeUpgrade(db *DB) error {
+	path := db.path
+	if path == "" || strings.HasPrefix(path, "file:") || strings.Contains(path, ":memory:") {
+		return nil // in-memory or DSN store: nothing to snapshot.
+	}
+
+	applied, pending, err := migrationStatus(db.DB)
+	if err != nil {
+		return err
+	}
+	if applied == 0 || pending == 0 {
+		return nil // fresh init, or fully up to date: no upgrade backup needed.
+	}
+
+	dir := filepath.Join(filepath.Dir(path), "backups")
+	if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
+		return fmt.Errorf("storage: migration backup: mkdir: %w", mkErr)
+	}
+	dest := filepath.Join(dir, fmt.Sprintf("pre-migration-%s.db", time.Now().UTC().Format("20060102T150405Z")))
+	if _, statErr := os.Stat(dest); statErr == nil {
+		dest = filepath.Join(dir, fmt.Sprintf("pre-migration-%d.db", time.Now().UTC().UnixNano()))
+	}
+	if _, err := db.DB.Exec("VACUUM INTO ?", dest); err != nil {
+		return fmt.Errorf("storage: migration backup: vacuum into %q: %w", dest, err)
+	}
+	return nil
+}
+
+// migrationStatus reports how many known migrations are already applied and how
+// many are still pending, without applying anything.
+func migrationStatus(conn *sql.DB) (applied, pending int, err error) {
+	files, err := loadMigrations()
+	if err != nil {
+		return 0, 0, fmt.Errorf("storage: cannot load migrations: %w", err)
+	}
+	for _, m := range files {
+		isDone, _, chkErr := isApplied(conn, m.Version)
+		if chkErr != nil {
+			return 0, 0, chkErr
+		}
+		if isDone {
+			applied++
+		} else {
+			pending++
+		}
+	}
+	return applied, pending, nil
 }
 
 func migrateDB(conn *sql.DB) error {
