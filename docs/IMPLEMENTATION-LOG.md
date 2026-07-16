@@ -1865,3 +1865,100 @@ git push origin v0.2.0
 ```
 
 El punto de release de `v0.1.10` sigue siendo `66a90da`, intacto y sin etiquetar.
+
+---
+
+## HANDOFF — 2026-07-16 — estado al cerrar la sesión
+
+Punto de retome para la próxima sesión. **El plan `docs/PLAN-recuperacion-contrato.md`
+está terminado: los siete tramos cerrados, sin ningún FAIL abierto.** Lo que queda
+no es desarrollo: son decisiones del humano y una señal de CI que nunca se obtuvo.
+
+### Dónde está el código
+
+| | |
+|---|---|
+| Rama | `fix/v019-contract-recovery` |
+| HEAD | `a0ed20e` |
+| Remoto | `origin/fix/v019-contract-recovery` = `a0ed20e` — **subido, 0 commits pendientes** |
+| Tags nuevos | **Ninguno.** `v0.1.10` y `v0.2.0` sin etiquetar |
+| GitHub | Último release y último tag: `v0.1.9`. `main` remoto sigue en `a00143f` (= v0.1.9) |
+
+Señal verde local: `go test -race -p 1 -count=1 ./...` → 22 paquetes ok / 0 fail.
+E2E 37/37. `go build`, `go vet` y `gofmt -l .` limpios.
+
+### Lo primero que hay que saber: CI NUNCA CORRIÓ
+
+`.github/workflows/ci.yml` declara:
+
+```yaml
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+```
+
+Pushear una rama feature **no dispara nada**: no es `main`/`master`, y sin PR no hay
+evento `pull_request`. El historial del repo lo confirma — los runs de ramas feature
+siempre fueron `pull_request`. Verificado: `gh run list --branch fix/v019-contract-recovery`
+→ vacío.
+
+**Consecuencia real y no maquillada:** todo lo que este proyecto afirma está
+verificado **solo en Windows, en la máquina del usuario**. La matriz nueva
+(3 SO × {Go 1.25.0 mínimo declarado, Go 1.26.x} + cross-build + instalación limpia)
+está escrita y **jamás ejecutada**. El plan exige Linux, Windows y macOS. Hasta que
+CI corra, la fila «Windows, Linux y macOS pasan sus pruebas» del informe final se
+apoya en una sola plataforma.
+
+**Cómo destrabarlo:** abrir un PR de `fix/v019-contract-recovery` → `main` (se propuso
+en draft). Dispara `pull_request` y da la señal en los tres SO sin mergear nada.
+**El usuario no lo autorizó todavía.** No abrir el PR sin autorización explícita.
+
+### Decisiones que esperan al humano (no resolver en silencio)
+
+1. **Abrir el PR** para obtener la señal de CI.
+2. **Etiquetar `v0.1.10`** en `66a90da` (Hito 1). Ya respaldado en el remoto.
+3. **Etiquetar `v0.2.0`** en `a0ed20e` (Hito 2).
+
+Orden que importa: `66a90da` es **ancestro** de `a0ed20e`. Etiquetar `v0.2.0` sin
+etiquetar antes `v0.1.10` saltea ese release intermedio y el salto queda
+`v0.1.9 → v0.2.0`.
+
+Comandos listos, **no ejecutados** (los releases los aprueba el humano):
+
+```bash
+git tag -a v0.1.10 66a90da -m "v0.1.10" && git push origin v0.1.10
+git tag -a v0.2.0 -m "v0.2.0"           && git push origin v0.2.0
+```
+
+### Riesgos residuales elevados, no resueltos
+
+1. **`policies` rompe la convención JSON.** El array `policies` del `preview` usa
+   nombres de campo de Go (`Passed`, `PolicyName`, `Reason`) contra el `snake_case`
+   del resto de los payloads públicos. La documentación no especifica esa forma, así
+   que **no** es contradicción de contrato; pero corregirlo sería un **cambio de
+   contrato público**. Queda fijado por el snapshot y elevado. Requiere decisión.
+2. **`RestoreFile` con backup ausente borra el destino y reporta éxito**
+   (`internal/publish/backup.go`). Si el backup no existe, la restauración toma la
+   rama «el archivo no existía antes» y **elimina** el archivo, devolviendo éxito.
+   Fuera del alcance de este cierre; ninguna prueba lo ejercita hoy. Merece decisión
+   propia y probablemente una prueba roja.
+3. **Flake de teardown en Windows.** `TempDir RemoveAll cleanup: ... The directory is
+   not empty` aparece en ~la mitad de las corridas completas, **víctima aleatoria**,
+   **siempre pasa aislada**, y le toca también a paquetes que este trabajo no tocó
+   (`internal/selfupdate`). Antivirus contra el borrado de temporales, no producto.
+   Ante un fallo sospechoso: re-correr aislado con `-run` antes de perseguir fantasmas.
+
+### Reglas que siguen vigentes
+
+- TDD estricto; conventional commits sin atribución de IA.
+- **Outbox prohibido** en producción (verificado: 0 coincidencias; la palabra solo vive
+  en la prueba de corte `TestOutbox_MaterializationWindowIsRecoverable`).
+- **`internal/publish` no importa `internal/capture`** (verificado: 0 coincidencias).
+  La materialización vive en `internal/record`, que solo depende de `internal/domain`.
+- Prohibido `git tag`, `git push` de tags y `goreleaser` sin autorización explícita.
+- Contradicción real entre plan, docs y código → documentar en `CONTRACT-DECISIONS.md`
+  y **parar**.
+- `docs/` en español neutro profesional; código, comentarios, errores y JSON en inglés.
+- Tras editar con scripts: correr `gofmt -l .` — `go test` no nota el desorden de
+  imports, la puerta de formato de CI sí.
