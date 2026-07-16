@@ -135,6 +135,61 @@ func ListPublicationsByLearning(ctx context.Context, tx *sql.Tx, learningID doma
 	return out, rows.Err()
 }
 
+// ListRecoverablePublications returns interrupted attempts in deterministic order.
+func ListRecoverablePublications(ctx context.Context, tx *sql.Tx) ([]*domain.Publication, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, learning_id, preview_hash, approval_id, targets_json, verification_json, rollback_json, status, started_at, completed_at, error_code, error_message
+		FROM publications WHERE status = ? ORDER BY started_at ASC
+	`, string(domain.PubStatusInProgress))
+	if err != nil {
+		return nil, fmt.Errorf("ListRecoverablePublications: %w", err)
+	}
+	defer rows.Close()
+	var out []*domain.Publication
+	for rows.Next() {
+		publication, scanErr := scanPublicationFromRows(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		out = append(out, publication)
+	}
+	return out, rows.Err()
+}
+
+// HasNewerActivePublicationOverlap reports whether a later non-rolled-back
+// publication owns any target of the supplied publication.
+func HasNewerActivePublicationOverlap(ctx context.Context, tx *sql.Tx, publication *domain.Publication) (bool, domain.PublicationID, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, targets_json FROM publications
+		WHERE started_at > ? AND status IN (?, ?) ORDER BY started_at DESC
+	`, publication.StartedAt.Format(time.RFC3339), string(domain.PubStatusInProgress), string(domain.PubStatusCompleted))
+	if err != nil {
+		return false, "", fmt.Errorf("HasNewerActivePublicationOverlap: %w", err)
+	}
+	defer rows.Close()
+	wanted := make(map[string]struct{}, len(publication.Targets))
+	for _, target := range publication.Targets {
+		wanted[target.Root+"\x00"+target.Path] = struct{}{}
+	}
+	for rows.Next() {
+		var id domain.PublicationID
+		var raw string
+		if err := rows.Scan((*string)(&id), &raw); err != nil {
+			return false, "", err
+		}
+		var targets []domain.TargetEntry
+		if err := json.Unmarshal([]byte(raw), &targets); err != nil {
+			return false, "", fmt.Errorf("decode targets for publication %s: %w", id, err)
+		}
+		for _, target := range targets {
+			if _, overlaps := wanted[target.Root+"\x00"+target.Path]; overlaps {
+				return true, id, nil
+			}
+		}
+	}
+	return false, "", rows.Err()
+}
+
 // scanPublication scans a row into a Publication.
 func scanPublication(row interface{ Scan(...interface{}) error }) (*domain.Publication, error) {
 	p := &domain.Publication{}

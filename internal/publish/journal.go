@@ -13,6 +13,7 @@ import (
 
 // Journal is an append-only publish journal confined to the project store.
 type Journal struct {
+	projectRoot string
 	journalPath string
 }
 
@@ -51,19 +52,11 @@ func NewJournal(projectRoot, journalDir string) (*Journal, error) {
 	} else if statErr != nil && !os.IsNotExist(statErr) {
 		return nil, fmt.Errorf("NewJournal: journal root: %w", statErr)
 	}
-	if err := os.MkdirAll(absJournal, 0o700); err != nil {
-		return nil, fmt.Errorf("NewJournal: mkdir: %w", err)
-	}
-	if err := rejectSymlinkComponents(absJournal, false); err != nil {
-		return nil, fmt.Errorf("NewJournal: journal root: %w", err)
-	}
-	journalPath := filepath.Join(absJournal, "publish-journal.jsonl")
-	if info, err := os.Lstat(journalPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		return nil, fmt.Errorf("NewJournal: journal path must not be a symlink: %s", journalPath)
-	} else if err != nil && !os.IsNotExist(err) {
+	journalPath := filepath.Join(rel, "publish-journal.jsonl")
+	if _, err := secureRelativePath(absProject, journalPath, "journal", true); err != nil {
 		return nil, fmt.Errorf("NewJournal: journal path: %w", err)
 	}
-	return &Journal{journalPath: journalPath}, nil
+	return &Journal{projectRoot: absProject, journalPath: journalPath}, nil
 }
 
 // Append writes and syncs one journal entry. The opened inode is compared with
@@ -76,7 +69,12 @@ func (j *Journal) Append(entry JournalEntry) error {
 	}
 	data = append(data, '\n')
 
-	before, statErr := os.Lstat(j.journalPath)
+	root, err := openRootNoFollow(j.projectRoot)
+	if err != nil {
+		return fmt.Errorf("Journal.Append: open root: %w", err)
+	}
+	defer root.Close()
+	before, statErr := root.Lstat(j.journalPath)
 	created := os.IsNotExist(statErr)
 	if statErr == nil && before.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("Journal.Append: journal path is a symlink")
@@ -84,12 +82,12 @@ func (j *Journal) Append(entry JournalEntry) error {
 	if statErr != nil && !created {
 		return fmt.Errorf("Journal.Append: lstat: %w", statErr)
 	}
-	f, err := os.OpenFile(j.journalPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := root.OpenFile(j.journalPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("Journal.Append: open: %w", err)
 	}
 	opened, openedErr := f.Stat()
-	after, afterErr := os.Lstat(j.journalPath)
+	after, afterErr := root.Lstat(j.journalPath)
 	if openedErr != nil || afterErr != nil || after.Mode()&os.ModeSymlink != 0 || !os.SameFile(opened, after) {
 		_ = f.Close()
 		return fmt.Errorf("Journal.Append: journal path changed during open")
@@ -114,9 +112,59 @@ func (j *Journal) Append(entry JournalEntry) error {
 		return fmt.Errorf("Journal.Append: close: %w", err)
 	}
 	if created {
-		if _, err := syncParentDirectoryRequired(j.journalPath); err != nil {
+		if _, err := syncParentDirectoryRequired(filepath.Join(j.projectRoot, j.journalPath)); err != nil {
 			return fmt.Errorf("Journal.Append: %w", err)
 		}
 	}
 	return nil
+}
+
+// ReadAll validates and returns every durable journal entry.
+func (j *Journal) ReadAll() ([]JournalEntry, error) {
+	root, err := openRootNoFollow(j.projectRoot)
+	if err != nil {
+		return nil, fmt.Errorf("Journal.ReadAll: open root: %w", err)
+	}
+	defer root.Close()
+	info, err := root.Lstat(j.journalPath)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("Journal.ReadAll: lstat: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("Journal.ReadAll: journal is not a regular non-symlink file")
+	}
+	data, err := root.ReadFile(j.journalPath)
+	if err != nil {
+		return nil, fmt.Errorf("Journal.ReadAll: read: %w", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	entries := make([]JournalEntry, 0, len(lines))
+	for index, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var entry JournalEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			return nil, fmt.Errorf("Journal.ReadAll: line %d: %w", index+1, err)
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
+}
+
+func (j *Journal) LatestStatus(publicationID domain.PublicationID) (string, error) {
+	entries, err := j.ReadAll()
+	if err != nil {
+		return "", err
+	}
+	status := ""
+	for _, entry := range entries {
+		if entry.PublicationID == string(publicationID) {
+			status = entry.RollbackStatus
+		}
+	}
+	return status, nil
 }

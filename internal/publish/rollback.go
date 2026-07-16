@@ -5,12 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/storage"
+
+	"github.com/google/uuid"
 )
 
 // RollbackFromBackup restores files from complete entries stored in a publication.
@@ -41,7 +42,7 @@ type recoveryFailure struct {
 	Artifact string `json:"recovery_artifact,omitempty"`
 }
 
-func (s *Service) rollbackPublication(ctx context.Context, backupMgr *BackupManager, journal *Journal, pub *domain.Publication) error {
+func (s *Service) rollbackPublication(ctx context.Context, backupMgr *BackupManager, journal *Journal, pub *domain.Publication, actor domain.Actor) error {
 	if len(pub.Rollback) == 0 {
 		return s.legacyRecoveryError(pub.ID, "[]", "rollback metadata is empty")
 	}
@@ -59,12 +60,15 @@ func (s *Service) rollbackPublication(ctx context.Context, backupMgr *BackupMana
 		if err != nil {
 			entry.Success = false
 			entry.RecoveryState = domain.RecoveryConflict
-			entry.FailureReason = err.Error()
 			artifact, artifactErr := s.writeConflictArtifact(pub.ID, i, *entry, err)
-			if artifactErr == nil {
+			failureErr := err
+			if artifactErr != nil {
+				failureErr = errors.Join(err, fmt.Errorf("recovery artifact: %w", artifactErr))
+			} else {
 				entry.RecoveryArtifact = artifact
 			}
-			failures = append(failures, recoveryFailure{Path: entry.Path, Reason: err.Error(), Artifact: entry.RecoveryArtifact})
+			entry.FailureReason = failureErr.Error()
+			failures = append(failures, recoveryFailure{Path: entry.Path, Reason: failureErr.Error(), Artifact: entry.RecoveryArtifact})
 		} else {
 			entry.Success = true
 			entry.RecoveryState = domain.RecoveryRestored
@@ -120,6 +124,13 @@ func (s *Service) rollbackPublication(ctx context.Context, backupMgr *BackupMana
 	pub.ErrorCode = nil
 	pub.ErrorMessage = nil
 	var learning *domain.Learning
+	previousState := `{"status":"completed"}`
+	newState := `{"status":"rolled_back"}`
+	auditEvent := &domain.AuditEvent{
+		ID: domain.AuditEventID(uuid.Must(uuid.NewV7()).String()), OccurredAt: now,
+		Actor: actor, Operation: "publication.rollback", EntityType: "publication", EntityID: string(pub.ID),
+		PreviousState: &previousState, NewState: &newState, PayloadSHA256: HashContent([]byte(pub.ID)), Result: "success",
+	}
 	if err := storage.WithTx(ctx, s.db, func(tx *sql.Tx) error {
 		var err error
 		learning, err = storage.GetLearning(ctx, tx, pub.LearningID)
@@ -136,7 +147,10 @@ func (s *Service) rollbackPublication(ctx context.Context, backupMgr *BackupMana
 				return err
 			}
 		}
-		return storage.UpdatePublication(ctx, tx, pub)
+		if err := storage.UpdatePublication(ctx, tx, pub); err != nil {
+			return err
+		}
+		return storage.RecordEventTx(ctx, tx, auditEvent)
 	}); err != nil {
 		return rollbackDatabasePendingError(pub.ID, "", err)
 	}
@@ -173,20 +187,24 @@ func rollbackFailureError(publicationID domain.PublicationID, failures []recover
 	if journalErr != nil {
 		auditErr = fmt.Errorf("append rollback failure journal: %w", journalErr)
 	}
+	details := map[string]any{
+		"publication_id":    string(publicationID),
+		"recovery_id":       string(publicationID),
+		"path":              first.Path,
+		"reason":            first.Reason,
+		"recovery_artifact": first.Artifact,
+		"conflicts":         failures,
+	}
+	if auditErr != nil {
+		details["audit_reason"] = auditErr.Error()
+	}
 	return &domain.DomainError{
 		Code:        domain.ErrRollbackFailed,
 		Message:     fmt.Sprintf("rollback could not safely restore %d target(s)", len(failures)),
 		Recoverable: true,
-		Details: map[string]any{
-			"publication_id":    string(publicationID),
-			"recovery_id":       string(publicationID),
-			"path":              first.Path,
-			"reason":            first.Reason,
-			"recovery_artifact": first.Artifact,
-			"conflicts":         failures,
-		},
-		NextAction: "review the reversal artifact, resolve the destination conflict, then retry rollback",
-		Cause:      errors.Join(errors.New(first.Reason), auditErr),
+		Details:     details,
+		NextAction:  "review the reversal artifact, resolve the destination conflict, then retry rollback",
+		Cause:       errors.Join(errors.New(first.Reason), auditErr),
 	}
 }
 
@@ -267,8 +285,12 @@ func (s *Service) writeConflictArtifact(publicationID domain.PublicationID, inde
 	var desired []byte
 	if entry.OriginalExisted != nil && *entry.OriginalExisted {
 		backupPath, err := secureAbsoluteWithin(s.backupDir, entry.Backup, "backup")
-		if err == nil {
-			desired, _ = readVerifiedBackup(backupPath, entry.BackupSHA256)
+		if err != nil {
+			return "", fmt.Errorf("validate original backup: %w", err)
+		}
+		desired, err = readVerifiedBackup(backupPath, entry.BackupSHA256)
+		if err != nil {
+			return "", fmt.Errorf("read original backup: %w", err)
 		}
 	}
 	diff := GenerateDiff(current.Content, desired, entry.Path, current.Exists)
@@ -286,13 +308,8 @@ func (s *Service) writeRecoveryArtifact(publicationID domain.PublicationID, suff
 	}, string(publicationID)+"-"+suffix) + ".patch"
 	relative := filepath.Join(".royo-learn", "recovery", name)
 	full := filepath.Join(s.projectRoot, relative)
-	if info, err := os.Lstat(full); err == nil && info.Mode().IsRegular() {
-		return full, nil
-	} else if err != nil && !os.IsNotExist(err) {
-		return "", err
-	}
 	writer := NewWriter(s.projectRoot)
-	if err := writer.WriteFileCAS(relative, []byte(content), 0o600, TargetIdentity{Exists: false}); err != nil {
+	if err := writer.WriteFile(relative, []byte(content), 0o600); err != nil {
 		return "", err
 	}
 	return full, nil

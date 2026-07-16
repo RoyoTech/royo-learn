@@ -38,6 +38,9 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 	if learning == nil {
 		return nil, domain.NewNotFoundError(domain.ErrLearningNotFound, "learning: "+string(input.LearningID))
 	}
+	if learning.Status == domain.StatusPublished && input.Apply {
+		return s.reconcilePublished(ctx, input, learning)
+	}
 	if learning.Status != domain.StatusApproved {
 		return nil, domain.NewValidationError(domain.ErrInvalidTransition,
 			fmt.Sprintf("learning must be approved to publish (current: %s)", learning.Status))
@@ -579,12 +582,15 @@ func (s *Service) compensate(journal *Journal, backupMgr *BackupManager, backups
 		}
 		pub.Rollback[i].Success = false
 		pub.Rollback[i].RecoveryState = domain.RecoveryConflict
-		pub.Rollback[i].FailureReason = result.Error.Error()
 		artifact, artifactErr := s.writeConflictArtifact(pubID, i, pub.Rollback[i], result.Error)
-		if artifactErr == nil {
+		failureErr := result.Error
+		if artifactErr != nil {
+			failureErr = errors.Join(result.Error, fmt.Errorf("recovery artifact: %w", artifactErr))
+		} else {
 			pub.Rollback[i].RecoveryArtifact = artifact
 		}
-		failures = append(failures, recoveryFailure{Path: result.Path, Reason: result.Error.Error(), Artifact: pub.Rollback[i].RecoveryArtifact})
+		pub.Rollback[i].FailureReason = failureErr.Error()
+		failures = append(failures, recoveryFailure{Path: result.Path, Reason: failureErr.Error(), Artifact: pub.Rollback[i].RecoveryArtifact})
 	}
 	code := string(domain.ErrPublicationFailed)
 	if len(failures) > 0 {
@@ -618,17 +624,21 @@ func (s *Service) compensate(journal *Journal, backupMgr *BackupManager, backups
 	}
 	if len(failures) > 0 {
 		first := failures[0]
+		details := map[string]any{
+			"publication_id": string(pubID), "recovery_id": string(pubID), "journal_id": string(pubID),
+			"path": first.Path, "reason": first.Reason, "recovery_artifact": first.Artifact,
+			"conflicts": failures,
+		}
+		if journalErr != nil {
+			details["audit_reason"] = journalErr.Error()
+		}
 		return &domain.DomainError{
 			Code:        domain.ErrRollbackFailed,
 			Message:     fmt.Sprintf("%s failed and compensating rollback preserved %d conflicting target(s)", stage, len(failures)),
 			Recoverable: true,
-			Details: map[string]any{
-				"publication_id": string(pubID), "recovery_id": string(pubID), "journal_id": string(pubID),
-				"path": first.Path, "reason": first.Reason, "recovery_artifact": first.Artifact,
-				"conflicts": failures,
-			},
-			NextAction: "review the reversal artifact to restore each target manually, resolve every conflict, then retry rollback",
-			Cause:      errors.Join(cause, journalErr),
+			Details:     details,
+			NextAction:  "review the reversal artifact to restore each target manually, resolve every conflict, then retry rollback",
+			Cause:       errors.Join(cause, journalErr),
 		}
 	}
 	return &domain.DomainError{
@@ -784,18 +794,37 @@ func (s *Service) Rollback(ctx context.Context, projectID domain.ProjectID, inpu
 		return fmt.Errorf("Rollback: get publication: %w", err)
 	}
 
-	if pub.Status == domain.PubStatusRolledback {
-		return nil
-	}
-
 	// Create backup manager and perform rollback.
 	backupMgr := NewBackupManager(s.projectRoot, s.backupDir)
 	journal, err := NewJournal(s.projectRoot, s.journalDir)
 	if err != nil {
 		return fmt.Errorf("Rollback: create journal: %w", err)
 	}
+	if pub.Status == domain.PubStatusRolledback {
+		reconciled, reconcileErr := s.reconcileRolledBack(ctx, journal, pub)
+		if reconcileErr != nil {
+			return reconcileErr
+		}
+		if reconciled {
+			return nil
+		}
+		return domain.NewConflictError(domain.ErrPublicationConflict, "publication was already rolled back")
+	}
+	ownershipTx, txErr := s.db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if txErr != nil {
+		return fmt.Errorf("Rollback: ownership tx: %w", txErr)
+	}
+	overlaps, newerID, ownershipErr := storage.HasNewerActivePublicationOverlap(ctx, ownershipTx, pub)
+	ownershipTx.Rollback()
+	if ownershipErr != nil {
+		return fmt.Errorf("Rollback: publication ownership: %w", ownershipErr)
+	}
+	if overlaps {
+		return domain.NewConflictError(domain.ErrPublicationConflict,
+			fmt.Sprintf("newer publication %s owns an overlapping target", newerID))
+	}
 
-	return s.rollbackPublication(ctx, backupMgr, journal, pub)
+	return s.rollbackPublication(ctx, backupMgr, journal, pub, input.Actor)
 }
 
 // rollbackAll attempts to restore all files from backups. It aggregates ALL
