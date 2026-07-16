@@ -1081,3 +1081,164 @@ una ruta segura para actualizar las Skills incompatibles ya instaladas.
 
 Tramo 3 — puerta de publicación del Hito 1 (`v0.1.10`). **Fuera del alcance de
 este recorrido; no tocado.**
+
+---
+
+## 2026-07-14 — Tramo 3: puerta de publicación del Hito 1 (auditoría y preparación)
+
+**Rama:** `fix/v019-contract-recovery`
+**Commit de partida:** `9906c20` (cierre del Recorrido F)
+**Naturaleza del tramo:** auditar, verificar PASS/FAIL, alinear el README y
+**preparar** (no publicar) la versión `v0.1.10`. No se escribió funcionalidad nueva.
+
+### Regla dura respetada
+
+No se ejecutó `git tag`, `git push`, `goreleaser release` ni ninguna operación de
+publicación. El tramo termina dejando el comando exacto listo y **detenido** para
+aprobación humana. El único cambio de código/docs de este tramo es la alineación
+del README y esta entrada de bitácora, ambos en commits locales sin `push`.
+
+### Paso 1 — Auditoría de los 12 ítems de la puerta (PASS/FAIL, con prueba)
+
+Cada ítem se verificó ejecutando la(s) prueba(s) que lo demuestran. Sin PARCIAL.
+
+| # | Ítem | Prueba que lo demuestra | Estado |
+|---|------|-------------------------|--------|
+| 1 | Skills y MCP coinciden (test de contrato) | `TestContract_SkillsCiteOnlyRegisteredCanonicalTools`, `TestContract_DocsRegistrySkillsTripleMatch` (`internal/mcpserver/contract_test.go`) — paquete `ok` | **PASS** |
+| 2 | Captura acepta evidencia | `TestCLI_CaptureAcceptsEmbeddedEvidence`, `TestMCP_CaptureAcceptsEmbeddedEvidence` (`internal/mcpserver/evidence_test.go`, `cmd/royo-learn`) | **PASS** |
+| 3 | `evidence add` funciona (CLI y MCP) | `TestCLI_EvidenceUnblocksApproval`, `TestMCP_AddEvidenceUnblocksApproval`; comando real `royo-learn evidence add <id> --summary …` | **PASS** |
+| 4 | La curación aprueba por interfaz pública | `TestContract_CLIAndDomainShareCurationAllowlist` (`cmd/royo-learn/curate_allowlist_test.go`); cadena `captured→needs_evidence→approved` sin SQL directo | **PASS** |
+| 5 | La aprobación pública queda ligada al `preview_hash` | `TestApprovalGate_ValidApprovalIsAccepted`, `TestApprovalGate_ApprovalForDifferentPreviewIsRejected`, `TestApprovalGate_ExpiredApprovalIsRejected`, `TestCLI_ApprovalGate` | **PASS** |
+| 6 | `publish` exige `approval_id` cuando `requires_approval` | `TestApprovalGate_SensitiveWithoutApprovalIsBlocked`, `TestApprovalGate_NonPreferenceAgentsRuleRequiresApproval` | **PASS** |
+| 7 | `publish` exige `--apply` para escribir | `TestFault_*` (dry-run por defecto); help real: `publish -apply` (D7), `-dry-run` default `true` | **PASS** |
+| 8 | `rollback` compensa fallos posteriores a escritura | Las 7 pruebas `TestFault_*` (`internal/publish/fault_injection_test.go`) | **PASS** |
+| 9 | E2E CLI completo (19 pasos, sin soft-passes) | `TestRunE2ETempCompletesAllSteps` (escenario `cli-sensitive`, 19 pasos, `cmd/royo-learn/e2e.go`) — `ok` | **PASS** |
+| 10 | E2E MCP completo | `TestRunE2ETempCompletesAllSteps` (escenario `mcp-sensitive` por stdio) — `ok` | **PASS** |
+| 11 | Skills instaladas pueden actualizarse (Recorrido F) | Los 7 `TestUpgradeSkills_*` (`cmd/royo-learn/setup_upgrade_test.go`) | **PASS** |
+| 12 | El README describe únicamente lo demostrado | Alineado en este tramo (ver Paso 4); commit `docs: align README with demonstrated Hito 1 behavior` | **PASS** |
+
+**Resultado Paso 1: 12/12 PASS. Sin FAIL.**
+
+### Paso 2 — Batería de verificación final (salida real, clasificada)
+
+| Comando | Resultado real | Clasificación |
+|---------|----------------|---------------|
+| `go fmt ./...` / `gofmt -l ./cmd ./internal` | Sin archivos listados (limpio) | PASS |
+| `go mod tidy` | **Cero cambios** en `go.mod`/`go.sum` (`git diff --stat` vacío) | PASS — sin hallazgo |
+| `go mod verify` | `all modules verified` | PASS |
+| `go vet ./...` | Limpio, `exit=0` | PASS |
+| `go build ./cmd/royo-learn` | `exit=0` | PASS |
+| `go test -race -p 1 -count=1 ./...` | **`exit=0`, TODOS los paquetes `ok`** (incluido `internal/buildinfo`) | PASS — señal fiable de suite completa |
+| `go test -p 1 -count=1 ./...` (serie) | `exit=1`; **única** falla `internal/buildinfo` | Ambiental (AV) |
+| `go test ./...` (paralelo) | `exit=1`; **única** falla `internal/buildinfo` | Ambiental (AV) |
+
+**Clasificación de cada falla reportada por la suite:**
+
+- `internal/buildinfo` (`fork/exec … buildinfo.test.exe: Access is denied`):
+  **AMBIENTAL**. Reproducido: compilado a ruta estable
+  (`go test -c -o .gotmp/buildinfo.test.exe ./internal/buildinfo/`) y ejecutado →
+  `PASS` en las 3 pruebas (`TestVersionJSON`, `TestHumanString`,
+  `TestDevelopmentMetadataDefaults`). Además pasa bajo `-race`. Antivirus de
+  Windows bloqueando binarios de test en el árbol `go-build`. **No es fallo de
+  código.**
+- Las tres flakes de teardown de Windows conocidas
+  (`TestCLI_CaptureAcceptsEmbeddedEvidence`, `TestUpdateFullFlowZipWindows`, y el
+  e2e con dir temporal bloqueado por AV): **no se manifestaron** en las corridas
+  de este tramo (serie ni paralelo). Quedan clasificadas de antemano como
+  ambientales (pasan en aislamiento), pero no hubo que reejecutarlas porque no
+  aparecieron.
+
+**Ninguna falla de aserción. Cero FAIL de código.**
+
+### Paso 3 — Cacería de soft-passes (grep en la superficie de pruebas)
+
+Patrón buscado: `acceptable|soft.?pass|failure is acceptable|doesn't crash|any exit code|expected.*failure|skip.*expected`.
+
+| Hit | Veredicto |
+|-----|-----------|
+| `cmd/royo-learn/setup_test.go:235,251,328` (`expected failure…`, `expected exitFailure`) | **Legítimo** — aserciones de ruta negativa: afirman que un error/`exitFailure` SÍ se devuelve. |
+| `internal/setup/codex_test.go:71` (`is acceptable because Codex would never accept a commented section`) | **Legítimo** — el test asevera `if !ok { t.Errorf }`; el comentario documenta un quirk de coincidencia literal en un helper no crítico. Tiene aserción real. |
+| `internal/mcpserver/contract_test.go:165` (`no pending list, and no soft pass`) | **Legítimo** — comentario que describe la intención de la prueba de contrato. |
+| `internal/publish/fault_injection_test.go:76,100,157,189,221` (`expected a … failure`) | **Legítimo** — aserciones fuertes de inyección de fallo: exigen que el fallo produzca error. |
+| `internal/publish/publish_test.go:1798` (`expected journal failure error, got nil`) | **Legítimo** — aserción de ruta negativa. |
+| `cmd/royo-learn/e2e.go:20-25` (`failure is acceptable`, `soft pass`) | **Legítimo** — comentario que describe el E2E permisivo que SE REEMPLAZÓ; no es código activo. |
+
+**Ningún soft-pass nuevo en ninguna prueba crítica.** Los ítems 9 y 10 no están
+comprometidos.
+
+### Paso 4 — README alineado con lo demostrado (ítem 12)
+
+Commit `docs: align README with demonstrated Hito 1 behavior`. Correcciones:
+
+1. **Perfiles MCP.** El README afirmaba `minimal` = «capture, search, doctor» y
+   `standard` = «curate, preview, list, get». Es falso desde el Recorrido A:
+   `capture` es escritura y ya **no** vive en `read`/`minimal`, y las lecturas
+   incluyen `get`/`list`/`status`. Se reemplazó por los perfiles canónicos
+   `read`/`agent`/`admin` (flag `--tools`), con el conjunto real por perfil y la
+   nota de que `--profile`/`minimal|standard|full` y los alias de tools siguen
+   funcionando como deprecated (D8). Ejemplo `--profile full` → `--tools admin`.
+2. **Flujo de publicación del Quick Start.** El ejemplo de `publish` mostraba solo
+   `--preview-hash` (sin `--apply` ni `--approval-id`), lo que contradice lo
+   demostrado: sin `--apply` es dry-run (D7) y un destino sensible se bloquea sin
+   `--approval-id` (Recorrido C). Se añadió el paso `approve` y se corrigió
+   `publish` con `--apply` + `--approval-id`. Se añadieron `get`, `search`,
+   `evidence add` y `occurrence` (las seis operaciones D17).
+3. **Actualización segura de Skills (Recorrido F).** Se documentó
+   `royo-learn setup upgrade-skills` (dry-run por defecto, `--apply` para escribir;
+   Skills modificadas por el usuario nunca se sobrescriben).
+
+No se afirma ninguna función de Hito 2: no hay `export`/`import`/`rebuild-index`/
+`review` ni embeddings en el README. La lista de garantías del binario ya era
+exacta.
+
+**Nota (trabajo de Tramo 6, no de este tramo):** los README traducidos
+(`docs/README.es.md` y los stubs `de/fr/hi/pt/zh`) ahora quedan **desactualizados**
+respecto del README principal (perfiles, flujo de publicación, upgrade de Skills).
+No se tocaron por indicación explícita; se registran como pendientes del Tramo 6.
+
+### Paso 5 — Comando de release preparado (NO ejecutado)
+
+Versión del Hito 1: **`v0.1.10`** (D8). Proceso: `.goreleaser.yml`
+(`goreleaser release --clean`), owner `RoyoTech/royo-learn`, binario único
+multiplataforma, `CGO_ENABLED=0`.
+
+**Checklist previo al tag (todo debe pasar):**
+
+```bash
+git status                       # árbol limpio (commitear docs primero)
+go test -race ./...              # verde en la máquina de referencia (incluye buildinfo)
+go vet ./...
+go build ./cmd/royo-learn
+goreleaser release --snapshot --clean   # ensayo local, NO publica
+```
+
+**Comando exacto de corte y publicación — DEJADO LISTO, NO EJECUTADO. La
+publicación es decisión humana:**
+
+```bash
+# 1. Llevar la rama a main (decisión humana sobre la estrategia de merge)
+git checkout main
+git merge --no-ff fix/v019-contract-recovery
+
+# 2. Etiquetar la versión del Hito 1
+git tag -a v0.1.10 -m "royo-learn v0.1.10 — Hito 1: estabilización funcional"
+
+# 3. Empujar commit y tag
+git push origin main
+git push origin v0.1.10
+
+# 4. Cortar el release (GoReleaser lee el tag)
+goreleaser release --clean
+```
+
+Requisitos: `GITHUB_TOKEN` con permiso sobre `RoyoTech/royo-learn` y `goreleaser`
+instalado. `v0.1.10` conserva todos los nombres de `v0.1.9` como aliases (D8): no
+rompe compatibilidad.
+
+### Veredicto del Tramo 3
+
+**READY-FOR-RELEASE.** Los 12 ítems de la puerta pasan; la batería completa está
+verde salvo el ruido ambiental de AV (`internal/buildinfo`), reproducido como
+no-código; no existe ningún soft-pass nuevo; el README describe exactamente el
+comportamiento demostrado. El comando de release queda listo y **detenido** para
+aprobación humana. No se publicó nada.
