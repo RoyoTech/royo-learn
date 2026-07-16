@@ -1204,7 +1204,8 @@ func runPreview(args []string, stdout, stderr io.Writer) int {
 
 	svc := publish.NewService(db, root,
 		filepath.Join(root, ".royo-learn", "backups"),
-		filepath.Join(root, ".royo-learn"))
+		filepath.Join(root, ".royo-learn"),
+		filepath.Join(root, ".royo-learn", "records"))
 
 	ctx := context.Background()
 	result, err := svc.Preview(ctx, projectID, &publish.PreviewInput{
@@ -1304,7 +1305,8 @@ func runApprove(args []string, stdout, stderr io.Writer) int {
 
 	svc := publish.NewService(db, root,
 		filepath.Join(root, ".royo-learn", "backups"),
-		filepath.Join(root, ".royo-learn"))
+		filepath.Join(root, ".royo-learn"),
+		filepath.Join(root, ".royo-learn", "records"))
 
 	ctx := context.Background()
 	approval, err := svc.Approve(ctx, projectID, apprIn)
@@ -1369,7 +1371,8 @@ func runPublish(args []string, stdout, stderr io.Writer) int {
 
 	svc := publish.NewService(db, root,
 		filepath.Join(root, ".royo-learn", "backups"),
-		filepath.Join(root, ".royo-learn"))
+		filepath.Join(root, ".royo-learn"),
+		filepath.Join(root, ".royo-learn", "records"))
 
 	pubIn := &publish.PublishInput{
 		LearningID:  domain.LearningID(*learningID),
@@ -1451,7 +1454,8 @@ func runRollback(args []string, stdout, stderr io.Writer) int {
 
 	svc := publish.NewService(db, root,
 		filepath.Join(root, ".royo-learn", "backups"),
-		filepath.Join(root, ".royo-learn"))
+		filepath.Join(root, ".royo-learn"),
+		filepath.Join(root, ".royo-learn", "records"))
 
 	ctx := context.Background()
 	err := svc.Rollback(ctx, projectID, &publish.RollbackPublicationInput{

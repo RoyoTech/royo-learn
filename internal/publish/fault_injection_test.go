@@ -65,7 +65,7 @@ func TestFault_FirstFileWriteFails(t *testing.T) {
 	env := seedPublishEnv(t, "fault1/SKILL.md", false, "")
 	defer env.db.Close()
 
-	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
+	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir, env.recordsDir)
 	svc.writer = &faultyWriter{real: NewWriter(env.projectRoot), failAt: 1}
 
 	_, err := svc.Publish(ctx, env.projectID, &PublishInput{
@@ -88,7 +88,7 @@ func TestFault_SecondFileWriteFails(t *testing.T) {
 	env := seedPublishEnv(t, "fault2", false, "")
 	defer env.db.Close()
 
-	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
+	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir, env.recordsDir)
 	fw := &faultyWriter{real: NewWriter(env.projectRoot), failAt: 2}
 	svc.writer = fw
 
@@ -116,7 +116,7 @@ func TestFault_VerificationFails(t *testing.T) {
 	defer env.db.Close()
 	target := filepath.Join(env.projectRoot, "skills", "fault3", "SKILL.md")
 
-	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
+	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir, env.recordsDir)
 	// Corrupt the write so the on-disk content no longer matches the expected
 	// hash: verification must catch it and roll back.
 	svc.writer = &faultyWriter{real: NewWriter(env.projectRoot), corruptAt: 1}
@@ -144,7 +144,7 @@ func TestFault_JournalAttemptFails(t *testing.T) {
 	defer env.db.Close()
 	target := filepath.Join(env.projectRoot, "skills", "fault4", "SKILL.md")
 
-	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
+	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir, env.recordsDir)
 	svc.faults = &FaultHooks{
 		BeforeJournalAttempt: func() error { return errors.New("injected journal failure") },
 	}
@@ -176,7 +176,7 @@ func TestFault_FinalSQLiteUpdateFails(t *testing.T) {
 	defer env.db.Close()
 	target := filepath.Join(env.projectRoot, "skills", "fault5", "SKILL.md")
 
-	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
+	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir, env.recordsDir)
 	svc.faults = &FaultHooks{
 		BeforeDBCommit: func() error { return errors.New("injected DB commit failure") },
 	}
@@ -205,7 +205,7 @@ func TestFault_RollbackItselfFailsEmitsRecoveryInstruction(t *testing.T) {
 	env := seedPublishEnv(t, "fault6/SKILL.md", true, original)
 	defer env.db.Close()
 
-	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
+	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir, env.recordsDir)
 	// Corrupt the write so verification fails, then force the compensating
 	// rollback to fail too: the system must surface a recovery instruction.
 	svc.writer = &faultyWriter{real: NewWriter(env.projectRoot), corruptAt: 1}
@@ -246,7 +246,7 @@ func TestFault_DestinationModifiedAfterPreviewIsRefused(t *testing.T) {
 	defer env.db.Close()
 	target := filepath.Join(env.projectRoot, "skills", "fault7", "SKILL.md")
 
-	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
+	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir, env.recordsDir)
 
 	// Generate a REAL preview so its plan records the prior hash of the file.
 	prev, err := svc.Preview(ctx, env.projectID, &PreviewInput{

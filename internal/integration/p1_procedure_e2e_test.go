@@ -207,6 +207,7 @@ func TestP1_E2E_ProcedurePreservedOnRepublish(t *testing.T) {
 		projectRoot,
 		filepath.Join(projectRoot, ".royo-learn", "backups"),
 		filepath.Join(projectRoot, ".royo-learn"),
+		filepath.Join(projectRoot, ".royo-learn", "records"),
 	)
 
 	previewA, err := publishService.Preview(ctx, project.ID, &publish.PreviewInput{

@@ -327,7 +327,14 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 			"persist publication", pErr)
 	}
 
-	// 13. Close the journal with the successful outcome.
+	// 13. The truth changed, so the derived record must follow it (D6, D18).
+	// SQLite already holds `published`; a record still claiming `approved`
+	// would diverge from the instant this transaction commits.
+	if err := s.materializeRecord(learning); err != nil {
+		return nil, err
+	}
+
+	// 14. Close the journal with the successful outcome.
 	_ = journal.Append(JournalEntry{
 		PublicationID:  string(pubID),
 		LearningID:     string(input.LearningID),
@@ -617,7 +624,7 @@ func (s *Service) Rollback(ctx context.Context, projectID domain.ProjectID, inpu
 		return fmt.Errorf("Rollback: create journal: %w", err)
 	}
 
-	return RollbackPublication(s.db, backupMgr, journal, pub)
+	return s.rollbackPublication(backupMgr, journal, pub)
 }
 
 // rollbackAll attempts to restore all files from backups. It aggregates ALL

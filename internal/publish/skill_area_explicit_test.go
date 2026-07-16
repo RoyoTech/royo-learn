@@ -78,6 +78,7 @@ func newP2Harness(t *testing.T) *p2Harness {
 			projectRoot,
 			filepath.Join(projectRoot, ".royo-learn", "backups"),
 			filepath.Join(projectRoot, ".royo-learn"),
+			filepath.Join(projectRoot, ".royo-learn", "records"),
 		),
 		actor: actor,
 		now:   now,

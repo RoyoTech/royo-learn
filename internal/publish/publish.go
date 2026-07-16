@@ -1,10 +1,12 @@
 package publish
 
 import (
+	"fmt"
 	"os"
 	"time"
 
 	"agent-royo-learn/internal/domain"
+	"agent-royo-learn/internal/record"
 	"agent-royo-learn/internal/storage"
 )
 
@@ -39,6 +41,7 @@ type Service struct {
 	projectRoot string
 	backupDir   string
 	journalDir  string
+	recordsDir  string
 
 	// writer is the injectable file-write seam; nil means the real atomic writer.
 	writer FileWriter
@@ -46,14 +49,36 @@ type Service struct {
 	faults *FaultHooks
 }
 
-// NewService creates a new publish Service.
-func NewService(db *storage.DB, projectRoot, backupDir, journalDir string) *Service {
+// NewService creates a new publish Service. recordsDir is required, not
+// optional: publish and rollback both change the status of a learning, and
+// every operation that mutates the truth must re-materialize the derived
+// Markdown record (D18 rules 5 and 6). An optional recordsDir would allow a
+// Service that publishes without materializing — a divergence by construction.
+func NewService(db *storage.DB, projectRoot, backupDir, journalDir, recordsDir string) *Service {
 	return &Service{
 		db:          db,
 		projectRoot: projectRoot,
 		backupDir:   backupDir,
 		journalDir:  journalDir,
+		recordsDir:  recordsDir,
 	}
+}
+
+// materializeRecord rewrites the derived Markdown record of a learning after
+// its truth changed in SQLite (D6, D18 rule 5).
+//
+// It runs AFTER the owning transaction commits, so a failure here never undoes
+// a publication or a rollback that already succeeded — it reports a store that
+// could not write, over a truth that is already correct. The window is
+// recoverable and does not need a queue: `doctor` detects the divergence and
+// `rebuild-index` rewrites the record from the same source of truth.
+func (s *Service) materializeRecord(learning *domain.Learning) error {
+	if err := record.WriteRecord(s.recordsDir, learning); err != nil {
+		return fmt.Errorf("the operation completed and SQLite is correct, but the "+
+			"Markdown record could not be written — run `royo-learn rebuild-index` "+
+			"to repair it: %w", err)
+	}
+	return nil
 }
 
 // fileWriter returns the injected writer or the default atomic writer.

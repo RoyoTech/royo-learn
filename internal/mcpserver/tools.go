@@ -78,7 +78,8 @@ func newPublishSvc(db *storage.DB, projectRoot, journalDir string) *publishSvc {
 func (s *publishSvc) service() *publish.Service {
 	return publish.NewService(s.db, s.projectRoot,
 		s.projectRoot+"/.royo-learn/backups",
-		s.projectRoot+"/.royo-learn")
+		s.projectRoot+"/.royo-learn",
+		s.projectRoot+"/.royo-learn/records")
 }
 
 func (s *publishSvc) Preview(ctx context.Context, projectID domain.ProjectID, input *publish.PreviewInput) (*publish.PreviewResult, error) {
@@ -570,7 +571,8 @@ func handlePublishLearning(srv *Server) func(ctx context.Context, req *mcp.CallT
 
 		svc := publish.NewService(srv.db, srv.projectRoot,
 			srv.projectRoot+"/.royo-learn/backups",
-			srv.projectRoot+"/.royo-learn")
+			srv.projectRoot+"/.royo-learn",
+			srv.projectRoot+"/.royo-learn/records")
 		result, err := svc.Publish(ctx, srv.projectID, pubIn)
 		if err != nil {
 			return toolDomainError(err, "publish_failed")

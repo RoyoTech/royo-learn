@@ -1165,6 +1165,7 @@ func TestPublish_RollbackFailureObserved(t *testing.T) {
 	projectRoot := t.TempDir()
 	backupDir := filepath.Join(t.TempDir(), "backups")
 	journalDir := filepath.Join(t.TempDir(), "journal")
+	recordsDir := filepath.Join(projectRoot, ".royo-learn", "records")
 
 	// Create a target file that EXISTS so backup gets a real backup.
 	skillDir := filepath.Join(projectRoot, "skills", "rb-skill")
@@ -1238,7 +1239,7 @@ func TestPublish_RollbackFailureObserved(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	svc := NewService(db, projectRoot, backupDir, journalDir)
+	svc := NewService(db, projectRoot, backupDir, journalDir, recordsDir)
 	_, pubErr := svc.Publish(ctx, projectID, &PublishInput{
 		Apply:      true,
 		LearningID: learningID, PreviewHash: previewHash,
@@ -1464,6 +1465,7 @@ func TestPublish_E2E(t *testing.T) {
 	projectRoot := t.TempDir()
 	backupDir := filepath.Join(t.TempDir(), "backups")
 	journalDir := filepath.Join(t.TempDir(), "journal")
+	recordsDir := filepath.Join(projectRoot, ".royo-learn", "records")
 	if err := os.MkdirAll(filepath.Join(projectRoot, "skills"), 0o755); err != nil {
 		t.Fatalf("mkdir skills: %v", err)
 	}
@@ -1547,7 +1549,7 @@ func TestPublish_E2E(t *testing.T) {
 	}
 
 	// --- Publish ---
-	svc := NewService(db, projectRoot, backupDir, journalDir)
+	svc := NewService(db, projectRoot, backupDir, journalDir, recordsDir)
 	result, err := svc.Publish(ctx, projectID, &PublishInput{
 		Apply:       true,
 		LearningID:  learningID,
@@ -1611,6 +1613,7 @@ type publishTestEnv struct {
 	projectRoot string
 	backupDir   string
 	journalDir  string
+	recordsDir  string
 	projectID   domain.ProjectID
 	learningID  domain.LearningID
 	previewHash string
@@ -1628,6 +1631,7 @@ func seedPublishEnv(t *testing.T, skillPath string, precreateFile bool, initialC
 	projectRoot := t.TempDir()
 	backupDir := filepath.Join(t.TempDir(), "backups")
 	journalDir := filepath.Join(t.TempDir(), "journal")
+	recordsDir := filepath.Join(projectRoot, ".royo-learn", "records")
 	os.MkdirAll(filepath.Join(projectRoot, "skills"), 0o755)
 
 	if precreateFile {
@@ -1692,7 +1696,8 @@ func seedPublishEnv(t *testing.T, skillPath string, precreateFile bool, initialC
 
 	return &publishTestEnv{
 		db: db, projectRoot: projectRoot, backupDir: backupDir, journalDir: journalDir,
-		projectID: projectID, learningID: learningID, previewHash: previewHash, actor: actor,
+		recordsDir: recordsDir,
+		projectID:  projectID, learningID: learningID, previewHash: previewHash, actor: actor,
 	}
 }
 
@@ -1709,7 +1714,7 @@ func TestPublish_BeginTxErrorsChecked(t *testing.T) {
 	// Close the DB so BeginTx fails.
 	env.db.Close()
 
-	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
+	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir, env.recordsDir)
 	_, pubErr := svc.Publish(ctx, env.projectID, &PublishInput{
 		Apply:       true,
 		LearningID:  env.learningID,
@@ -1734,7 +1739,7 @@ func TestPublish_JournalWrittenBeforeDBCommit(t *testing.T) {
 	env := seedPublishEnv(t, "m2-skill/SKILL.md", false, "")
 	ctx := context.Background()
 
-	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
+	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir, env.recordsDir)
 	result, err := svc.Publish(ctx, env.projectID, &PublishInput{
 		Apply:       true,
 		LearningID:  env.learningID,
@@ -1785,7 +1790,7 @@ func TestPublish_JournalFailurePreventsDBCommit(t *testing.T) {
 		t.Fatalf("sabotage journal: %v", err)
 	}
 
-	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
+	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir, env.recordsDir)
 	_, pubErr := svc.Publish(ctx, env.projectID, &PublishInput{
 		Apply:       true,
 		LearningID:  env.learningID,
@@ -1877,7 +1882,7 @@ func TestPublish_OptimisticLock_NoFalsePositive(t *testing.T) {
 	env := seedPublishEnv(t, "m3-skill/SKILL.md", true, "# Existing Skill\n\nold content\n")
 	ctx := context.Background()
 
-	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
+	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir, env.recordsDir)
 	result, err := svc.Publish(ctx, env.projectID, &PublishInput{
 		Apply:       true,
 		LearningID:  env.learningID,
@@ -1908,7 +1913,7 @@ func TestPublish_ForceSkipsOptimisticLock(t *testing.T) {
 	env := seedPublishEnv(t, "m3f-skill/SKILL.md", true, "# Force Skill\n\noriginal\n")
 	ctx := context.Background()
 
-	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
+	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir, env.recordsDir)
 	result, err := svc.Publish(ctx, env.projectID, &PublishInput{
 		Apply:       true,
 		LearningID:  env.learningID,

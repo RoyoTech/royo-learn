@@ -21,7 +21,7 @@ func TestPublish_DryRunByDefaultWritesNothing(t *testing.T) {
 	env := seedPublishEnv(t, "dryrun-skill", false, "")
 	defer env.db.Close()
 
-	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
+	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir, env.recordsDir)
 
 	// A real preview so the plan is fully populated.
 	prev, err := svc.Preview(ctx, env.projectID, &PreviewInput{
@@ -72,7 +72,7 @@ func TestPublish_ApplyWritesAndMarksPublished(t *testing.T) {
 	env := seedPublishEnv(t, "apply-skill", false, "")
 	defer env.db.Close()
 
-	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
+	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir, env.recordsDir)
 	prev, err := svc.Preview(ctx, env.projectID, &PreviewInput{
 		LearningID: env.learningID, Actor: env.actor,
 	})

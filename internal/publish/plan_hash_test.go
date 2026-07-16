@@ -72,7 +72,7 @@ func TestPreview_PersistsPerTargetPriorAndPosteriorHashes(t *testing.T) {
 	env := seedPublishEnv(t, "index-only", false, "")
 	defer env.db.Close()
 
-	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
+	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir, env.recordsDir)
 	res, err := svc.Preview(ctx, env.projectID, &PreviewInput{
 		LearningID: env.learningID,
 		Actor:      env.actor,

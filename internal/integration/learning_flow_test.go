@@ -109,6 +109,7 @@ func TestCaptureCuratePublishFlow(t *testing.T) {
 		projectRoot,
 		filepath.Join(projectRoot, ".royo-learn", "backups"),
 		filepath.Join(projectRoot, ".royo-learn"),
+		filepath.Join(projectRoot, ".royo-learn", "records"),
 	)
 	preview, err := publishService.Preview(ctx, project.ID, &publish.PreviewInput{
 		LearningID: captured.LearningID,
