@@ -91,3 +91,19 @@ func TestMCPErrorModelFallbackAndToolErrorsAreNested(t *testing.T) {
 		t.Fatalf("tool error code = %v", inner["code"])
 	}
 }
+
+func TestMCPErrorModelRetainsLegacyTopLevelFields(t *testing.T) {
+	t.Parallel()
+	result, _, _ := toolError("invalid_argument", "bad input")
+	text := result.Content[0].(*mcp.TextContent)
+	var body map[string]any
+	if err := json.Unmarshal([]byte(text.Text), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["code"] != "invalid_argument" || body["message"] != "bad input" {
+		t.Fatalf("legacy top-level fields missing: %v", body)
+	}
+	if _, ok := body["error"].(map[string]any); !ok {
+		t.Fatalf("nested error details missing: %v", body)
+	}
+}

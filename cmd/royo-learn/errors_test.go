@@ -85,3 +85,29 @@ func TestCLIErrorModelNonDomainErrorFallsBack(t *testing.T) {
 		t.Fatalf("fallback exit = %d, want %d", exit, domain.ErrInvalidArgument.ExitCode())
 	}
 }
+
+func TestCLIRollbackPlainErrorFallsBackToRollbackFailed(t *testing.T) {
+	t.Parallel()
+	var stderr bytes.Buffer
+	exit := writeDomainError(&stderr, errors.New("plain wrapped failure"), "rollback_failed", "recover", "rollback: ")
+	if exit != domain.ErrRollbackFailed.ExitCode() {
+		t.Fatalf("fallback exit = %d, want %d", exit, domain.ErrRollbackFailed.ExitCode())
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(stderr.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope["code"] != "rollback_failed" {
+		t.Fatalf("fallback envelope = %v", envelope)
+	}
+}
+
+func TestSelfUpdateErrorsAlwaysExitOne(t *testing.T) {
+	t.Parallel()
+	for _, code := range []string{"invalid_argument", "development_build", "self_update_failed"} {
+		var stderr bytes.Buffer
+		if exit := writeSelfUpdateError(&stderr, code, "failure"); exit != exitFailure {
+			t.Errorf("code %s exit=%d, want %d", code, exit, exitFailure)
+		}
+	}
+}
