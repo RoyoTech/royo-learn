@@ -31,6 +31,8 @@
 | D14 | Las instrucciones de `initialize` mienten sobre el perfil | Tramo 0 — Hallazgo 18 |
 | D15 | **Una Skill no cita `learning_approve` hasta que exista** | Tramo 2 — Recorrido A |
 | D16 | Los aliases deprecated no se anuncian: aclaración de D14 | Tramo 2 — Recorrido A |
+| D17 | Seis operaciones se adelantan al Hito 1 | Tramo 2 — Recorrido E |
+| D18 | **El estado de un aprendizaje revertido y quién re-materializa el registro** | Tramo 4 — §4.7 |
 
 ---
 
@@ -1707,3 +1709,169 @@ obligatorios, es decir, el soft-pass que este recorrido existe para erradicar.
 ### Fecha
 
 2026-07-14
+
+---
+
+## D18 — El estado de un aprendizaje revertido y quién re-materializa el registro
+
+### Contexto
+
+El Tramo 4 · Parte 3 cerró con un FAIL: `TestRunE2ETempCompletesAllSteps` deja
+36/37 pasos en verde y `cli-sensitive/final-doctor` en rojo con
+`[doctor] exited 1`. La detección de coherencia SQLite–Markdown que introdujo
+§4.7 (`internal/coherence`, `doctor`, check `record-integrity`) destapó un
+defecto real del producto. El `doctor` hace exactamente su trabajo.
+
+**Evidencia medida en esta sesión, no supuesta.** Se instrumentó el escenario
+`cli-sensitive` con dos sondas temporales (revertidas después de medir) para
+capturar la salida JSON completa del `doctor`, que el `error` del paso oculta:
+
+```text
+paso final-doctor (después del rollback):
+  "record-integrity": "fail" — "1 divergence(s) between SQLite and Markdown"
+                              detail: "missing=0 divergent=1 orphan=0"
+
+sonda doctor inmediatamente DESPUÉS de publish-apply, ANTES de cualquier rollback:
+  "record-integrity": "fail" — "1 divergence(s) between SQLite and Markdown"
+                              detail: "missing=0 divergent=1 orphan=0"
+```
+
+**El diagnóstico registrado en `docs/IMPLEMENTATION-LOG.md` es correcto pero
+incompleto.** No hay un defecto, hay dos, y son la misma enfermedad en dos
+puntos de la misma operación:
+
+1. **`internal/publish/rollback.go:54`** actualiza el estado de la
+   **publicación** (`pub.Status = domain.PubStatusRolledback`) pero nunca
+   revierte el estado del **aprendizaje**. Tras un rollback exitoso el
+   aprendizaje sigue en `published` aunque el archivo publicado ya no exista.
+2. **`internal/publish/publish_op.go:293`** asigna
+   `learning.Status = domain.StatusPublished` y lo persiste, pero **nadie
+   re-materializa el registro Markdown**. `internal/capture/record.go:119`
+   (`computeRecordHash`) incluye `l.Status` en el hash, de modo que el registro
+   escrito en la curación —con `status: approved`— diverge de SQLite desde el
+   instante mismo en que `publish` confirma la transacción. La divergencia
+   **precede al rollback**.
+
+El E2E no lo había visto antes porque `cli-sensitive` solo corre `doctor` al
+final del escenario, y `cli-lowimpact` —que publica y no revierte— no corre
+`doctor` en absoluto.
+
+**El contrato ya condena el estado actual.** `docs/03-DOMAIN-MODEL.md:307`
+declara la invariante: «Un `published` siempre tiene al menos una publicación
+verificada». Tras un rollback la publicación queda en `rolled_back`, no
+verificada. Un aprendizaje que permanece en `published` **viola una invariante
+escrita del dominio**. No es una preferencia estética: es la misma enfermedad
+que el Recorrido D vino a curar («estados verdaderos»). D probó que un **fallo**
+no deja un `published` falso; nadie probó el inverso — que un **rollback
+exitoso** revoque el `published`.
+
+### Opciones consideradas
+
+**(a) Sobre a qué estado vuelve un aprendizaje revertido:**
+
+1. **Volver a `approved`.** El aprendizaje conserva su curación y su aprobación;
+   lo único que se deshizo es la escritura en disco. Puede volver a publicarse
+   sin re-curar.
+2. **Volver a `captured`.** Descarta la curación de hecho, obliga a re-curar y
+   re-aprobar. Castiga al usuario por usar `rollback`.
+3. **Un estado nuevo `rolled_back` para el aprendizaje.** Añade un estado al
+   dominio (`docs/03`), a la máquina de transiciones, a las migraciones y a
+   todas las superficies públicas, para expresar algo que `approved` ya expresa:
+   «curado y aprobado, no publicado».
+4. **Dejarlo en `published` y debilitar la detección**, excluyendo `Status` de
+   `computeRecordHash`. Convierte el `doctor` en cómplice: apaga la alarma en
+   lugar de arreglar la fuga.
+
+**(b) Sobre quién re-materializa el registro:**
+
+1. **`internal/publish` importa `internal/capture`** para llamar a
+   `capture.WriteRecord`. **Descartada de antemano**: una sesión anterior empezó
+   por ahí y viola las capas — `capture` y `publish` son servicios de aplicación
+   hermanos, ninguno depende del otro.
+2. **Extraer la materialización a un paquete propio de nivel inferior**
+   (`internal/record`), que solo dependa de `internal/domain`, y que importen
+   `capture`, `curate`, `coherence`, `portability` y `publish`.
+3. **Inyectar un seam materializador en `publish.Service`**, cableado desde
+   `cmd/` y `internal/mcpserver`. Evita el movimiento, pero un cableado olvidado
+   reintroduce el defecto en silencio.
+4. **Que lo haga el llamador** (`cmd/`, `mcpserver`) después de publicar. Cada
+   superficie nueva puede olvidarlo; es un soft-pass por construcción.
+
+### Decisión
+
+**(a) Un rollback exitoso devuelve el aprendizaje a `approved`** (opción a.1).
+
+Vinculante:
+
+1. La reversión de estado ocurre **solo cuando el rollback es exitoso**
+   (`allSuccess`). Un rollback fallido deja la publicación en `failed` y **no**
+   toca el estado del aprendizaje: no se puede afirmar que el contenido dejó de
+   estar publicado si no se pudo restaurar.
+2. La reversión de estado y la actualización de la publicación se confirman en
+   **una sola transacción**, igual que `publish_op.go:317-328` confirma la
+   publicación y el `published` juntos. Ni un fallo de commit ni un rollback a
+   medias pueden dejar el par incoherente.
+3. **La arista `published → approved` NO se añade a
+   `domain.ValidTransitions`.** Esa tabla gobierna las **acciones de curación**
+   (`internal/curate/curate.go:112,142` son sus dos únicos usuarios de
+   producción). Añadirla abriría un agujero nuevo: un curador podría «aprobar»
+   un aprendizaje publicado y dejarlo en `approved` **con el archivo todavía
+   escrito en disco** — exactamente el estado falso que esta decisión elimina.
+   La arista pertenece al ciclo de vida de la publicación, que es la única ruta
+   que restaura los archivos y revierte el estado a la vez, y se ejecuta con
+   actor `system`, igual que `publish_op.go:293` asigna `published` sin pasar
+   por la tabla.
+
+**(b) La materialización del registro se extrae a `internal/record`**
+(opción b.2).
+
+Vinculante:
+
+4. `internal/record` depende **solo** de `internal/domain`. Expone
+   `WriteRecord`, `RecordHash` y `ReadRecordHash`. `capture`, `curate`,
+   `coherence`, `portability` y `publish` lo importan. `internal/publish` **no**
+   importa `internal/capture` en ningún caso.
+5. **Toda operación que muta la verdad de un aprendizaje re-materializa su
+   registro.** `capture` y `curate` ya lo hacen; `publish` y `rollback` pasan a
+   hacerlo. Es la regla que faltaba, no una regla nueva: D6 fija SQLite como
+   fuente de verdad y el registro Markdown como derivado, y un derivado que no
+   se regenera cuando la verdad cambia es un derivado obsoleto.
+6. `publish.Service` recibe el directorio de registros como **parámetro
+   obligatorio** de `NewService`, no como opción. Un parámetro opcional
+   permitiría un `Service` que publica sin materializar — un soft-pass en la
+   construcción.
+
+### Justificación
+
+`approved` es el único estado que ya significa lo que el aprendizaje es después
+de un rollback: curado, aprobado, no publicado. Es reversible sin castigo, no
+inventa dominio y satisface la invariante de `docs/03:307` sin tocarla. La
+opción 3 añadiría un estado a la máquina, a `docs/03`, a `docs/14`, a las
+migraciones y a todas las superficies para expresar exactamente lo mismo, contra
+la regla §1.2 del plan (no rediseñar antes de demostrar necesidad). La opción 4
+—excluir `Status` del hash— desactivaría la detección que §4.7 acaba de
+construir para que el síntoma desaparezca: es la definición de soft-pass, y está
+prohibida por §1.4.
+
+La extracción a `internal/record` es un **movimiento, no una reimplementación**
+(regla §1.3): `record.go` ya depende únicamente de `internal/domain`; vivía en
+`capture` por origen histórico, no por pertenencia conceptual. Cinco paquetes ya
+lo consumen desde fuera. Moverlo hace explícita la capa que el código ya
+respetaba de hecho y elimina la tentación de la dependencia prohibida
+`publish → capture`.
+
+### Impacto documental
+
+Esta decisión toca el contrato y **contrato y código avanzan juntos** (§1.1):
+
+- `docs/03-DOMAIN-MODEL.md`: se documenta que un rollback exitoso devuelve el
+  aprendizaje a `approved`, y que esa arista pertenece al ciclo de vida de la
+  publicación y no a la máquina de transiciones de curación.
+- `docs/14-ACCEPTANCE-CRITERIA.md`: el criterio `rollback` (línea 59) se
+  desdobla para exigir lo que hasta ahora nadie exigía — que tras un rollback
+  exitoso el aprendizaje no siga en `published` y que el `doctor` quede limpio —
+  y se añade el criterio de coherencia tras `publish`.
+
+### Fecha
+
+2026-07-16

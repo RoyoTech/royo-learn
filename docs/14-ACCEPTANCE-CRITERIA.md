@@ -57,6 +57,12 @@
 - [ ] publish.
 - [ ] verify.
 - [ ] rollback.
+- [ ] **tras un `publish` exitoso, el registro Markdown refleja el estado
+      `published` de SQLite: el `doctor` queda limpio sin ejecutar
+      `rebuild-index`** (D18).
+- [ ] **tras un `rollback` exitoso, el aprendizaje NO sigue en `published`:
+      vuelve a `approved` y el `doctor` queda limpio** (D18).
+- [ ] **un `rollback` fallido no toca el estado del aprendizaje** (D18).
 - [ ] occurrence.
 - [ ] métricas.
 
