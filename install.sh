@@ -7,7 +7,7 @@ set -euo pipefail
 
 REPO="RoyoTech/royo-learn"
 DEFAULT_VERSION="latest"
-INSTALL_DIR="${HOME}/.local/bin"
+INSTALL_DIR="${ROYO_LEARN_INSTALL_DIR:-${HOME}/.local/bin}"
 BINARY_NAME="royo-learn"
 
 # ---------- helpers ----------
@@ -58,7 +58,7 @@ do_install() {
     # GoReleaser naming: royo-learn-linux-amd64.tar.gz
     local archive_name="${BINARY_NAME}-${platform}.tar.gz"
 
-    local base_url="https://github.com/${REPO}/releases"
+    local base_url="${ROYO_LEARN_RELEASES_URL:-https://github.com/${REPO}/releases}"
     local download_url checksum_url
     if [ "$version" = "latest" ]; then
         download_url="${base_url}/latest/download/${archive_name}"
@@ -72,33 +72,53 @@ do_install() {
 
     local tmpdir
     tmpdir=$(mktemp -d)
-    trap 'rm -rf "$tmpdir"' EXIT
+    local target="${INSTALL_DIR}/${BINARY_NAME}"
+    local staged="${target}.new.$$"
+    local backup="${target}.rollback.$$"
+    local replacement_started=false
+    local install_succeeded=false
+    local had_existing=false
+    rollback() {
+        if [ "$replacement_started" = true ] && [ "$install_succeeded" != true ]; then
+            if [ "$had_existing" = true ] && [ -f "$backup" ]; then
+                mv -f "$backup" "$target"
+                info "rollback restored the previous binary"
+            else
+                rm -f "$target"
+            fi
+        fi
+        rm -f "$staged" "$backup"
+        rm -rf "$tmpdir"
+    }
+    trap rollback EXIT
 
     # Download archive.
     info "downloading ${download_url}..."
     local archive_path="${tmpdir}/${archive_name}"
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL -o "$archive_path" "$download_url" || error "download failed"
-        curl -fsSL -o "${tmpdir}/checksums.txt" "$checksum_url" 2>/dev/null || true
+        curl -fsSL -o "${tmpdir}/checksums.txt" "$checksum_url" || error "checksum download failed"
     elif command -v wget >/dev/null 2>&1; then
         wget -q -O "$archive_path" "$download_url" || error "download failed"
-        wget -q -O "${tmpdir}/checksums.txt" "$checksum_url" 2>/dev/null || true
+        wget -q -O "${tmpdir}/checksums.txt" "$checksum_url" || error "checksum download failed"
     else
         error "curl or wget required"
     fi
 
-    # Verify checksum if available.
+    # Verification is mandatory: missing tools, files, entries, or mismatches fail closed.
     local expected
-    expected=$(grep "$archive_name" "${tmpdir}/checksums.txt" 2>/dev/null | awk '{print $1}')
-    if [ -n "$expected" ] && command -v sha256sum >/dev/null 2>&1; then
-        local actual
+    expected=$(awk -v name="$archive_name" '$2 == name || $2 == "*" name { print $1; exit }' "${tmpdir}/checksums.txt")
+    [ -n "$expected" ] || error "checksum entry not found for ${archive_name}"
+    local actual
+    if command -v sha256sum >/dev/null 2>&1; then
         actual=$(sha256sum "$archive_path" | awk '{print $1}')
-        if [ "$expected" = "$actual" ]; then
-            info "checksum OK"
-        else
-            info "checksum mismatch (expected $expected, got $actual)"
-        fi
+    elif command -v shasum >/dev/null 2>&1; then
+        actual=$(shasum -a 256 "$archive_path" | awk '{print $1}')
+    else
+        error "sha256sum or shasum is required for checksum verification"
     fi
+    [ "$expected" = "$actual" ] || error "checksum mismatch (expected $expected, got $actual)"
+    info "checksum OK"
 
     # Extract.
     info "extracting..."
@@ -108,15 +128,36 @@ do_install() {
     fi
     chmod +x "${tmpdir}/${BINARY_NAME}"
 
-    # Install.
-    mkdir -p "$INSTALL_DIR"
-    mv "${tmpdir}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
-    info "installed to ${INSTALL_DIR}/${BINARY_NAME}"
-
-    # Verify.
-    if "${INSTALL_DIR}/${BINARY_NAME}" version --json >/dev/null 2>&1; then
-        info "verified: $("${INSTALL_DIR}/${BINARY_NAME}" version --json)"
+    local version_json actual_version expected_version
+    version_json=$("${tmpdir}/${BINARY_NAME}" version --json) || error "candidate version verification failed"
+    actual_version=$(printf '%s\n' "$version_json" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | sed -n '1p')
+    [ -n "$actual_version" ] || error "candidate version output is invalid"
+    if [ "$version" = "latest" ]; then
+        [ "$actual_version" != "dev" ] || error "version mismatch: latest release resolved to a development build"
+    else
+        expected_version=${version#v}
+        [ "$actual_version" = "$expected_version" ] || error "version mismatch (expected $expected_version, got $actual_version)"
     fi
+
+    # Stage on the destination filesystem, preserve the old binary, then replace atomically.
+    mkdir -p "$INSTALL_DIR"
+    cp "${tmpdir}/${BINARY_NAME}" "$staged"
+    chmod +x "$staged"
+    if [ -f "$target" ]; then
+        had_existing=true
+        cp -p "$target" "$backup"
+    fi
+    replacement_started=true
+    mv -f "$staged" "$target"
+
+    version_json=$("$target" version --json) || error "installed binary version verification failed"
+    if ! printf '%s\n' "$version_json" | grep -q "\"version\"[[:space:]]*:[[:space:]]*\"${actual_version}\""; then
+        error "installed binary version mismatch"
+    fi
+    install_succeeded=true
+    rm -f "$backup"
+    info "installed to ${target}"
+    info "verified: ${version_json}"
 
     # PATH note.
     if ! echo "$PATH" | tr ':' '\n' | grep -qxF "$INSTALL_DIR"; then
@@ -126,6 +167,8 @@ do_install() {
     fi
 
     info "install complete!"
+    rollback
+    trap - EXIT
 }
 
 # ---------- main ----------
