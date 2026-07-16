@@ -11,6 +11,8 @@ import (
 
 var errDirectorySyncUnsupported = errors.New("directory sync is unsupported on this platform")
 
+func directorySyncAvailable() bool { return runtime.GOOS != "windows" }
+
 func secureRelativePath(root, relative, label string, createParents bool) (string, error) {
 	if root == "" {
 		return "", fmt.Errorf("%s root is required", label)
@@ -123,7 +125,7 @@ func rejectSymlinkComponents(path string, allowMissing bool) error {
 }
 
 func syncParentDirectory(path string) (bool, error) {
-	if runtime.GOOS == "windows" {
+	if !directorySyncAvailable() {
 		return false, errDirectorySyncUnsupported
 	}
 	dir, err := os.Open(filepath.Dir(path))

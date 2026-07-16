@@ -10,6 +10,22 @@ import (
 	"agent-royo-learn/internal/domain"
 )
 
+// PublicationMetadataError reports persisted publication JSON that cannot be
+// decoded safely. Raw is retained so recovery callers can create an actionable
+// artifact without mutating or erasing the stored evidence.
+type PublicationMetadataError struct {
+	PublicationID domain.PublicationID
+	Field         string
+	Raw           string
+	Err           error
+}
+
+func (e *PublicationMetadataError) Error() string {
+	return fmt.Sprintf("publication %s has malformed %s: %v", e.PublicationID, e.Field, e.Err)
+}
+
+func (e *PublicationMetadataError) Unwrap() error { return e.Err }
+
 // SavePublication inserts a publication record.
 func SavePublication(ctx context.Context, tx *sql.Tx, p *domain.Publication) error {
 	targetsJSON := marshalAny(p.Targets)
@@ -151,7 +167,9 @@ func scanPublication(row interface{ Scan(...interface{}) error }) (*domain.Publi
 
 	p.Targets = unmarshalTargetEntries(targetsJSON)
 	p.Verification = unmarshalValidationResults(verificationJSON)
-	p.Rollback = unmarshalRollbackEntries(rollbackJSON)
+	if err := decodeRollbackEntries(p, rollbackJSON); err != nil {
+		return nil, err
+	}
 	p.StartedAt, _ = time.Parse(time.RFC3339, startedAt)
 	if completedAt != nil {
 		t, _ := time.Parse(time.RFC3339, *completedAt)
@@ -194,7 +212,9 @@ func scanPublicationFromRows(rows interface{ Scan(...interface{}) error }) (*dom
 
 	p.Targets = unmarshalTargetEntries(targetsJSON)
 	p.Verification = unmarshalValidationResults(verificationJSON)
-	p.Rollback = unmarshalRollbackEntries(rollbackJSON)
+	if err := decodeRollbackEntries(p, rollbackJSON); err != nil {
+		return nil, err
+	}
 	p.StartedAt, _ = time.Parse(time.RFC3339, startedAt)
 	if completedAt != nil {
 		t, _ := time.Parse(time.RFC3339, *completedAt)
@@ -206,6 +226,20 @@ func scanPublicationFromRows(rows interface{ Scan(...interface{}) error }) (*dom
 	}
 
 	return p, nil
+}
+
+func decodeRollbackEntries(p *domain.Publication, raw string) error {
+	var entries []domain.RollbackEntry
+	if err := json.Unmarshal([]byte(raw), &entries); err != nil {
+		return &PublicationMetadataError{
+			PublicationID: p.ID,
+			Field:         "rollback_json",
+			Raw:           raw,
+			Err:           err,
+		}
+	}
+	p.Rollback = entries
+	return nil
 }
 
 // jsonNullString returns the string representation of a nullable JSON value.

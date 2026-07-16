@@ -3,6 +3,7 @@ package publish
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -224,18 +225,37 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 		})
 		backupPaths = append(backupPaths, backupEntries[i].BackupPath)
 	}
+	startedAt := utcNowPublish()
+	var approvalID *domain.ApprovalID
+	if approval != nil {
+		approvalID = &approval.ID
+	}
+	pub := &domain.Publication{
+		ID:           pubID,
+		LearningID:   input.LearningID,
+		PreviewHash:  input.PreviewHash,
+		ApprovalID:   approvalID,
+		Targets:      targetEntries,
+		Rollback:     rollbackEntries,
+		Verification: []domain.ValidationResult{filesystemDurabilityVerification()},
+		Status:       domain.PubStatusInProgress,
+		StartedAt:    startedAt,
+	}
+	if err := storage.WithTx(ctx, s.db, func(tx *sql.Tx) error {
+		return storage.SavePublication(ctx, tx, pub)
+	}); err != nil {
+		return nil, fmt.Errorf("Publish: persist recoverable attempt: %w", err)
+	}
 
-	// 9. Record the attempt in the journal BEFORE writing. This is the durable
-	// recovery record: it names the publication, its targets and the backups, so
-	// a crash between here and completion is recoverable from the journal alone.
-	// If it fails, we abort before any write — nothing is left modified.
-	journal, jErr := NewJournal(s.journalDir)
+	// 9. Mirror the recoverable SQLite attempt in the append-only journal before
+	// writing. The public recovery ID is the publication ID in both stores.
+	journal, jErr := NewJournal(s.projectRoot, s.journalDir)
 	if jErr != nil {
-		return nil, fmt.Errorf("Publish: create journal: %w", jErr)
+		return nil, recoveryInterruptionError(pubID, "create attempting journal", jErr)
 	}
 	if s.faults != nil && s.faults.BeforeJournalAttempt != nil {
 		if fErr := s.faults.BeforeJournalAttempt(); fErr != nil {
-			return nil, fmt.Errorf("Publish: journal: %w", fErr)
+			return nil, recoveryInterruptionError(pubID, "write attempting journal", fErr)
 		}
 	}
 	if aErr := journal.Append(JournalEntry{
@@ -243,9 +263,16 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 		LearningID:     string(input.LearningID),
 		Targets:        targetEntries,
 		BackupPaths:    backupPaths,
+		Recovery:       rollbackEntries,
+		Verification:   pub.Verification,
 		RollbackStatus: "attempting",
 	}); aErr != nil {
-		return nil, fmt.Errorf("Publish: journal: %w", aErr)
+		return nil, recoveryInterruptionError(pubID, "write attempting journal", aErr)
+	}
+	if s.faults != nil && s.faults.AfterAttemptPersisted != nil {
+		if fErr := s.faults.AfterAttemptPersisted(pubID); fErr != nil {
+			return nil, recoveryInterruptionError(pubID, "interrupted before first target write", fErr)
+		}
 	}
 
 	// 10. Write files with compare-and-swap against the captured snapshots. Any
@@ -269,8 +296,20 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 			return nil, s.compensate(journal, backupMgr, backupEntries, pubID, input.LearningID, targetEntries, backupPaths,
 				fmt.Sprintf("write %s", target.Path), wErr)
 		}
+		if s.faults != nil && s.faults.AfterTargetWrite != nil {
+			if fErr := s.faults.AfterTargetWrite(i, relPath); fErr != nil {
+				return nil, recoveryInterruptionError(pubID, "interrupted after target write", fErr)
+			}
+		}
 
 		rollbackEntries[i].RecoveryState = domain.RecoveryPublished
+		pub.Rollback = rollbackEntries
+		if progressErr := storage.WithTx(ctx, s.db, func(tx *sql.Tx) error {
+			return storage.UpdatePublication(ctx, tx, pub)
+		}); progressErr != nil {
+			return nil, s.compensate(journal, backupMgr, backupEntries, pubID, input.LearningID, targetEntries, backupPaths,
+				fmt.Sprintf("persist recovery progress for %s", target.Path), progressErr)
+		}
 		writtenContents[relPath] = contentToWrite
 	}
 
@@ -290,22 +329,10 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 	// neither does, so a commit failure never leaves a false `published`.
 	now := utcNowPublish()
 	learning.Status = domain.StatusPublished
-	var approvalID *domain.ApprovalID
-	if approval != nil {
-		approvalID = &approval.ID
-	}
-	pub := &domain.Publication{
-		ID:           pubID,
-		LearningID:   input.LearningID,
-		PreviewHash:  input.PreviewHash,
-		ApprovalID:   approvalID,
-		Targets:      targetEntries,
-		Verification: verification,
-		Rollback:     rollbackEntries,
-		Status:       domain.PubStatusCompleted,
-		StartedAt:    now,
-		CompletedAt:  &now,
-	}
+	pub.Verification = append(pub.Verification, verification...)
+	pub.Rollback = rollbackEntries
+	pub.Status = domain.PubStatusCompleted
+	pub.CompletedAt = &now
 
 	if s.faults != nil && s.faults.BeforeDBCommit != nil {
 		if fErr := s.faults.BeforeDBCommit(); fErr != nil {
@@ -314,8 +341,8 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 		}
 	}
 	if pErr := storage.WithTx(ctx, s.db, func(tx *sql.Tx) error {
-		if saveErr := storage.SavePublication(ctx, tx, pub); saveErr != nil {
-			return fmt.Errorf("save publication: %w", saveErr)
+		if updateErr := storage.UpdatePublication(ctx, tx, pub); updateErr != nil {
+			return fmt.Errorf("update publication: %w", updateErr)
 		}
 		if updateErr := storage.UpdateLearning(ctx, tx, learning); updateErr != nil {
 			return fmt.Errorf("update learning: %w", updateErr)
@@ -327,19 +354,49 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 	}
 
 	// 13. Close the journal with the successful outcome.
-	_ = journal.Append(JournalEntry{
+	if err := journal.Append(JournalEntry{
 		PublicationID:  string(pubID),
 		LearningID:     string(input.LearningID),
 		Targets:        targetEntries,
-		Verification:   verification,
+		Recovery:       rollbackEntries,
+		Verification:   pub.Verification,
 		RollbackStatus: "completed",
-	})
+	}); err != nil {
+		return nil, committedJournalError(pubID, domain.PubStatusCompleted, err)
+	}
 
 	return &PublishResult{
 		Publication: pub,
 		JournalID:   string(pubID),
 		Targets:     targetEntries,
 	}, nil
+}
+
+func filesystemDurabilityVerification() domain.ValidationResult {
+	if directorySyncAvailable() {
+		return domain.ValidationResult{
+			Check: "filesystem-durability", Pass: true,
+			Note: "file sync, atomic placement, and parent-directory sync are enabled",
+		}
+	}
+	return domain.ValidationResult{
+		Check: "filesystem-durability", Pass: true,
+		Note: "parent-directory sync is unsupported on this platform; file sync and atomic placement remain enabled",
+	}
+}
+
+func recoveryInterruptionError(publicationID domain.PublicationID, stage string, cause error) error {
+	return &domain.DomainError{
+		Code:        domain.ErrPublicationFailed,
+		Message:     stage + "; a recoverable in-progress publication was persisted before the target mutation",
+		Recoverable: true,
+		Details: map[string]any{
+			"recovery_id":    string(publicationID),
+			"publication_id": string(publicationID),
+		},
+		NextAction: fmt.Sprintf("run 'royo-learn rollback --journal-id %s' before retrying publication", publicationID),
+		Cause:      cause,
+	}
 }
 
 // composeTargetContent produces the exact bytes to write for a target, applying
@@ -414,60 +471,99 @@ func (s *Service) validateCurrentHashes(preview *domain.PublicationPreview, targ
 func (s *Service) compensate(journal *Journal, backupMgr *BackupManager, backups []BackupEntry,
 	pubID domain.PublicationID, learningID domain.LearningID, targets []domain.TargetEntry, backupPaths []string,
 	stage string, cause error) error {
+	ctx := context.Background()
+	readTx, err := s.db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return rollbackDatabasePendingError(pubID, "", errors.Join(cause, err))
+	}
+	pub, err := storage.GetPublication(ctx, readTx, pubID)
+	readTx.Rollback()
+	if err != nil {
+		return rollbackDatabasePendingError(pubID, "", errors.Join(cause, err))
+	}
 
-	rbErr := s.rollbackBackups(backupMgr, backups)
+	results := make([]RestoreResult, len(backups))
+	if s.faults != nil && s.faults.FailRollback != nil {
+		forcedErr := s.faults.FailRollback()
+		for i, entry := range backups {
+			results[i] = RestoreResult{Path: entry.OriginalPath, Backup: entry.BackupPath, Error: forcedErr}
+		}
+	} else {
+		results = backupMgr.RestoreAll(backups)
+	}
+
+	failures := make([]recoveryFailure, 0)
+	restored := 0
+	for i, result := range results {
+		if result.Success {
+			pub.Rollback[i].Success = true
+			pub.Rollback[i].RecoveryState = domain.RecoveryRestored
+			pub.Rollback[i].FailureReason = ""
+			restored++
+			continue
+		}
+		pub.Rollback[i].Success = false
+		pub.Rollback[i].RecoveryState = domain.RecoveryConflict
+		pub.Rollback[i].FailureReason = result.Error.Error()
+		artifact, artifactErr := s.writeConflictArtifact(pubID, i, pub.Rollback[i], result.Error)
+		if artifactErr == nil {
+			pub.Rollback[i].RecoveryArtifact = artifact
+		}
+		failures = append(failures, recoveryFailure{Path: result.Path, Reason: result.Error.Error(), Artifact: pub.Rollback[i].RecoveryArtifact})
+	}
+	code := string(domain.ErrPublicationFailed)
+	if len(failures) > 0 {
+		code = string(domain.ErrRollbackFailed)
+	}
+	message := fmt.Sprintf("%s; compensating rollback restored %d of %d targets", stage, restored, len(results))
+	pub.Status = domain.PubStatusFailed
+	pub.ErrorCode = &code
+	pub.ErrorMessage = &message
+	pub.Verification = append(pub.Verification, domain.ValidationResult{
+		Check: "compensating-rollback", Pass: len(failures) == 0,
+		Note: fmt.Sprintf("restored %d of %d files", restored, len(results)),
+	})
+	if err := storage.WithTx(ctx, s.db, func(tx *sql.Tx) error {
+		return storage.UpdatePublication(ctx, tx, pub)
+	}); err != nil {
+		return rollbackDatabasePendingError(pubID, "", errors.Join(cause, err))
+	}
+
 	status := "rolled_back"
-	if rbErr != nil {
+	if len(failures) > 0 {
 		status = "rollback_failed"
 	}
+	var journalErr error
 	if journal != nil {
-		_ = journal.Append(JournalEntry{
-			PublicationID:  string(pubID),
-			LearningID:     string(learningID),
-			Targets:        targets,
-			BackupPaths:    backupPaths,
+		journalErr = journal.Append(JournalEntry{
+			PublicationID: string(pubID), LearningID: string(learningID), Targets: targets,
+			BackupPaths: backupPaths, Recovery: pub.Rollback, Verification: pub.Verification,
 			RollbackStatus: status,
 		})
 	}
-
-	if rbErr != nil {
-		var restorable []string
-		for _, p := range backupPaths {
-			if p != "" {
-				restorable = append(restorable, p)
-			}
-		}
+	if len(failures) > 0 {
+		first := failures[0]
 		return &domain.DomainError{
-			Code: domain.ErrRollbackFailed,
-			Message: fmt.Sprintf("%s failed and the compensating rollback also failed — the tree may be partially modified",
-				stage),
-			Recoverable: false,
+			Code:        domain.ErrRollbackFailed,
+			Message:     fmt.Sprintf("%s failed and compensating rollback preserved %d conflicting target(s)", stage, len(failures)),
+			Recoverable: true,
 			Details: map[string]any{
-				"journal_id": string(pubID),
-				"backups":    restorable,
+				"publication_id": string(pubID), "recovery_id": string(pubID), "journal_id": string(pubID),
+				"path": first.Path, "reason": first.Reason, "recovery_artifact": first.Artifact,
+				"conflicts": failures,
 			},
-			NextAction: fmt.Sprintf("restore the listed backup files manually or run 'royo-learn rollback --journal-id %s', then verify with 'royo-learn doctor'",
-				pubID),
-			Cause: cause,
+			NextAction: "review the reversal artifact to restore each target manually, resolve every conflict, then retry rollback",
+			Cause:      errors.Join(cause, journalErr),
 		}
 	}
-
 	return &domain.DomainError{
 		Code:        domain.ErrPublicationFailed,
-		Message:     fmt.Sprintf("%s — all files were rolled back to their prior state; nothing was published", stage),
+		Message:     fmt.Sprintf("%s; all target mutations were restored and the failed attempt was recorded", stage),
 		Recoverable: true,
-		NextAction:  "inspect the cause, fix it, then retry the publication",
-		Cause:       cause,
+		Details:     map[string]any{"publication_id": string(pubID), "recovery_id": string(pubID)},
+		NextAction:  "inspect the original cause, then create a fresh preview before retrying publication",
+		Cause:       errors.Join(cause, journalErr),
 	}
-}
-
-// rollbackBackups performs the actual restore, honoring the FailRollback fault
-// hook so a test can prove the recovery instruction path.
-func (s *Service) rollbackBackups(backupMgr *BackupManager, entries []BackupEntry) error {
-	if s.faults != nil && s.faults.FailRollback != nil {
-		return s.faults.FailRollback()
-	}
-	return rollbackAll(backupMgr, entries)
 }
 
 // buildPublishContents builds the content for each target during publish.
@@ -601,22 +697,25 @@ func (s *Service) Rollback(ctx context.Context, projectID domain.ProjectID, inpu
 	pub, err := storage.GetPublication(ctx, readTx, input.PublicationID)
 	readTx.Rollback()
 	if err != nil {
+		var metadataErr *storage.PublicationMetadataError
+		if errors.As(err, &metadataErr) {
+			return s.legacyRecoveryError(input.PublicationID, metadataErr.Raw, metadataErr.Error())
+		}
 		return fmt.Errorf("Rollback: get publication: %w", err)
 	}
 
 	if pub.Status == domain.PubStatusRolledback {
-		return domain.NewConflictError(domain.ErrRollbackConflict,
-			"publication already rolled back")
+		return nil
 	}
 
 	// Create backup manager and perform rollback.
 	backupMgr := NewBackupManager(s.projectRoot, s.backupDir)
-	journal, err := NewJournal(s.journalDir)
+	journal, err := NewJournal(s.projectRoot, s.journalDir)
 	if err != nil {
 		return fmt.Errorf("Rollback: create journal: %w", err)
 	}
 
-	return RollbackPublication(s.db, backupMgr, journal, pub)
+	return s.rollbackPublication(ctx, backupMgr, journal, pub)
 }
 
 // rollbackAll attempts to restore all files from backups. It aggregates ALL

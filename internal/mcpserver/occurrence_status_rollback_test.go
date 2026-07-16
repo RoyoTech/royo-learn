@@ -180,7 +180,7 @@ func TestMCP_Rollback_RestoresAndBlocksDoubleRollback(t *testing.T) {
 		}
 	}
 
-	// Rolling back an already-rolled-back publication must fail.
+	// A retry after the target is already restored is an idempotent success.
 	again, err := ts.callTool(ctx, "learning_rollback", map[string]any{
 		"publication_id": pubID,
 		"actor":          map[string]any{"kind": "human", "name": "publisher"},
@@ -188,8 +188,8 @@ func TestMCP_Rollback_RestoresAndBlocksDoubleRollback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second rollback: transport error: %v", err)
 	}
-	if !again.IsError {
-		t.Fatal("rolling back an already-rolled-back publication must fail")
+	if again.IsError {
+		t.Fatal("rolling back an already-restored publication must converge successfully")
 	}
 }
 

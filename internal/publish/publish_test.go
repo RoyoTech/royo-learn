@@ -787,7 +787,7 @@ func TestJournalAppend(t *testing.T) {
 	tmpDir := t.TempDir()
 	journalDir := filepath.Join(tmpDir, "journal")
 
-	j, err := NewJournal(journalDir)
+	j, err := NewJournal(tmpDir, journalDir)
 	if err != nil {
 		t.Fatalf("NewJournal: %v", err)
 	}
@@ -826,7 +826,7 @@ func TestJournalEntryFields(t *testing.T) {
 	tmpDir := t.TempDir()
 	journalDir := filepath.Join(tmpDir, "journal")
 
-	j, _ := NewJournal(journalDir)
+	j, _ := NewJournal(tmpDir, journalDir)
 
 	entry := JournalEntry{
 		PublicationID:  "pub-123",

@@ -28,6 +28,18 @@ type FaultHooks struct {
 	// BeforeDBCommit fires just before the final SQLite update that marks the
 	// learning published, after files were written and verified.
 	BeforeDBCommit func() error
+	// AfterAttemptPersisted simulates an interruption after both SQLite and the
+	// journal contain complete recovery metadata but before the first target write.
+	AfterAttemptPersisted func(domain.PublicationID) error
+	// AfterTargetWrite simulates abrupt process loss after a target mutation. The
+	// service deliberately does not compensate this test-only crash seam.
+	AfterTargetWrite func(index int, path string) error
+	// BeforeRollbackProgress fails after a target has been restored but before
+	// that per-target progress is persisted.
+	BeforeRollbackProgress func(index int) error
+	// BeforeRollbackCommit fails the final publication-state transaction after
+	// all target restoration progress has been persisted.
+	BeforeRollbackCommit func() error
 	// FailRollback, when set, forces the compensating rollback to fail so a test
 	// can prove a recovery instruction is emitted.
 	FailRollback func() error
@@ -128,7 +140,7 @@ type PublishResult struct {
 
 // PolicyEvaluation records the result of a policy check.
 type PolicyEvaluation struct {
-	PolicyName string
-	Passed     bool
-	Reason     string
+	PolicyName string `json:"PolicyName"`
+	Passed     bool   `json:"Passed"`
+	Reason     string `json:"Reason"`
 }
