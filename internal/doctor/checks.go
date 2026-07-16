@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"agent-royo-learn/internal/coherence"
 	"agent-royo-learn/internal/config"
 	"agent-royo-learn/internal/project"
 )
@@ -30,7 +31,51 @@ func (r *Runner) registerBuiltinChecks() {
 	r.Register("migrations", stubCheck("migrations", "not implemented yet"))
 	r.Register("engram", stubCheck("engram", "not implemented yet"))
 	r.Register("shared-library", stubCheck("shared-library", "not implemented yet"))
-	r.Register("record-integrity", stubCheck("record-integrity", "not implemented yet"))
+	r.Register("record-integrity", recordIntegrityCheck)
+}
+
+// recordIntegrityCheck detects divergences between SQLite (the operational
+// source of truth) and the derived Markdown records (D6). It stays degraded when
+// no store is bound (WithStore), so it never blocks an environment-only doctor
+// run; when a store is bound it passes on full coherence and fails on any
+// divergence, pointing at `rebuild-index` to repair.
+func recordIntegrityCheck(ctx context.Context, r *Runner) *Check {
+	if r.store == nil {
+		return &Check{
+			Name:    "record-integrity",
+			Status:  StatusDegraded,
+			Message: "no database bound; run via `royo-learn doctor` to check SQLite<->Markdown coherence",
+			Detail:  "this check reports pass/fail only when doctor binds the project store",
+		}
+	}
+
+	divergences, err := coherence.Audit(ctx, r.store, r.projectID, r.recordsDir)
+	if err != nil {
+		return &Check{
+			Name:    "record-integrity",
+			Status:  StatusFail,
+			Message: fmt.Sprintf("coherence audit failed: %v", err),
+		}
+	}
+	if len(divergences) == 0 {
+		return &Check{
+			Name:    "record-integrity",
+			Status:  StatusPass,
+			Message: "SQLite and Markdown records are coherent",
+		}
+	}
+
+	counts := map[coherence.DivergenceKind]int{}
+	for _, d := range divergences {
+		counts[d.Kind]++
+	}
+	return &Check{
+		Name:    "record-integrity",
+		Status:  StatusFail,
+		Message: fmt.Sprintf("%d divergence(s) between SQLite and Markdown; run `royo-learn rebuild-index` to repair", len(divergences)),
+		Detail: fmt.Sprintf("missing=%d divergent=%d orphan=%d",
+			counts[coherence.MissingRecord], counts[coherence.DivergentRecord], counts[coherence.OrphanRecord]),
+	}
 }
 
 // stubCheck returns a CheckFn that reports degraded with a reason.

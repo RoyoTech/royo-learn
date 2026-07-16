@@ -8,6 +8,9 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+
+	"agent-royo-learn/internal/domain"
+	"agent-royo-learn/internal/storage"
 )
 
 // ---------------------------------------------------------------------------
@@ -53,6 +56,12 @@ type Runner struct {
 	fixSafe      bool
 	logger       *slog.Logger
 
+	// Optional store binding. When set, the record-integrity check compares
+	// SQLite against the Markdown records (D6); when nil it stays degraded.
+	store      *storage.DB
+	recordsDir string
+	projectID  domain.ProjectID
+
 	mu         sync.RWMutex
 	registry   map[string]CheckFn
 	checkOrder []string // deterministic ordering
@@ -89,6 +98,17 @@ func WithFixSafe(enabled bool) RunnerOption {
 func WithLogger(logger *slog.Logger) RunnerOption {
 	return func(r *Runner) {
 		r.logger = logger
+	}
+}
+
+// WithStore binds an open database, its project, and its records directory so
+// the record-integrity check can detect SQLite<->Markdown divergences (D6).
+// Without it that check reports degraded rather than pass/fail.
+func WithStore(db *storage.DB, projectID domain.ProjectID, recordsDir string) RunnerOption {
+	return func(r *Runner) {
+		r.store = db
+		r.projectID = projectID
+		r.recordsDir = recordsDir
 	}
 }
 

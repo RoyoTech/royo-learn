@@ -349,11 +349,26 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 		return exitProjectNotFound
 	}
 
-	runner := doctor.NewRunner(
+	opts := []doctor.RunnerOption{
 		doctor.WithProjectRoot(root),
 		doctor.WithTrustedRoots([]string{root}),
 		doctor.WithFixSafe(*fixSafe),
-	)
+	}
+
+	// Bind the store so the record-integrity check can detect SQLite<->Markdown
+	// divergences (D6). Best-effort: a store that will not open leaves that check
+	// degraded rather than failing the whole doctor run.
+	dbPath := filepath.Join(root, ".royo-learn", "royo-learn.db")
+	if db, dbErr := storage.Open(dbPath); dbErr == nil {
+		defer db.Close()
+		if migErr := storage.Migrate(db); migErr == nil {
+			projectID, _ := resolveProjectID(context.Background(), db, proj)
+			recordsDir := filepath.Join(root, ".royo-learn", "records")
+			opts = append(opts, doctor.WithStore(db, projectID, recordsDir))
+		}
+	}
+
+	runner := doctor.NewRunner(opts...)
 	defer runner.Close()
 
 	var report *doctor.Report

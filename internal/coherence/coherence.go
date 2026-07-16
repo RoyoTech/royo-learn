@@ -18,6 +18,78 @@ import (
 	"agent-royo-learn/internal/storage"
 )
 
+// DivergenceKind classifies a SQLite<->Markdown mismatch.
+type DivergenceKind string
+
+const (
+	// MissingRecord: SQLite has the learning but no Markdown record exists.
+	MissingRecord DivergenceKind = "missing_record"
+	// DivergentRecord: the record exists but its content hash disagrees with SQLite.
+	DivergentRecord DivergenceKind = "divergent_record"
+	// OrphanRecord: a record file exists with no learning behind it in SQLite.
+	OrphanRecord DivergenceKind = "orphan_record"
+)
+
+// Divergence is one detected mismatch between the source of truth and its
+// derived representation.
+type Divergence struct {
+	Kind       DivergenceKind `json:"kind"`
+	LearningID string         `json:"learning_id"`
+	Detail     string         `json:"detail"`
+}
+
+// Audit detects divergences between SQLite (truth) and the Markdown records
+// (derived). It is read-only: it reports, it never repairs. `doctor` runs this;
+// `rebuild-index` runs Repair. It compares the content hash SQLite would produce
+// for each learning against the hash embedded in the on-disk record.
+func Audit(ctx context.Context, db *storage.DB, projectID domain.ProjectID, recordsDir string) ([]Divergence, error) {
+	if db == nil || db.DB == nil {
+		return nil, fmt.Errorf("coherence: audit: nil database")
+	}
+	learnings, err := loadLearnings(ctx, db, projectID)
+	if err != nil {
+		return nil, err
+	}
+
+	var divergences []Divergence
+	live := make(map[string]bool, len(learnings))
+	for _, l := range learnings {
+		live[string(l.ID)] = true
+		path := filepath.Join(recordsDir, string(l.ID)+".md")
+		stored, found, rerr := capture.ReadRecordHash(path)
+		if rerr != nil {
+			return nil, fmt.Errorf("coherence: audit: read record %s: %w", l.ID, rerr)
+		}
+		if !found {
+			divergences = append(divergences, Divergence{
+				Kind: MissingRecord, LearningID: string(l.ID),
+				Detail: "SQLite has this learning but no Markdown record exists",
+			})
+			continue
+		}
+		if stored != capture.RecordHash(l) {
+			divergences = append(divergences, Divergence{
+				Kind: DivergentRecord, LearningID: string(l.ID),
+				Detail: "the Markdown record hash disagrees with SQLite",
+			})
+		}
+	}
+
+	orphans, err := orphanRecords(recordsDir, live)
+	if err != nil {
+		return nil, err
+	}
+	for _, path := range orphans {
+		id := strings.TrimSuffix(filepath.Base(path), ".md")
+		divergences = append(divergences, Divergence{
+			Kind: OrphanRecord, LearningID: id,
+			Detail: "a Markdown record exists with no learning behind it in SQLite",
+		})
+	}
+
+	return divergences, nil
+}
+
 // RepairResult reports what a repair did.
 type RepairResult struct {
 	FTSRows        int64 `json:"fts_rows"`

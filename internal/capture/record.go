@@ -90,6 +90,32 @@ func buildRecordContent(l *domain.Learning) string {
 	return sb.String()
 }
 
+// RecordHash returns the content hash a materialized Markdown record embeds for
+// the given learning. Coherence checks compare this against the hash stored in
+// the on-disk record to detect SQLite<->Markdown divergence (D6).
+func RecordHash(l *domain.Learning) string {
+	return computeRecordHash(l)
+}
+
+// ReadRecordHash reads the record_hash field from a materialized record file.
+// found is false when the file does not exist, so a missing record is
+// distinguishable from a divergent one.
+func ReadRecordHash(path string) (hash string, found bool, err error) {
+	data, readErr := os.ReadFile(path)
+	if readErr != nil {
+		if os.IsNotExist(readErr) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("record: read %s: %w", path, readErr)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "record_hash:") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "record_hash:")), true, nil
+		}
+	}
+	return "", true, nil // file exists but has no record_hash line
+}
+
 func computeRecordHash(l *domain.Learning) string {
 	data := strings.Join([]string{
 		string(l.ID),
