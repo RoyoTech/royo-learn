@@ -118,16 +118,43 @@ func (s *Service) rollbackPublication(ctx context.Context, backupMgr *BackupMana
 	pub.Status = domain.PubStatusRolledback
 	pub.ErrorCode = nil
 	pub.ErrorMessage = nil
+	var learning *domain.Learning
 	if err := storage.WithTx(ctx, s.db, func(tx *sql.Tx) error {
+		var err error
+		learning, err = storage.GetLearning(ctx, tx, pub.LearningID)
+		if err != nil {
+			return err
+		}
+		if learning == nil {
+			return domain.NewNotFoundError(domain.ErrLearningNotFound, "learning: "+string(pub.LearningID))
+		}
+		if learning.Status == domain.StatusPublished {
+			learning.Status = domain.StatusApproved
+			learning.UpdatedAt = now
+			if err := storage.UpdateLearning(ctx, tx, learning); err != nil {
+				return err
+			}
+		}
 		return storage.UpdatePublication(ctx, tx, pub)
 	}); err != nil {
 		return rollbackDatabasePendingError(pub.ID, "", err)
 	}
-	if err := journal.Append(JournalEntry{
-		PublicationID: string(pub.ID), LearningID: string(pub.LearningID), Targets: pub.Targets,
-		Recovery: pub.Rollback, Verification: []domain.ValidationResult{verification}, RollbackStatus: "rolled_back",
-	}); err != nil {
-		return committedJournalError(pub.ID, domain.PubStatusRolledback, err)
+	materializeErr := s.materialize(learning)
+	terminalStatus := "rolled_back"
+	if materializeErr != nil {
+		terminalStatus = "rolled_back_record_failed"
+	}
+	var journalErr error
+	if s.faults != nil && s.faults.BeforeTerminalJournal != nil {
+		journalErr = s.faults.BeforeTerminalJournal()
+	} else {
+		journalErr = journal.Append(JournalEntry{
+			PublicationID: string(pub.ID), LearningID: string(pub.LearningID), Targets: pub.Targets,
+			Recovery: pub.Rollback, Verification: []domain.ValidationResult{verification}, RollbackStatus: terminalStatus,
+		})
+	}
+	if materializeErr != nil || journalErr != nil {
+		return committedStateError(pub.ID, domain.PubStatusRolledback, materializeErr, journalErr)
 	}
 	return nil
 }
@@ -141,9 +168,9 @@ func validatePersistedRecoveryEntry(entry domain.RollbackEntry) error {
 
 func rollbackFailureError(publicationID domain.PublicationID, failures []recoveryFailure, journalErr error) error {
 	first := failures[0]
-	cause := error(nil)
+	var auditErr error
 	if journalErr != nil {
-		cause = fmt.Errorf("append rollback failure journal: %w", journalErr)
+		auditErr = fmt.Errorf("append rollback failure journal: %w", journalErr)
 	}
 	return &domain.DomainError{
 		Code:        domain.ErrRollbackFailed,
@@ -158,7 +185,7 @@ func rollbackFailureError(publicationID domain.PublicationID, failures []recover
 			"conflicts":         failures,
 		},
 		NextAction: "review the reversal artifact, resolve the destination conflict, then retry rollback",
-		Cause:      cause,
+		Cause:      errors.Join(errors.New(first.Reason), auditErr),
 	}
 }
 
@@ -181,18 +208,27 @@ func rollbackDatabasePendingError(publicationID domain.PublicationID, path strin
 	}
 }
 
-func committedJournalError(publicationID domain.PublicationID, status domain.PublicationStatus, cause error) error {
+func committedStateError(publicationID domain.PublicationID, status domain.PublicationStatus, materializeErr, journalErr error) error {
+	message := "SQLite committed the terminal state"
+	if materializeErr != nil {
+		message += " but Markdown materialization failed"
+	}
+	if journalErr != nil {
+		message += " and the append-only journal could not record the terminal result"
+	}
 	return &domain.DomainError{
 		Code:        domain.ErrPublicationFailed,
-		Message:     "SQLite committed the terminal state but the append-only journal could not record it",
+		Message:     message,
 		Recoverable: false,
 		Details: map[string]any{
-			"committed":      true,
-			"publication_id": string(publicationID),
-			"status":         string(status),
+			"committed":              true,
+			"publication_id":         string(publicationID),
+			"status":                 string(status),
+			"materialization_failed": materializeErr != nil,
+			"audit_failed":           journalErr != nil,
 		},
-		NextAction: "do not retry blindly; inspect the publication by ID and repair the journal/audit path",
-		Cause:      cause,
+		NextAction: "do not retry blindly; inspect the publication by ID, repair record materialization or the journal path, and reconcile from SQLite truth",
+		Cause:      errors.Join(materializeErr, journalErr),
 	}
 }
 

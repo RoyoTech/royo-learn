@@ -2,6 +2,7 @@ package publish
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/record"
+	"agent-royo-learn/internal/storage"
 )
 
 func TestPublishAndRollbackMaterializeTruthAndReturnToApproved(t *testing.T) {
@@ -19,7 +21,7 @@ func TestPublishAndRollbackMaterializeTruthAndReturnToApproved(t *testing.T) {
 	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir, recordsDir)
 
 	publicationID := publishForRecovery(t, svc, env)
-	published := loadLearning(t, env)
+	published := loadMaterializedLearning(t, env)
 	if published.Status != domain.StatusPublished {
 		t.Fatalf("learning status after publish = %q, want published", published.Status)
 	}
@@ -28,12 +30,12 @@ func TestPublishAndRollbackMaterializeTruthAndReturnToApproved(t *testing.T) {
 	if err := svc.Rollback(context.Background(), env.projectID, &RollbackPublicationInput{PublicationID: publicationID, Actor: env.actor}); err != nil {
 		t.Fatalf("Rollback: %v", err)
 	}
-	approved := loadLearning(t, env)
+	approved := loadMaterializedLearning(t, env)
 	if approved.Status != domain.StatusApproved {
 		t.Fatalf("learning status after rollback = %q, want approved", approved.Status)
 	}
 	assertMaterializedHash(t, recordsDir, approved)
-	if _, ok := domain.ValidTransitions[domain.StatusPublished][domain.StatusApproved]; ok {
+	if domain.CanTransition(domain.StatusPublished, domain.StatusApproved) {
 		t.Fatal("published -> approved must not be exposed through curation ValidTransitions")
 	}
 }
@@ -52,7 +54,7 @@ func TestRollbackConflictLeavesLearningPublished(t *testing.T) {
 	if err := svc.Rollback(context.Background(), env.projectID, &RollbackPublicationInput{PublicationID: publicationID, Actor: env.actor}); err == nil {
 		t.Fatal("Rollback returned nil for a destination conflict")
 	}
-	if learning := loadLearning(t, env); learning.Status != domain.StatusPublished {
+	if learning := loadMaterializedLearning(t, env); learning.Status != domain.StatusPublished {
 		t.Fatalf("failed rollback changed learning status to %q, want published", learning.Status)
 	}
 }
@@ -73,7 +75,7 @@ func TestPublishMaterializationFailureReportsCommittedState(t *testing.T) {
 	if !errors.Is(err, materializeErr) {
 		t.Fatalf("committed error lost materialization cause: %v", err)
 	}
-	if learning := loadLearning(t, env); learning.Status != domain.StatusPublished {
+	if learning := loadMaterializedLearning(t, env); learning.Status != domain.StatusPublished {
 		t.Fatalf("committed publish reported learning status %q, want published", learning.Status)
 	}
 }
@@ -86,7 +88,7 @@ func TestPublishPreservesMaterializationAndTerminalAuditFailures(t *testing.T) {
 	materializeErr := errors.New("materialization failed")
 	auditErr := errors.New("terminal journal failed")
 	svc.faults = &FaultHooks{
-		BeforeMaterialize:    func() error { return materializeErr },
+		BeforeMaterialize:     func() error { return materializeErr },
 		BeforeTerminalJournal: func() error { return auditErr },
 	}
 
@@ -111,7 +113,7 @@ func TestRollbackMaterializationFailureReportsCommittedApprovedState(t *testing.
 
 	err := svc.Rollback(context.Background(), env.projectID, &RollbackPublicationInput{PublicationID: publicationID, Actor: env.actor})
 	assertCommittedError(t, err, domain.PubStatusRolledback)
-	if learning := loadLearning(t, env); learning.Status != domain.StatusApproved {
+	if learning := loadMaterializedLearning(t, env); learning.Status != domain.StatusApproved {
 		t.Fatalf("committed rollback learning status = %q, want approved", learning.Status)
 	}
 }
@@ -125,6 +127,20 @@ func assertMaterializedHash(t *testing.T, recordsDir string, learning *domain.Le
 	if !found || hash != record.RecordHash(learning) {
 		t.Fatalf("record hash = %q found=%v, want %q", hash, found, record.RecordHash(learning))
 	}
+}
+
+func loadMaterializedLearning(t *testing.T, env *publishTestEnv) *domain.Learning {
+	t.Helper()
+	tx, err := env.db.DB.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatalf("begin learning read transaction: %v", err)
+	}
+	defer tx.Rollback()
+	learning, err := storage.GetLearning(context.Background(), tx, env.learningID)
+	if err != nil {
+		t.Fatalf("GetLearning: %v", err)
+	}
+	return learning
 }
 
 func assertCommittedError(t *testing.T, err error, status domain.PublicationStatus) {

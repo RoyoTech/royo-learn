@@ -8,6 +8,7 @@ import (
 
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/evidence"
+	"agent-royo-learn/internal/record"
 	"agent-royo-learn/internal/storage"
 
 	"github.com/google/uuid"
@@ -242,7 +243,7 @@ func (s *Service) Capture(ctx context.Context, projectID domain.ProjectID, input
 	}
 
 	// Write Markdown record.
-	if err := WriteRecord(s.recordsDir, learning); err != nil {
+	if err := record.WriteRecord(s.recordsDir, learning); err != nil {
 		return nil, fmt.Errorf("capture: write record: %w", err)
 	}
 
@@ -374,7 +375,7 @@ func (s *Service) AddEvidence(ctx context.Context, projectID domain.ProjectID, i
 
 	// Keep the derived Markdown record in step with SQLite (D6).
 	if levelChanged {
-		if err := WriteRecord(s.recordsDir, learning); err != nil {
+		if err := record.WriteRecord(s.recordsDir, learning); err != nil {
 			return nil, fmt.Errorf("add evidence: write record: %w", err)
 		}
 	}

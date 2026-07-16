@@ -353,16 +353,28 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 			"persist publication", pErr)
 	}
 
-	// 13. Close the journal with the successful outcome.
-	if err := journal.Append(JournalEntry{
-		PublicationID:  string(pubID),
-		LearningID:     string(input.LearningID),
-		Targets:        targetEntries,
-		Recovery:       rollbackEntries,
-		Verification:   pub.Verification,
-		RollbackStatus: "completed",
-	}); err != nil {
-		return nil, committedJournalError(pubID, domain.PubStatusCompleted, err)
+	// 13. SQLite is committed. Materialize its truth, then close the journal. A
+	// failure here must report committed state and forbid blind publication retry.
+	materializeErr := s.materialize(learning)
+	terminalStatus := "completed"
+	if materializeErr != nil {
+		terminalStatus = "completed_record_failed"
+	}
+	var terminalJournalErr error
+	if s.faults != nil && s.faults.BeforeTerminalJournal != nil {
+		terminalJournalErr = s.faults.BeforeTerminalJournal()
+	} else {
+		terminalJournalErr = journal.Append(JournalEntry{
+			PublicationID:  string(pubID),
+			LearningID:     string(input.LearningID),
+			Targets:        targetEntries,
+			Recovery:       rollbackEntries,
+			Verification:   pub.Verification,
+			RollbackStatus: terminalStatus,
+		})
+	}
+	if materializeErr != nil || terminalJournalErr != nil {
+		return nil, committedStateError(pubID, domain.PubStatusCompleted, materializeErr, terminalJournalErr)
 	}
 
 	return &PublishResult{

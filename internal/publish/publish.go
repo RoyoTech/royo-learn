@@ -2,9 +2,11 @@ package publish
 
 import (
 	"os"
+	"path/filepath"
 	"time"
 
 	"agent-royo-learn/internal/domain"
+	"agent-royo-learn/internal/record"
 	"agent-royo-learn/internal/storage"
 )
 
@@ -40,6 +42,10 @@ type FaultHooks struct {
 	// BeforeRollbackCommit fails the final publication-state transaction after
 	// all target restoration progress has been persisted.
 	BeforeRollbackCommit func() error
+	// BeforeMaterialize injects a post-commit record materialization failure.
+	BeforeMaterialize func() error
+	// BeforeTerminalJournal injects a failure at the final audit boundary.
+	BeforeTerminalJournal func() error
 	// FailRollback, when set, forces the compensating rollback to fail so a test
 	// can prove a recovery instruction is emitted.
 	FailRollback func() error
@@ -51,6 +57,7 @@ type Service struct {
 	projectRoot string
 	backupDir   string
 	journalDir  string
+	recordsDir  string
 
 	// writer is the injectable file-write seam; nil means the real atomic writer.
 	writer FileWriter
@@ -59,13 +66,27 @@ type Service struct {
 }
 
 // NewService creates a new publish Service.
-func NewService(db *storage.DB, projectRoot, backupDir, journalDir string) *Service {
+func NewService(db *storage.DB, projectRoot, backupDir, journalDir string, recordsDir ...string) *Service {
+	records := filepath.Join(projectRoot, ".royo-learn", "records")
+	if len(recordsDir) > 0 && recordsDir[0] != "" {
+		records = recordsDir[0]
+	}
 	return &Service{
 		db:          db,
 		projectRoot: projectRoot,
 		backupDir:   backupDir,
 		journalDir:  journalDir,
+		recordsDir:  records,
 	}
+}
+
+func (s *Service) materialize(learning *domain.Learning) error {
+	if s.faults != nil && s.faults.BeforeMaterialize != nil {
+		if err := s.faults.BeforeMaterialize(); err != nil {
+			return err
+		}
+	}
+	return record.WriteRecord(s.recordsDir, learning)
 }
 
 // fileWriter returns the injected writer or the default atomic writer.

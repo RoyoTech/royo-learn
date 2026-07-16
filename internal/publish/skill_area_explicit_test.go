@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"agent-royo-learn/internal/capture"
 	"agent-royo-learn/internal/curate"
 	"agent-royo-learn/internal/domain"
+	"agent-royo-learn/internal/record"
 	"agent-royo-learn/internal/storage"
 	"agent-royo-learn/internal/storage/storagetest"
 
@@ -27,7 +27,7 @@ import (
 // area in curate_learning; if provided it wins; if omitted, the deterministic
 // derivation is the fallback.
 //
-// These tests use a real SQLite DB, real capture/curate/publish services, and
+// These tests use a real SQLite DB, real curate/publish services, and
 // real file I/O — no mocks. They mirror internal/integration/p1_procedure_e2e_test.go.
 
 // p2Harness holds the shared setup for P2 e2e tests.
@@ -36,7 +36,6 @@ type p2Harness struct {
 	project     *domain.Project
 	db          *storage.DB
 	projectRoot string
-	captureSvc  *capture.Service
 	curateSvc   *curate.Service
 	publishSvc  *Service
 	actor       domain.Actor
@@ -71,7 +70,6 @@ func newP2Harness(t *testing.T) *p2Harness {
 		project:     project,
 		db:          db,
 		projectRoot: projectRoot,
-		captureSvc:  capture.NewService(db, filepath.Join(projectRoot, ".royo-learn", "records")),
 		curateSvc:   curate.NewService(db, filepath.Join(projectRoot, ".royo-learn", "records")),
 		publishSvc: NewService(
 			db,
@@ -84,11 +82,25 @@ func newP2Harness(t *testing.T) *p2Harness {
 	}
 }
 
+type p2CaptureInput struct {
+	Title          string
+	Context        string
+	Observation    string
+	Lesson         string
+	Type           domain.LearningType
+	Destination    domain.DestinationType
+	Recommended    []string
+	Limits         string
+	RetrievalTerms []string
+	EvidenceLevel  domain.EvidenceLevel
+	Confidence     domain.Confidence
+	Scope          domain.Scope
+}
+
 // captureAndEvidence captures a learning and attaches one evidence record
 // (required for curation approval). Returns the captured learning ID.
-func (h *p2Harness) captureAndEvidence(t *testing.T, input capture.CaptureInput) domain.LearningID {
+func (h *p2Harness) captureAndEvidence(t *testing.T, input p2CaptureInput) domain.LearningID {
 	t.Helper()
-	input.Actor = h.actor
 	if input.EvidenceLevel == "" {
 		input.EvidenceLevel = domain.EvidenceModerate
 	}
@@ -101,25 +113,54 @@ func (h *p2Harness) captureAndEvidence(t *testing.T, input capture.CaptureInput)
 	if input.Destination == "" {
 		input.Destination = domain.DestSkill
 	}
-	res, err := h.captureSvc.Capture(h.ctx, h.project.ID, &input)
-	if err != nil {
-		t.Fatalf("capture %q: %v", input.Title, err)
+	learning := &domain.Learning{
+		ID:                   domain.LearningID(uuid.Must(uuid.NewV7()).String()),
+		ProjectID:            h.project.ID,
+		Status:               domain.StatusCaptured,
+		Type:                 input.Type,
+		Title:                input.Title,
+		Context:              input.Context,
+		Observation:          input.Observation,
+		ReusableLesson:       input.Lesson,
+		RecommendedProcedure: input.Recommended,
+		Limits:               input.Limits,
+		ScopeGuess:           input.Scope,
+		Confidence:           input.Confidence,
+		EvidenceLevel:        input.EvidenceLevel,
+		ProposedDestination:  input.Destination,
+		RetrievalTerms:       input.RetrievalTerms,
+		Actor:                h.actor,
+		Revision:             1,
+		CreatedAt:            h.now,
+		UpdatedAt:            h.now,
 	}
+	hash, err := domain.ComputeHash(learning)
+	if err != nil {
+		t.Fatalf("hash %q: %v", input.Title, err)
+	}
+	learning.NormalizedHash = hash
+	learning.Fingerprint = hash
 	ev := &domain.Evidence{
 		ID:          domain.EvidenceID(uuid.Must(uuid.NewV7()).String()),
-		LearningID:  res.LearningID,
+		LearningID:  learning.ID,
 		Kind:        domain.KindTest,
-		URI:         "test://" + string(res.LearningID),
+		URI:         "test://" + string(learning.ID),
 		Summary:     "evidence for " + input.Title,
-		SHA256:      "p2-ev-" + string(res.LearningID),
+		SHA256:      "p2-ev-" + string(learning.ID),
 		CollectedAt: h.now,
 	}
 	if err := storage.WithTx(h.ctx, h.db, func(tx *sql.Tx) error {
+		if err := storage.SaveLearning(h.ctx, tx, learning); err != nil {
+			return err
+		}
 		return storage.SaveEvidence(h.ctx, tx, ev)
 	}); err != nil {
-		t.Fatalf("save evidence for %s: %v", res.LearningID, err)
+		t.Fatalf("save learning and evidence for %s: %v", learning.ID, err)
 	}
-	return res.LearningID
+	if err := record.WriteRecord(filepath.Join(h.projectRoot, ".royo-learn", "records"), learning); err != nil {
+		t.Fatalf("materialize learning %s: %v", learning.ID, err)
+	}
+	return learning.ID
 }
 
 // curateWithArea curates a learning with an optional explicit area.
@@ -178,7 +219,7 @@ func TestP2_ExplicitAreaGroupsDifferentTerms(t *testing.T) {
 	const area = "dashboard-datos"
 
 	// Learning A: terms ["dashboard","datos"], 3-step procedure.
-	lidA := h.captureAndEvidence(t, capture.CaptureInput{
+	lidA := h.captureAndEvidence(t, p2CaptureInput{
 		Title:          "Dashboard de datos del profesor",
 		Context:        "Dashboard de profesor en padreseducadores.org",
 		Observation:    "El dashboard agrega datos de cursos y alumnos.",
@@ -191,7 +232,7 @@ func TestP2_ExplicitAreaGroupsDifferentTerms(t *testing.T) {
 	})
 
 	// Learning B: DIFFERENT terms ["graficos","reportes"], 2-step procedure.
-	lidB := h.captureAndEvidence(t, capture.CaptureInput{
+	lidB := h.captureAndEvidence(t, p2CaptureInput{
 		Title:          "Reportes gráficos del dashboard",
 		Context:        "Dashboard de profesor en padreseducadores.org",
 		Observation:    "Los reportes gráficos deben usar los mismos datos.",
@@ -275,7 +316,7 @@ func TestP2_ExplicitAreaOverridesDerivation(t *testing.T) {
 	}
 	t.Logf("derived area = %q (explicit will override to %q)", derived, area)
 
-	lidA := h.captureAndEvidence(t, capture.CaptureInput{
+	lidA := h.captureAndEvidence(t, p2CaptureInput{
 		Title:          "Evitar anti-patrón 3b",
 		Context:        "Refactor en padreseducadores.org",
 		Observation:    "El anti-patrón 3b aparece al acoplar lógica de presentación.",
@@ -313,7 +354,7 @@ func TestP2_NoAreaFallbackStillDerives(t *testing.T) {
 	derived := SkillArea(&domain.Learning{RetrievalTerms: terms})
 	wantName := SkillName(h.project.ProjectKey, derived)
 
-	lidA := h.captureAndEvidence(t, capture.CaptureInput{
+	lidA := h.captureAndEvidence(t, p2CaptureInput{
 		Title:          "Dashboard datos fallback",
 		Context:        "Dashboard de profesor en padreseducadores.org",
 		Observation:    "Sin área explícita, se deriva de los términos.",
@@ -363,7 +404,7 @@ func TestP2_PreviewMatchesPublishPath(t *testing.T) {
 	const area = "dashboard-datos"
 	wantPath := filepath.Join(SkillName(h.project.ProjectKey, area), "SKILL.md")
 
-	lidA := h.captureAndEvidence(t, capture.CaptureInput{
+	lidA := h.captureAndEvidence(t, p2CaptureInput{
 		Title:          "Preview==publish path check",
 		Context:        "Dashboard de profesor en padreseducadores.org",
 		Observation:    "Preview y publish deben coincidir en la ruta destino.",
