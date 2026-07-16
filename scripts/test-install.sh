@@ -31,6 +31,11 @@ bash "${repo_root}/install.sh" --version "$tag"
 "${install_dir}/royo-learn" version --json | grep -q "\"version\":\"${version}\""
 
 before=$(sha256sum "${install_dir}/royo-learn" | awk '{print $1}')
+ROYO_LEARN_INSTALL_DIR="$install_dir" \
+ROYO_LEARN_RELEASES_URL="file://${tmpdir}/releases" \
+bash "${repo_root}/install.sh" --version "$tag"
+test "$before" = "$(sha256sum "${install_dir}/royo-learn" | awk '{print $1}')"
+
 printf '00  %s\n' "$archive" > "${release_dir}/checksums.txt"
 if ROYO_LEARN_INSTALL_DIR="$install_dir" ROYO_LEARN_RELEASES_URL="file://${tmpdir}/releases" \
   bash "${repo_root}/install.sh" --version "$tag"; then
@@ -70,3 +75,6 @@ if ROYO_LEARN_INSTALL_DIR="$install_dir" ROYO_LEARN_RELEASES_URL="file://${tmpdi
   exit 1
 fi
 test "$before" = "$(sha256sum "${install_dir}/royo-learn" | awk '{print $1}')"
+
+ROYO_LEARN_INSTALL_DIR="$install_dir" bash "${repo_root}/install.sh" --uninstall
+test ! -e "${install_dir}/royo-learn"

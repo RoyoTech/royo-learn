@@ -29,6 +29,10 @@ try {
     $target = Join-Path $installRoot 'bin\royo-learn.exe'
     $before = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
 
+    & pwsh -NoProfile -File (Join-Path $repoRoot 'install.ps1') -Version $tag
+    if ($LASTEXITCODE -ne 0) { throw 'valid update failed' }
+    if ((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -ne $before) { throw 'valid update changed candidate bytes' }
+
     Set-Content -LiteralPath (Join-Path $releaseDir 'checksums.txt') -Value "00  $archive" -Encoding ascii
     & pwsh -NoProfile -File (Join-Path $repoRoot 'install.ps1') -Version $tag
     if ($LASTEXITCODE -eq 0) { throw 'checksum mismatch unexpectedly succeeded' }
@@ -54,6 +58,10 @@ try {
     & pwsh -NoProfile -File (Join-Path $repoRoot 'install.ps1') -Version $tag
     if ($LASTEXITCODE -eq 0) { throw 'post-replacement failure unexpectedly succeeded' }
     if ((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -ne $before) { throw 'post-replacement failure did not restore prior binary' }
+
+    & pwsh -NoProfile -File (Join-Path $repoRoot 'install.ps1') -Uninstall
+    if ($LASTEXITCODE -ne 0) { throw 'uninstall failed' }
+    if (Test-Path -LiteralPath $target) { throw 'uninstall left the binary behind' }
 } finally {
     Remove-Item Env:ROYO_LEARN_INSTALL_ROOT -ErrorAction SilentlyContinue
     Remove-Item Env:ROYO_LEARN_RELEASES_URL -ErrorAction SilentlyContinue
