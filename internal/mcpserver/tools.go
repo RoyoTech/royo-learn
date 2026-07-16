@@ -690,14 +690,7 @@ func handleListRecurrences(srv *Server) func(ctx context.Context, req *mcp.CallT
 
 		items := make([]map[string]any, 0, len(records))
 		for _, r := range records {
-			items = append(items, map[string]any{
-				"id":                     string(r.ID),
-				"recurrence_fingerprint": r.RecurrenceFingerprint,
-				"learning_id":            string(r.LearningID),
-				"project_id":             string(r.ProjectID),
-				"summary":                r.Summary,
-				"occurred_at":            r.OccurredAt.Format(time.RFC3339),
-			})
+			items = append(items, recurrenceToMap(r))
 		}
 		return toolResultJSON(items)
 	}
@@ -739,6 +732,7 @@ func handleComputeMetrics(srv *Server) func(ctx context.Context, req *mcp.CallTo
 			"last_seen":     metrics.LastSeen.Format(time.RFC3339),
 			"avg_interval":  metrics.AvgInterval.String(),
 			"trend":         string(metrics.Trend),
+			"state":         string(metrics.State),
 			"needs_review":  metrics.NeedsReview,
 			"review_reason": metrics.ReviewReason,
 		})
@@ -845,6 +839,27 @@ func handleRollback(srv *Server) func(ctx context.Context, req *mcp.CallToolRequ
 // ---------------------------------------------------------------------------
 // learningToMap converts a domain.Learning to a map for JSON output.
 // ---------------------------------------------------------------------------
+
+// recurrenceToMap projects a recurrence record with the nine occurrence fields
+// plan 4.4 enumerates (learning ID, fingerprint, event, date, result, retrieved,
+// skill activated, evidence, actor), so a caller listing recurrences sees the
+// full detail that was persisted, not only the identity columns.
+func recurrenceToMap(r *domain.RecurrenceRecord) map[string]any {
+	return map[string]any{
+		"id":                     string(r.ID),
+		"recurrence_fingerprint": r.RecurrenceFingerprint,
+		"learning_id":            string(r.LearningID),
+		"project_id":             string(r.ProjectID),
+		"summary":                r.Summary,
+		"occurred_at":            r.OccurredAt.Format(time.RFC3339),
+		"outcome":                r.Outcome,
+		"retrieved":              r.Retrieved,
+		"skill_activated":        r.SkillActivated,
+		"evidence":               r.Evidence,
+		"actor_kind":             r.ActorKind,
+		"actor_name":             r.ActorName,
+	}
+}
 
 func learningToMap(l *domain.Learning) map[string]any {
 	m := map[string]any{

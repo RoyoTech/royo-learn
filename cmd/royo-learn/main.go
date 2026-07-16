@@ -1692,6 +1692,12 @@ func runRecurrences(args []string, stdout, stderr io.Writer) int {
 				"learning_id":            string(r.LearningID),
 				"summary":                r.Summary,
 				"occurred_at":            r.OccurredAt.Format(time.RFC3339),
+				"outcome":                r.Outcome,
+				"retrieved":              r.Retrieved,
+				"skill_activated":        r.SkillActivated,
+				"evidence":               r.Evidence,
+				"actor_kind":             r.ActorKind,
+				"actor_name":             r.ActorName,
 			})
 		}
 		data, _ := json.MarshalIndent(items, "", "  ")
@@ -1782,6 +1788,7 @@ func runMetrics(args []string, stdout, stderr io.Writer) int {
 			"last_seen":    metrics.LastSeen.Format(time.RFC3339),
 			"avg_interval": metrics.AvgInterval.String(),
 			"trend":        string(metrics.Trend),
+			"state":        string(metrics.State),
 			"needs_review": metrics.NeedsReview,
 		}, "", "  ")
 		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
@@ -1792,6 +1799,7 @@ func runMetrics(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stdout, "  Last seen: %s\n", metrics.LastSeen.Format(time.RFC3339))
 		_, _ = fmt.Fprintf(stdout, "  Avg interval: %s\n", metrics.AvgInterval.String())
 		_, _ = fmt.Fprintf(stdout, "  Trend: %s\n", metrics.Trend)
+		_, _ = fmt.Fprintf(stdout, "  State: %s\n", metrics.State)
 		_, _ = fmt.Fprintf(stdout, "  Needs review: %v\n", metrics.NeedsReview)
 	}
 

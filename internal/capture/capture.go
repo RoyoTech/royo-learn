@@ -8,6 +8,7 @@ import (
 
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/evidence"
+	"agent-royo-learn/internal/recurrence"
 	"agent-royo-learn/internal/storage"
 
 	"github.com/google/uuid"
@@ -47,6 +48,11 @@ type CaptureResult struct {
 	New         bool // false if deduplicated or an idempotent retry
 	EvidenceIDs []domain.EvidenceID
 	Redacted    bool
+	// RecurrenceRecorded is true when the capture reused an existing learning
+	// AND recorded a recurrence for it: the D5 "equivalent event" case (a
+	// different idempotency key over the same content hash). It stays false for
+	// a technical retry (same key) and for a conservative keyless dedup.
+	RecurrenceRecorded bool
 }
 
 // Service provides the capture operation.
@@ -179,18 +185,39 @@ func (s *Service) Capture(ctx context.Context, projectID domain.ProjectID, input
 	learning.NormalizedHash = hash
 	learning.Fingerprint = Fingerprint(learning)
 
-	// Conservative deduplication by content hash (D5, third rule): reuse the
-	// learning and do NOT record a recurrence.
+	// Content-hash match over an existing learning. D5 splits this into two
+	// cases by whether an idempotency key accompanies the event:
+	//
+	//   different key + same hash -> equivalent event: reuse learning, record a
+	//     recurrence (a real, distinct event that happens to match content).
+	//   no key + same hash        -> conservative dedup: reuse learning, record
+	//     nothing automatically (a coincidence is not a business assertion).
 	existing, err := s.findExisting(ctx, projectID, hash)
 	if err != nil {
 		return nil, fmt.Errorf("capture: check existing: %w", err)
 	}
 	if existing != nil {
-		return &CaptureResult{
+		result := &CaptureResult{
 			LearningID: existing.ID,
 			Status:     existing.Status,
 			New:        false,
-		}, nil
+		}
+		if input.IdempotencyKey != "" {
+			// The learning-level key guard above already returned for a repeated
+			// key, so reaching here with a key means it is genuinely new: an
+			// equivalent event. Record a recurrence, guarded by the same key so a
+			// technical retry of this event does not double-count.
+			_, recNew, recErr := recurrence.RecordOccurrence(ctx, s.db, projectID, existing, recurrence.OccurrenceInput{
+				Outcome:        string(domain.OutcomeRecurred),
+				Actor:          input.Actor,
+				IdempotencyKey: input.IdempotencyKey,
+			})
+			if recErr != nil {
+				return nil, fmt.Errorf("capture: record equivalent-event recurrence: %w", recErr)
+			}
+			result.RecurrenceRecorded = recNew
+		}
+		return result, nil
 	}
 
 	// Assign ID.

@@ -30,6 +30,7 @@ func ComputeMetrics(ctx context.Context, db *storage.DB, projectID domain.Projec
 		Fingerprint: fingerprint,
 		Count:       len(records),
 		Trend:       domain.TrendFirst,
+		State:       classifyState(records),
 	}
 
 	if m.Count == 0 {
@@ -50,6 +51,28 @@ func ComputeMetrics(ctx context.Context, db *storage.DB, projectID domain.Projec
 	m.Trend = computeTrend(records)
 
 	return m, nil
+}
+
+// classifyState maps a fingerprint's records (newest first) onto the four
+// coarse states plan 4.4 requires. The distinction is deliberately conservative
+// (D5): a single non-prevented occurrence is "insufficient data", never a
+// claimed repeated problem.
+//
+//	no records                       -> zero recurrences
+//	most recent outcome "prevented"  -> prevented recurrence
+//	two or more records              -> repeated recurrence
+//	one record, no prevented outcome -> insufficient data
+func classifyState(records []*domain.RecurrenceRecord) domain.RecurrenceState {
+	if len(records) == 0 {
+		return domain.StateZeroRecurrences
+	}
+	if records[0].Outcome == string(domain.OutcomePrevented) {
+		return domain.StatePreventedRecurrence
+	}
+	if len(records) >= 2 {
+		return domain.StateRepeatedRecurrence
+	}
+	return domain.StateInsufficientData
 }
 
 // computeTrend determines the recurrence trend from ordered records

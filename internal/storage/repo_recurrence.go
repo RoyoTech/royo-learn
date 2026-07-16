@@ -86,6 +86,46 @@ func FindRecurrenceByIdempotencyKey(ctx context.Context, tx *sql.Tx, projectID d
 	return rec, nil
 }
 
+// recurrenceColumns is the full column list every recurrence read path selects,
+// so the nine occurrence-detail fields (plan 4.4) round-trip through listing and
+// metrics, not only through the idempotency-key lookup.
+const recurrenceColumns = `id, recurrence_fingerprint, learning_id, project_id, summary, occurred_at,
+	outcome, retrieved, skill_activated, evidence, actor_kind, actor_name, idempotency_key`
+
+// scanRecurrenceRows reads recurrence records selected with recurrenceColumns.
+func scanRecurrenceRows(rows *sql.Rows) ([]*domain.RecurrenceRecord, error) {
+	var out []*domain.RecurrenceRecord
+	for rows.Next() {
+		rec := &domain.RecurrenceRecord{}
+		var occurredAt string
+		var retrieved, skillActivated int
+		var idemKey *string
+		if err := rows.Scan(
+			(*string)(&rec.ID),
+			&rec.RecurrenceFingerprint,
+			(*string)(&rec.LearningID),
+			(*string)(&rec.ProjectID),
+			&rec.Summary,
+			&occurredAt,
+			&rec.Outcome,
+			&retrieved,
+			&skillActivated,
+			&rec.Evidence,
+			&rec.ActorKind,
+			&rec.ActorName,
+			&idemKey,
+		); err != nil {
+			return nil, fmt.Errorf("scanRecurrenceRows: %w", err)
+		}
+		rec.OccurredAt, _ = time.Parse(time.RFC3339Nano, occurredAt)
+		rec.Retrieved = retrieved != 0
+		rec.SkillActivated = skillActivated != 0
+		rec.IdempotencyKey = idemKey
+		out = append(out, rec)
+	}
+	return out, rows.Err()
+}
+
 // ListRecurrenceRecords returns recurrence records for a given fingerprint,
 // ordered by occurred_at DESC.
 func ListRecurrenceRecords(ctx context.Context, tx *sql.Tx, projectID domain.ProjectID, fingerprint string, limit int) ([]*domain.RecurrenceRecord, error) {
@@ -93,7 +133,7 @@ func ListRecurrenceRecords(ctx context.Context, tx *sql.Tx, projectID domain.Pro
 		limit = 50
 	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, recurrence_fingerprint, learning_id, project_id, summary, occurred_at
+		SELECT `+recurrenceColumns+`
 		FROM recurrence_records
 		WHERE project_id = ? AND recurrence_fingerprint = ?
 		ORDER BY occurred_at DESC
@@ -103,25 +143,7 @@ func ListRecurrenceRecords(ctx context.Context, tx *sql.Tx, projectID domain.Pro
 		return nil, fmt.Errorf("ListRecurrenceRecords: %w", err)
 	}
 	defer rows.Close()
-
-	var out []*domain.RecurrenceRecord
-	for rows.Next() {
-		rec := &domain.RecurrenceRecord{}
-		var occurredAt string
-		if err := rows.Scan(
-			(*string)(&rec.ID),
-			&rec.RecurrenceFingerprint,
-			(*string)(&rec.LearningID),
-			(*string)(&rec.ProjectID),
-			&rec.Summary,
-			&occurredAt,
-		); err != nil {
-			return nil, fmt.Errorf("ListRecurrenceRecords scan: %w", err)
-		}
-		rec.OccurredAt, _ = time.Parse(time.RFC3339Nano, occurredAt)
-		out = append(out, rec)
-	}
-	return out, rows.Err()
+	return scanRecurrenceRows(rows)
 }
 
 // CountRecurrences returns the total number of recurrence records for a given
@@ -145,7 +167,7 @@ func ListRecurrencesByLearning(ctx context.Context, tx *sql.Tx, learningID domai
 		limit = 50
 	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, recurrence_fingerprint, learning_id, project_id, summary, occurred_at
+		SELECT `+recurrenceColumns+`
 		FROM recurrence_records
 		WHERE learning_id = ?
 		ORDER BY occurred_at DESC
@@ -155,25 +177,7 @@ func ListRecurrencesByLearning(ctx context.Context, tx *sql.Tx, learningID domai
 		return nil, fmt.Errorf("ListRecurrencesByLearning: %w", err)
 	}
 	defer rows.Close()
-
-	var out []*domain.RecurrenceRecord
-	for rows.Next() {
-		rec := &domain.RecurrenceRecord{}
-		var occurredAt string
-		if err := rows.Scan(
-			(*string)(&rec.ID),
-			&rec.RecurrenceFingerprint,
-			(*string)(&rec.LearningID),
-			(*string)(&rec.ProjectID),
-			&rec.Summary,
-			&occurredAt,
-		); err != nil {
-			return nil, fmt.Errorf("ListRecurrencesByLearning scan: %w", err)
-		}
-		rec.OccurredAt, _ = time.Parse(time.RFC3339Nano, occurredAt)
-		out = append(out, rec)
-	}
-	return out, rows.Err()
+	return scanRecurrenceRows(rows)
 }
 
 // ListAllRecurrences returns all recurrence records for a project, ordered by
@@ -183,7 +187,7 @@ func ListAllRecurrences(ctx context.Context, tx *sql.Tx, projectID domain.Projec
 		limit = 50
 	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, recurrence_fingerprint, learning_id, project_id, summary, occurred_at
+		SELECT `+recurrenceColumns+`
 		FROM recurrence_records
 		WHERE project_id = ?
 		ORDER BY occurred_at DESC
@@ -193,23 +197,5 @@ func ListAllRecurrences(ctx context.Context, tx *sql.Tx, projectID domain.Projec
 		return nil, fmt.Errorf("ListAllRecurrences: %w", err)
 	}
 	defer rows.Close()
-
-	var out []*domain.RecurrenceRecord
-	for rows.Next() {
-		rec := &domain.RecurrenceRecord{}
-		var occurredAt string
-		if err := rows.Scan(
-			(*string)(&rec.ID),
-			&rec.RecurrenceFingerprint,
-			(*string)(&rec.LearningID),
-			(*string)(&rec.ProjectID),
-			&rec.Summary,
-			&occurredAt,
-		); err != nil {
-			return nil, fmt.Errorf("ListAllRecurrences scan: %w", err)
-		}
-		rec.OccurredAt, _ = time.Parse(time.RFC3339Nano, occurredAt)
-		out = append(out, rec)
-	}
-	return out, rows.Err()
+	return scanRecurrenceRows(rows)
 }

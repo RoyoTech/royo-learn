@@ -467,9 +467,28 @@ type RecurrenceMetrics struct {
 	LastSeen     time.Time
 	AvgInterval  time.Duration
 	Trend        RecurrenceTrend
+	State        RecurrenceState
 	NeedsReview  bool
 	ReviewReason string
 }
+
+// RecurrenceState is the coarse metric state plan 4.4 requires the metrics to
+// distinguish, independent of the finer-grained trend. It answers "what can we
+// assert about this pattern?" rather than "how is the interval changing?".
+type RecurrenceState string
+
+const (
+	// StateZeroRecurrences means the pattern has no recurrence records yet.
+	StateZeroRecurrences RecurrenceState = "zero_recurrences"
+	// StateInsufficientData means there is a single occurrence with no decisive
+	// outcome: not enough to assert a repeated or prevented pattern.
+	StateInsufficientData RecurrenceState = "insufficient_data"
+	// StateRepeatedRecurrence means the same problem recurred more than once.
+	StateRepeatedRecurrence RecurrenceState = "repeated_recurrence"
+	// StatePreventedRecurrence means the most recent occurrence was prevented:
+	// the learning was retrieved in time and the pattern did not repeat.
+	StatePreventedRecurrence RecurrenceState = "prevented_recurrence"
+)
 
 // RecurrenceTrend indicates whether the recurrence pattern is increasing,
 // decreasing, or stable.
