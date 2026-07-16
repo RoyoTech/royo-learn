@@ -318,6 +318,52 @@ func TestContract_DocsRegistrySkillsTripleMatch(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Test 2b — §4.2: the complete MCP tool set is registered.
+//
+// Tramo 4 §4.2 requires the full learning_* tool surface to be registered and
+// tested. The tools themselves were delivered across Recorridos A-E and D17;
+// this test locks the set in so a future change cannot drop one silently.
+// Tools reserved for §4.6 (export, import, rebuild_index, review) are
+// deliberately NOT here: they stay out until they have real utility over MCP.
+// ---------------------------------------------------------------------------
+
+func TestContract_AllHito2MCPToolsRegistered(t *testing.T) {
+	t.Parallel()
+
+	// The mandatory tool set of §4.2, in the plan's order.
+	want := []string{
+		"learning_capture",
+		"learning_add_evidence",
+		"learning_search",
+		"learning_get",
+		"learning_list",
+		"learning_curate",
+		"learning_publication_preview",
+		"learning_approve",
+		"learning_publish",
+		"learning_report_occurrence",
+		"learning_status",
+		"learning_doctor",
+		"learning_rollback",
+	}
+
+	canonical := canonicalNames()
+	for _, name := range want {
+		if _, ok := canonical[name]; !ok {
+			t.Errorf("§4.2 requires MCP tool %q, which is NOT registered", name)
+		}
+	}
+
+	// Reserved §4.6 tools must not be registered yet: registering one without
+	// promoting it out of §4.6 would misrepresent the contract.
+	for _, reserved := range []string{"learning_export", "learning_import", "learning_rebuild_index", "learning_review"} {
+		if _, ok := canonical[reserved]; ok {
+			t.Errorf("tool %q is reserved for §4.6 but is already registered; document and promote it deliberately", reserved)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Test 3 — D14: the initialize instructions are derived from the active
 // profile's registry, never hardcoded.
 // ---------------------------------------------------------------------------
