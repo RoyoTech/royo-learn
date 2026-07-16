@@ -1242,3 +1242,160 @@ verde salvo el ruido ambiental de AV (`internal/buildinfo`), reproducido como
 no-código; no existe ningún soft-pass nuevo; el README describe exactamente el
 comportamiento demostrado. El comando de release queda listo y **detenido** para
 aprobación humana. No se publicó nada.
+
+---
+
+## 2026-07-16 — Tramo 4 · Parte 1: CLI completa, MCP completo, errores y exit codes (§4.1–§4.3)
+
+Primer bloque del Hito 2. **No publica nada.** Desarrollo puro con TDD estricto
+(prueba roja identificada, verde mínimo, refactor), commits pequeños, cada uno
+compilando verde salvo los commits de prueba roja. Base de partida `66a90da`
+(Tramo 3, `v0.1.10` READY pero sin tag); su posición no se alteró.
+
+### Commits
+
+| Hash | Mensaje | Rol |
+|------|---------|-----|
+| `983f282` | `test: require a single declarative CLI command registry` | Rojo §4.1 (no compila: registro inexistente) |
+| `c564110` | `feat: derive CLI help and dispatch from one command registry` | Verde §4.1 |
+| `f4cba27` | `test: lock in the complete MCP tool set (Tramo 4 §4.2)` | §4.2 (verde: las tools ya existían de Tramo 2/D17) |
+| `195816e` | `test: require one exit-code mapping for every domain error class` | Rojo §4.3 (dominio) |
+| `1f98d76` | `feat: add one exit-code mapping and domain-error extraction (D §4.3)` | Verde §4.3 (dominio) |
+| `bf5a20c` | `test: require one domain error model on both CLI and MCP surfaces` | Rojo §4.3 (superficies) |
+| `5eac623` | `feat: translate one domain error model across CLI and MCP surfaces` | Verde §4.3 (superficies) |
+
+### §4.1 — CLI completa (registro declarativo único)
+
+`cmd/royo-learn/commands.go` define **un único registro** (`commandRegistry`) del
+que derivan **tanto `printHelp` como el dispatcher** de `run()`. No hay una segunda
+lista de comandos en ninguna parte. El registro clasifica cada comando en tres
+tipos: implementado (visible en help), alias deprecated (`mcp-serve`,
+`engram-health`, `engram-search`; funcionan y avisan en stderr, ocultos en help,
+D8/D9/D10) y pendiente (`review`, `export`, `import`, `rebuild-index`; documentados
+en docs/04 pero no construidos hasta el §4.6, ocultos en help).
+
+Nuevos comandos implementados en Parte 1: `mcp` (nombre canónico de `mcp-serve`,
+D10), `list` (docs/04:175, se apoya en `storage.ListLearnings`) y `status`
+(equivalente CLI de `learning_status`). Se corrigió el mensaje de comando
+desconocido para nombrar el comando invocado y remitir a `--help` (D12). Se
+documentaron `status`, `recurrences`, `metrics` y `setup` en docs/04 (D9).
+
+**Prueba de contrato de cinco condiciones** (`cmd/royo-learn/commands_test.go`,
+permanente, Tramo 5):
+
+| # | Condición | Resultado |
+|---|-----------|-----------|
+| 1 | Todo comando anunciado en `--help` existe y ejecuta (tiene `run`) | **PASS** — `TestContract_HelpCommandsAllExecute` |
+| 2 | Todo comando implementado aparece en help | **PASS** — `TestContract_ImplementedCommandsAppearInHelp` |
+| 3 | Todo comando acepta `--help` (exit 0) | **PASS** — `TestContract_EveryCommandAcceptsHelp` (manejo central de `--help`/`-h`) |
+| 4 | Todo comando documentado en docs/04 está implementado o pendiente | **PASS** — `TestContract_DocumentedCommandsAreImplementedOrPending` |
+| 5 | Sin comandos fantasma (anunciado-ausente) ni fantasmales (implementado-oculto) | **PASS** — `TestContract_ImplementedCommandsAppearInHelp` + `TestContract_NoPhantomOrUndocumentedCommand` (dirección D9: implementado no-deprecated ⊆ docs/04) |
+
+Además `TestContract_PendingCommandsAreDocumentedAndUnbuilt` verifica que la lista
+de pendientes es deuda honesta (documentada, sin `run`, sin colisiones). El help
+se deriva del registro, así que 1/2/5 son estructuralmente ciertos y las pruebas
+los sellan.
+
+### §4.2 — MCP completo
+
+Las 13 tools obligatorias del §4.2 (`learning_capture learning_add_evidence
+learning_search learning_get learning_list learning_curate
+learning_publication_preview learning_approve learning_publish
+learning_report_occurrence learning_status learning_doctor learning_rollback`)
+**ya estaban registradas** (entregadas en Recorridos A–E y D17); Parte 1 añade el
+candado de completitud `TestContract_AllHito2MCPToolsRegistered`, que además
+verifica que las tools reservadas al §4.6 (`export`/`import`/`rebuild_index`/
+`review`) **no** están registradas todavía. Nada destructivo en `read` ni `agent`:
+sostenido por el test preexistente `TestContract_NoDestructiveToolInReadOrAgentProfile`
+(sólo `learning_rollback` es destructive y vive sólo en `admin`).
+
+Resultado: **13/13 registradas; 4 reservadas al §4.6 correctamente ausentes.**
+
+### §4.3 — Errores y exit codes (un único modelo)
+
+Se consolidó sobre el tipo de dominio existente `domain.DomainError` (no se creó
+un segundo sistema de errores). En `internal/domain/errors.go`:
+
+- `ErrorCode.ExitCode()` — **la única** tabla código→exit code, según los buckets
+  de `docs/04-CLI-SPEC.md §Exit codes`.
+- `AsDomainError(err)` — extrae el `*DomainError`, desenvolviendo los wrappers
+  tipados (`NotFoundError`, `ConflictError`, `ValidationError`, `PermissionError`);
+  ninguna superficie interpreta errores por coincidencia de cadenas.
+- `AllErrorCodes()` — lista autoritativa para las pruebas de mapeo y sincronía.
+
+Ambas superficies traducen el mismo modelo: la **CLI** (`cmd/royo-learn/errors.go`,
+`writeDomainError`/`writeCodeError`) emite el envelope plano de docs/17 y deriva el
+exit code del código; la **MCP** (`internal/mcpserver/tools.go`, `toolDomainError`/
+`toolErrorEnvelope`) emite el envelope **anidado bajo `error`** que docs/05
+especifica. Se cablearon 16 sitios de error de servicio en MCP y los sitios de
+servicio de la CLI (publish/approve/curate/capture/evidence/preview/rollback).
+Consecuencia contractual: `invalid_argument` pasa de exit 1 a su exit code
+documentado **2**; se actualizaron cuatro aserciones de prueba a esa verdad
+(preview/publish/rollback sin id, self-update `--check`+`--version`).
+
+**Prueba por clase de error** (una fila por clase, en ambas superficies):
+
+| Prueba | Ubicación | Resultado |
+|--------|-----------|-----------|
+| Mapeo código→exit para toda clase (buckets docs/04) | `internal/domain/exit_codes_test.go::TestExitCodeMapping_EveryClass` | **PASS** — 39 códigos, todos en [2,15] |
+| Catálogo docs/17 ↔ constantes de dominio en sincronía | `…::TestExitCodeMapping_DocsCatalogInSync` | **PASS** |
+| CLI traduce toda clase (código real + exit code) | `cmd/royo-learn/errors_test.go::TestCLIErrorModel_EveryClassTranslates` | **PASS** |
+| CLI: error no-dominio cae al fallback | `…::TestCLIErrorModel_NonDomainErrorFallsBack` | **PASS** |
+| MCP traduce toda clase (envelope anidado, código real) | `internal/mcpserver/error_envelope_test.go::TestMCPErrorModel_EveryClassTranslates` | **PASS** |
+| MCP: fallback y forma anidada de `toolError` | `…::TestMCPErrorModel_NonDomainFallsBack`, `…_ToolErrorIsNested` | **PASS** |
+
+Matriz de exit codes (docs/04 §Exit codes), implementada y probada:
+
+```text
+2  invalid_argument, evidence_missing, evidence_too_large, payload_too_large
+3  invalid_config
+4  project_not_found, ambiguous_project, unknown_project
+5  learning_not_found, preview_not_found
+6  invalid_transition
+7  approval_required, approval_invalid, approval_expired
+8  duplicate_learning, target_ambiguous, target_changed, dirty_target,
+   publication_conflict, preview_hash_mismatch, rollback_conflict
+9  verification_failed
+10 engram_unavailable, engram_ambiguous_project, gentle_ai_unavailable, skill_registry_failed
+11 path_outside_root, symlink_escape, protected_path, secret_detected
+12 database_corrupt, migration_checksum_mismatch, record_hash_mismatch
+13 database_locked, rollback_failed, publication_failed
+14 mcp_protocol_error
+15 external_command_failed, timeout
+```
+
+### Decisiones
+
+Ninguna contradicción nueva del contrato que exija un número D. Aclaraciones
+registradas aquí: (1) el envelope de error de la **CLI** es plano (docs/17,
+pruebas existentes) y el de la **MCP** anidado bajo `error` (docs/05:281-298);
+son especificaciones complementarias por superficie, no un conflicto — mismo
+modelo de dominio, mismos cinco campos. (2) `status`/`recurrences`/`metrics`/
+`setup` se documentan en docs/04 conforme a D9. (3) `list` y `status` como
+comandos CLI se implementan ahora porque el §4.1 pertenece al Hito 2 (D17 §3 los
+mantenía fuera sólo del Hito 1).
+
+### Comandos ejecutados — resultado real
+
+- `go build ./...` — limpio.
+- `go vet ./...` — limpio.
+- `gofmt -l cmd/ internal/` — vacío.
+- `go test -race -p 1 -count=1 ./...` — **19 paquetes ok, 0 FAIL**, incluido
+  `internal/buildinfo` (en `-race` no sufre la contención de AV de esta máquina).
+  Ésta es la señal verde fiable del entorno.
+
+### Puerta de salida — Tramo 4 · Parte 1
+
+| Sección | Criterio de salida | Estado |
+|---------|--------------------|--------|
+| §4.1 | Registro declarativo único; prueba de contrato de cinco condiciones en verde; `mcp`/`list`/`status` reales; pendientes honestos | **PASS** |
+| §4.2 | Las 13 tools MCP registradas y probadas; nada destructivo en `read`/`agent`; reservadas al §4.6 ausentes | **PASS** |
+| §4.3 | Un único modelo de error de dominio traducido por CLI y MCP; exit codes contractuales de docs/17; una prueba por clase en ambas superficies | **PASS** |
+
+**Resultado del Tramo 4 · Parte 1: PASS en §4.1, §4.2 y §4.3. Sin FAIL.**
+
+### Siguiente paso
+
+Tramo 4 · Parte 2 (§4.4 recurrencias/idempotencia conectadas end-to-end, §4.5
+búsqueda y relaciones) y Parte 3 (§4.6 export/import/rebuild-index/review, §4.7
+coherencia SQLite–Markdown, §4.8 migraciones). Fuera del alcance de esta parte.
