@@ -41,19 +41,29 @@ type BackupEntry struct {
 	OriginalMode          *uint32
 	OriginalExisted       *bool
 	ExpectedPublishedHash string
+	ExpectedPublishedMode *uint32
 	DirectorySynced       bool
 	Timestamp             time.Time
 }
 
 // SnapshotFile captures one stable view of a regular target without following symlinks.
 func (b *BackupManager) SnapshotFile(relativePath string) (*FileSnapshot, error) {
-	fullPath, err := secureRelativePath(b.projectRoot, relativePath, "target", false)
+	_, err := secureRelativePath(b.projectRoot, relativePath, "target", false)
 	if err != nil {
 		return nil, fmt.Errorf("SnapshotFile: validate target path: %w", err)
 	}
-	lstat, err := os.Lstat(fullPath)
+	clean, err := cleanRootName(relativePath, "target")
+	if err != nil {
+		return nil, fmt.Errorf("SnapshotFile: %w", err)
+	}
+	root, err := openRootNoFollow(b.projectRoot)
+	if err != nil {
+		return nil, fmt.Errorf("SnapshotFile: open root: %w", err)
+	}
+	defer root.Close()
+	lstat, err := root.Lstat(clean)
 	if os.IsNotExist(err) {
-		return &FileSnapshot{RelativePath: filepath.Clean(relativePath)}, nil
+		return &FileSnapshot{RelativePath: clean}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("SnapshotFile: lstat: %w", err)
@@ -62,7 +72,7 @@ func (b *BackupManager) SnapshotFile(relativePath string) (*FileSnapshot, error)
 		return nil, fmt.Errorf("SnapshotFile: target must be a regular non-symlink file: %s", relativePath)
 	}
 
-	f, err := os.Open(fullPath)
+	f, err := root.Open(clean)
 	if err != nil {
 		return nil, fmt.Errorf("SnapshotFile: open: %w", err)
 	}
@@ -82,7 +92,7 @@ func (b *BackupManager) SnapshotFile(relativePath string) (*FileSnapshot, error)
 		return nil, fmt.Errorf("SnapshotFile: target changed while it was opened: %s", relativePath)
 	}
 	return &FileSnapshot{
-		RelativePath: filepath.Clean(relativePath),
+		RelativePath: clean,
 		Exists:       true,
 		Content:      content,
 		Hash:         HashContent(content),
@@ -124,7 +134,7 @@ func (b *BackupManager) BackupSnapshot(snapshot *FileSnapshot) (*BackupEntry, er
 	if !snapshot.Exists {
 		return entry, nil
 	}
-	mode := uint32(snapshot.Mode)
+	mode := fileModeIdentity(snapshot.Mode)
 	entry.OriginalMode = &mode
 
 	prefix := sanitizeBackupPrefix(filepath.Base(snapshot.RelativePath)) + "-"
@@ -230,10 +240,10 @@ func (b *BackupManager) RestoreFile(entry BackupEntry) error {
 	writer := NewWriter(b.projectRoot)
 	writer.beforeDestructive = b.beforeDestructive
 	if *entry.OriginalExisted {
-		if current.Exists && current.Hash == entry.OriginalHash {
+		if current.Exists && current.Hash == entry.OriginalHash && modeMatches(current, entry.OriginalMode) {
 			return nil
 		}
-		if !current.Exists || current.Hash != entry.ExpectedPublishedHash {
+		if !current.Exists || current.Hash != entry.ExpectedPublishedHash || !modeMatches(current, entry.ExpectedPublishedMode) {
 			return fmt.Errorf("RestoreFile: destination content conflict for %s", entry.OriginalPath)
 		}
 		backupPath, err := secureAbsoluteWithin(b.backupDir, entry.BackupPath, "backup")
@@ -250,16 +260,21 @@ func (b *BackupManager) RestoreFile(entry BackupEntry) error {
 		return writer.WriteFileCAS(entry.OriginalPath, content, os.FileMode(*entry.OriginalMode), TargetIdentity{
 			Exists: true,
 			Hash:   entry.ExpectedPublishedHash,
+			Mode:   entry.ExpectedPublishedMode,
 		})
 	}
 
 	if !current.Exists {
 		return nil
 	}
-	if current.Hash != entry.ExpectedPublishedHash {
+	if current.Hash != entry.ExpectedPublishedHash || !modeMatches(current, entry.ExpectedPublishedMode) {
 		return fmt.Errorf("RestoreFile: destination content conflict for %s", entry.OriginalPath)
 	}
-	return writer.RemoveFileCAS(entry.OriginalPath, TargetIdentity{Exists: true, Hash: entry.ExpectedPublishedHash})
+	return writer.RemoveFileCAS(entry.OriginalPath, TargetIdentity{Exists: true, Hash: entry.ExpectedPublishedHash, Mode: entry.ExpectedPublishedMode})
+}
+
+func modeMatches(snapshot *FileSnapshot, expected *uint32) bool {
+	return expected != nil && fileModeIdentity(snapshot.Mode) == fileModeIdentity(os.FileMode(*expected))
 }
 
 func validateRestoreEntry(entry BackupEntry) error {
@@ -271,6 +286,9 @@ func validateRestoreEntry(entry BackupEntry) error {
 	}
 	if entry.ExpectedPublishedHash == "" {
 		return fmt.Errorf("expected published hash is required")
+	}
+	if entry.ExpectedPublishedMode == nil {
+		return fmt.Errorf("expected published mode is required")
 	}
 	if !*entry.OriginalExisted {
 		if entry.BackupPath != "" || entry.Checksum != "" || entry.OriginalHash != "" || entry.OriginalMode != nil {

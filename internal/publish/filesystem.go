@@ -13,6 +13,16 @@ var errDirectorySyncUnsupported = errors.New("directory sync is unsupported on t
 
 func directorySyncAvailable() bool { return runtime.GOOS != "windows" }
 
+func fileModeIdentity(mode os.FileMode) uint32 {
+	if runtime.GOOS == "windows" {
+		if mode.Perm()&0o200 == 0 {
+			return 0o444
+		}
+		return 0o666
+	}
+	return uint32(mode.Perm())
+}
+
 func secureRelativePath(root, relative, label string, createParents bool) (string, error) {
 	if root == "" {
 		return "", fmt.Errorf("%s root is required", label)
@@ -33,29 +43,81 @@ func secureRelativePath(root, relative, label string, createParents bool) (strin
 	if unsafeRootForm(absRoot) {
 		return "", fmt.Errorf("%s root %q uses a forbidden path form", label, root)
 	}
-	if err := rejectSymlinkComponents(absRoot, false); err != nil {
+	rootHandle, err := openRootNoFollow(absRoot)
+	if err != nil {
 		return "", fmt.Errorf("%s root: %w", label, err)
 	}
-
+	defer rootHandle.Close()
 	full := filepath.Join(absRoot, clean)
 	rel, err := filepath.Rel(absRoot, full)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 		return "", fmt.Errorf("%s path %q escapes root %q", label, relative, absRoot)
 	}
 	if createParents {
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		parent := filepath.Dir(clean)
+		if err := rejectRootSymlinks(rootHandle, parent, true); err != nil {
+			return "", fmt.Errorf("%s parent: %w", label, err)
+		}
+		if err := rootHandle.MkdirAll(parent, 0o755); err != nil {
 			return "", fmt.Errorf("%s create parent: %w", label, err)
 		}
 	}
-	if err := rejectSymlinkComponents(filepath.Dir(full), !createParents); err != nil {
+	if err := rejectRootSymlinks(rootHandle, filepath.Dir(clean), !createParents); err != nil {
 		return "", fmt.Errorf("%s parent: %w", label, err)
 	}
-	if info, err := os.Lstat(full); err == nil && info.Mode()&os.ModeSymlink != 0 {
+	if info, err := rootHandle.Lstat(clean); err == nil && info.Mode()&os.ModeSymlink != 0 {
 		return "", fmt.Errorf("%s path is a symlink: %s", label, full)
 	} else if err != nil && !os.IsNotExist(err) {
 		return "", fmt.Errorf("%s lstat: %w", label, err)
 	}
 	return full, nil
+}
+
+func openRootNoFollow(root string) (*os.Root, error) {
+	info, err := os.Lstat(root)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return nil, fmt.Errorf("root must be a non-symlink directory: %s", root)
+	}
+	return os.OpenRoot(root)
+}
+
+func cleanRootName(relative, label string) (string, error) {
+	if unsafePathForm(relative) || filepath.IsAbs(relative) || filepath.VolumeName(relative) != "" {
+		return "", fmt.Errorf("%s path %q is not a safe relative path", label, relative)
+	}
+	clean := filepath.Clean(relative)
+	if clean == "." || clean == "" || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("%s path %q escapes its root", label, relative)
+	}
+	return clean, nil
+}
+
+func rejectRootSymlinks(root *os.Root, relative string, allowMissing bool) error {
+	clean := filepath.Clean(relative)
+	if clean == "." || clean == "" {
+		return nil
+	}
+	current := ""
+	for _, part := range strings.Split(clean, string(filepath.Separator)) {
+		if part == "" || part == "." {
+			continue
+		}
+		current = filepath.Join(current, part)
+		info, err := root.Lstat(current)
+		if err != nil {
+			if allowMissing && os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("symlink component is not allowed: %s", current)
+		}
+	}
+	return nil
 }
 
 func secureAbsoluteWithin(root, path, label string) (string, error) {

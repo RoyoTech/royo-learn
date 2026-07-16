@@ -31,6 +31,7 @@ func backupEntryFromDomain(entry domain.RollbackEntry) BackupEntry {
 		OriginalMode:          entry.OriginalMode,
 		OriginalExisted:       entry.OriginalExisted,
 		ExpectedPublishedHash: entry.ExpectedPublishedHash,
+		ExpectedPublishedMode: entry.ExpectedPublishedMode,
 	}
 }
 

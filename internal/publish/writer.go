@@ -45,24 +45,36 @@ func (w *Writer) WriteFile(targetPath string, content []byte, perm os.FileMode) 
 	return w.WriteFileCAS(targetPath, content, perm, expected)
 }
 
-// WriteFileCAS atomically replaces exactly the expected target. Existing
-// content is first moved aside and verified; absent targets use an exclusive
-// hard-link placement so a concurrent creation is never overwritten.
+// WriteFileCAS atomically replaces exactly the expected target inside an
+// os.Root capability. Existing targets are never moved away first: the final
+// rename is one atomic replacement, so failure or process loss leaves either
+// the original or the complete replacement at the destination.
 func (w *Writer) WriteFileCAS(targetPath string, content []byte, perm os.FileMode, expected TargetIdentity) error {
 	fullPath, err := secureRelativePath(w.projectRoot, targetPath, "target", true)
 	if err != nil {
 		return fmt.Errorf("WriteFileCAS: %w", err)
 	}
-	dir := filepath.Dir(fullPath)
-	tmp, err := os.CreateTemp(dir, ".royo-learn-write-*.tmp")
+	relative, err := cleanRootName(targetPath, "target")
+	if err != nil {
+		return fmt.Errorf("WriteFileCAS: %w", err)
+	}
+	root, err := openRootNoFollow(w.projectRoot)
+	if err != nil {
+		return fmt.Errorf("WriteFileCAS: open root: %w", err)
+	}
+	defer root.Close()
+	if err := rejectRootSymlinks(root, filepath.Dir(relative), false); err != nil {
+		return fmt.Errorf("WriteFileCAS: parent: %w", err)
+	}
+	tmpPath := filepath.Join(filepath.Dir(relative), ".royo-learn-write-"+uuid.NewString()+".tmp")
+	tmp, err := root.OpenFile(tmpPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm.Perm())
 	if err != nil {
 		return fmt.Errorf("WriteFileCAS: create temp: %w", err)
 	}
-	tmpPath := tmp.Name()
 	placed := false
 	defer func() {
 		if !placed {
-			_ = os.Remove(tmpPath)
+			_ = root.Remove(tmpPath)
 		}
 	}()
 	if err := tmp.Chmod(perm); err != nil {
@@ -88,56 +100,44 @@ func (w *Writer) WriteFileCAS(targetPath string, content []byte, perm os.FileMod
 	if _, err := secureRelativePath(w.projectRoot, targetPath, "target", false); err != nil {
 		return fmt.Errorf("WriteFileCAS: final path validation: %w", err)
 	}
-
+	current, inspectErr := inspectRootRegularFile(root, relative)
 	if !expected.Exists {
-		if err := os.Link(tmpPath, fullPath); err != nil {
-			if _, statErr := os.Lstat(fullPath); statErr == nil {
+		if inspectErr == nil {
+			return targetChanged("target appeared before atomic create", targetPath, "")
+		}
+		if !os.IsNotExist(inspectErr) {
+			return fmt.Errorf("WriteFileCAS: inspect target: %w", inspectErr)
+		}
+		// Link is used only for exclusive creation. Existing-file replacement,
+		// the crash-sensitive path, uses atomic Rename below.
+		if err := root.Link(tmpPath, relative); err != nil {
+			if _, statErr := root.Lstat(relative); statErr == nil {
 				return targetChanged("target appeared before atomic create", targetPath, "")
 			}
 			return fmt.Errorf("WriteFileCAS: exclusive placement: %w", err)
 		}
-		placed = true
-		if err := os.Remove(tmpPath); err != nil {
+		if err := root.Remove(tmpPath); err != nil {
 			return fmt.Errorf("WriteFileCAS: remove temp link: %w", err)
 		}
+		placed = true
 		if _, err := syncParentDirectoryRequired(fullPath); err != nil {
 			return fmt.Errorf("WriteFileCAS: %w", err)
 		}
 		return nil
 	}
-
-	quarantine := filepath.Join(dir, ".royo-learn-old-"+uuid.NewString())
-	if err := os.Rename(fullPath, quarantine); err != nil {
-		if os.IsNotExist(err) {
+	if inspectErr != nil {
+		if os.IsNotExist(inspectErr) {
 			return targetChanged("target disappeared before replacement", targetPath, "")
 		}
-		return fmt.Errorf("WriteFileCAS: move current target aside: %w", err)
+		return fmt.Errorf("WriteFileCAS: inspect target: %w", inspectErr)
 	}
-	current, inspectErr := inspectMovedRegularFile(quarantine)
-	if inspectErr != nil || current.Hash != expected.Hash || expected.Mode != nil && uint32(current.Mode) != *expected.Mode {
-		restoreErr := restoreMovedFile(quarantine, fullPath)
-		if restoreErr != nil {
-			return targetChanged("target changed and could not be returned to its path", targetPath, quarantine)
-		}
+	if current.Hash != expected.Hash || expected.Mode != nil && fileModeIdentity(current.Mode) != fileModeIdentity(os.FileMode(*expected.Mode)) {
 		return targetChanged("target changed at final replacement boundary", targetPath, "")
 	}
-	if err := os.Link(tmpPath, fullPath); err != nil {
-		preserved := quarantine
-		if restoreErr := restoreMovedFile(quarantine, fullPath); restoreErr == nil {
-			preserved = ""
-		}
-		return targetChanged("target appeared during atomic replacement", targetPath, preserved)
+	if err := root.Rename(tmpPath, relative); err != nil {
+		return fmt.Errorf("WriteFileCAS: atomic replacement: %w", err)
 	}
 	placed = true
-	if err := os.Remove(tmpPath); err != nil {
-		return fmt.Errorf("WriteFileCAS: remove temp link: %w", err)
-	}
-	if _, err := syncParentDirectoryRequired(fullPath); err != nil {
-		return fmt.Errorf("WriteFileCAS: %w", err)
-	}
-	if err := os.Remove(quarantine); err != nil {
-		return fmt.Errorf("WriteFileCAS: remove prior target %s: %w", quarantine, err)
-	}
 	if _, err := syncParentDirectoryRequired(fullPath); err != nil {
 		return fmt.Errorf("WriteFileCAS: %w", err)
 	}
@@ -159,27 +159,62 @@ func (w *Writer) RemoveFileCAS(targetPath string, expected TargetIdentity) error
 	if _, err := secureRelativePath(w.projectRoot, targetPath, "target", false); err != nil {
 		return fmt.Errorf("RemoveFileCAS: final path validation: %w", err)
 	}
-	quarantine := filepath.Join(filepath.Dir(fullPath), ".royo-learn-delete-"+uuid.NewString())
-	if err := os.Rename(fullPath, quarantine); err != nil {
-		if os.IsNotExist(err) {
+	relative, err := cleanRootName(targetPath, "target")
+	if err != nil {
+		return fmt.Errorf("RemoveFileCAS: %w", err)
+	}
+	root, err := openRootNoFollow(w.projectRoot)
+	if err != nil {
+		return fmt.Errorf("RemoveFileCAS: open root: %w", err)
+	}
+	defer root.Close()
+	current, inspectErr := inspectRootRegularFile(root, relative)
+	if inspectErr != nil {
+		if os.IsNotExist(inspectErr) {
 			return targetChanged("target disappeared before deletion", targetPath, "")
 		}
-		return fmt.Errorf("RemoveFileCAS: move target aside: %w", err)
+		return fmt.Errorf("RemoveFileCAS: inspect target: %w", inspectErr)
 	}
-	current, inspectErr := inspectMovedRegularFile(quarantine)
-	if inspectErr != nil || !expected.Exists || current.Hash != expected.Hash || expected.Mode != nil && uint32(current.Mode) != *expected.Mode {
-		if restoreErr := restoreMovedFile(quarantine, fullPath); restoreErr != nil {
-			return targetChanged("target changed and was preserved outside its path", targetPath, quarantine)
-		}
+	if !expected.Exists || current.Hash != expected.Hash || expected.Mode != nil && fileModeIdentity(current.Mode) != fileModeIdentity(os.FileMode(*expected.Mode)) {
 		return targetChanged("target changed at final delete boundary", targetPath, "")
 	}
-	if err := os.Remove(quarantine); err != nil {
+	if err := root.Remove(relative); err != nil {
 		return fmt.Errorf("RemoveFileCAS: remove verified target: %w", err)
 	}
 	if _, err := syncParentDirectoryRequired(fullPath); err != nil {
 		return fmt.Errorf("RemoveFileCAS: %w", err)
 	}
 	return nil
+}
+
+func inspectRootRegularFile(root *os.Root, relative string) (*FileSnapshot, error) {
+	info, err := root.Lstat(relative)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("target is not a regular non-symlink file")
+	}
+	f, err := root.Open(relative)
+	if err != nil {
+		return nil, err
+	}
+	content, readErr := io.ReadAll(f)
+	opened, statErr := f.Stat()
+	closeErr := f.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if statErr != nil {
+		return nil, statErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	if !os.SameFile(info, opened) {
+		return nil, fmt.Errorf("target changed while opened")
+	}
+	return &FileSnapshot{Exists: true, Content: content, Hash: HashContent(content), Mode: opened.Mode()}, nil
 }
 
 func inspectMovedRegularFile(path string) (*FileSnapshot, error) {

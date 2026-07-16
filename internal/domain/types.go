@@ -437,6 +437,7 @@ type RollbackEntry struct {
 	BackupSHA256          string        `json:"backup_sha256,omitempty"`
 	OriginalMode          *uint32       `json:"original_mode,omitempty"`
 	ExpectedPublishedHash string        `json:"expected_published_hash"`
+	ExpectedPublishedMode *uint32       `json:"expected_published_mode"`
 	RecoveryState         RecoveryState `json:"recovery_state"`
 	FailureReason         string        `json:"failure_reason,omitempty"`
 	RecoveryArtifact      string        `json:"recovery_artifact,omitempty"`

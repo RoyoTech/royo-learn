@@ -721,6 +721,8 @@ func TestBackupAndRestore(t *testing.T) {
 		t.Fatalf("modify source: %v", err)
 	}
 	entry.ExpectedPublishedHash = HashContent([]byte("modified content v2"))
+	publishedMode := fileModeIdentity(0o644)
+	entry.ExpectedPublishedMode = &publishedMode
 
 	// Restore from backup.
 	if err := mgr.RestoreFile(*entry); err != nil {
@@ -771,6 +773,9 @@ func TestRestoreAll_MixedResults(t *testing.T) {
 	}
 	entry1.ExpectedPublishedHash = HashContent([]byte("published"))
 	entry2.ExpectedPublishedHash = HashContent([]byte("unused published identity"))
+	publishedMode := fileModeIdentity(0o644)
+	entry1.ExpectedPublishedMode = &publishedMode
+	entry2.ExpectedPublishedMode = &publishedMode
 
 	results := mgr.RestoreAll([]BackupEntry{*entry1, *entry2})
 	if len(results) != 2 {
@@ -1099,6 +1104,8 @@ func TestRollbackAll_Success(t *testing.T) {
 		t.Fatalf("write published target: %v", err)
 	}
 	entry.ExpectedPublishedHash = HashContent([]byte("published"))
+	publishedMode := fileModeIdentity(0o644)
+	entry.ExpectedPublishedMode = &publishedMode
 
 	err := rollbackAll(mgr, []BackupEntry{*entry})
 	if err != nil {
@@ -1123,6 +1130,8 @@ func TestRollbackAll_NonexistentBackup(t *testing.T) {
 		OriginalExisted:       &absent,
 		ExpectedPublishedHash: HashContent([]byte("unused published identity")),
 	}
+	publishedMode := fileModeIdentity(0o644)
+	entry.ExpectedPublishedMode = &publishedMode
 	err := rollbackAll(mgr, []BackupEntry{entry})
 	if err != nil {
 		t.Fatalf("rollbackAll with empty backup: %v", err)
@@ -1140,8 +1149,8 @@ func TestRollbackAll_AggregatesFailures(t *testing.T) {
 	existed := true
 	mode := uint32(0o644)
 	entries := []BackupEntry{
-		{OriginalPath: "file1.txt", BackupPath: filepath.Join(backupDir, "missing1.bak"), Checksum: "h1", OriginalHash: "o1", OriginalMode: &mode, OriginalExisted: &existed, ExpectedPublishedHash: "p1"},
-		{OriginalPath: "file2.txt", BackupPath: filepath.Join(backupDir, "missing2.bak"), Checksum: "h2", OriginalHash: "o2", OriginalMode: &mode, OriginalExisted: &existed, ExpectedPublishedHash: "p2"},
+		{OriginalPath: "file1.txt", BackupPath: filepath.Join(backupDir, "missing1.bak"), Checksum: "h1", OriginalHash: "o1", OriginalMode: &mode, OriginalExisted: &existed, ExpectedPublishedHash: "p1", ExpectedPublishedMode: &mode},
+		{OriginalPath: "file2.txt", BackupPath: filepath.Join(backupDir, "missing2.bak"), Checksum: "h2", OriginalHash: "o2", OriginalMode: &mode, OriginalExisted: &existed, ExpectedPublishedHash: "p2", ExpectedPublishedMode: &mode},
 	}
 	err := rollbackAll(mgr, entries)
 	if err == nil {
@@ -1286,6 +1295,8 @@ func TestRollbackFromBackup(t *testing.T) {
 	// Modify.
 	os.WriteFile(srcPath, []byte("v2"), 0o644)
 	entry.ExpectedPublishedHash = HashContent([]byte("v2"))
+	publishedMode := fileModeIdentity(0o644)
+	entry.ExpectedPublishedMode = &publishedMode
 
 	rollbackEntries := []domain.RollbackEntry{
 		{
@@ -1296,6 +1307,7 @@ func TestRollbackFromBackup(t *testing.T) {
 			BackupSHA256:          entry.Checksum,
 			OriginalMode:          entry.OriginalMode,
 			ExpectedPublishedHash: entry.ExpectedPublishedHash,
+			ExpectedPublishedMode: entry.ExpectedPublishedMode,
 			RecoveryState:         domain.RecoveryPublished,
 		},
 	}

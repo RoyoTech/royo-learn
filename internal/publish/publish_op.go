@@ -156,6 +156,11 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 	if !input.Apply {
 		return &PublishResult{DryRun: true, Targets: planEntries}, nil
 	}
+	lock, err := acquirePublicationLock(s.projectRoot, "publish", input.Actor)
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Release()
 
 	// From here the plan is fixed. Every failure after the FIRST write must
 	// restore the tree byte-for-byte and must NEVER mark the learning published.
@@ -206,6 +211,11 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 		contentToWrite := composedContents[i]
 		expectedHash := HashContent([]byte(contentToWrite))
 		backupEntries[i].ExpectedPublishedHash = expectedHash
+		publishedMode := fileModeIdentity(0o644)
+		if snapshots[i].Exists {
+			publishedMode = fileModeIdentity(snapshots[i].Mode)
+		}
+		backupEntries[i].ExpectedPublishedMode = &publishedMode
 		rollbackEntries[i] = domain.RollbackEntry{
 			Path:                  backupEntries[i].OriginalPath,
 			Backup:                backupEntries[i].BackupPath,
@@ -214,6 +224,7 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 			BackupSHA256:          backupEntries[i].Checksum,
 			OriginalMode:          backupEntries[i].OriginalMode,
 			ExpectedPublishedHash: expectedHash,
+			ExpectedPublishedMode: &publishedMode,
 			RecoveryState:         domain.RecoveryPending,
 		}
 	}
@@ -292,7 +303,7 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 		expected := TargetIdentity{Exists: snapshots[i].Exists, Hash: snapshots[i].Hash}
 		perm := os.FileMode(0o644)
 		if snapshots[i].Exists {
-			mode := uint32(snapshots[i].Mode)
+			mode := fileModeIdentity(snapshots[i].Mode)
 			expected.Mode = &mode
 			perm = snapshots[i].Mode
 		}
@@ -752,6 +763,11 @@ func (s *Service) Rollback(ctx context.Context, projectID domain.ProjectID, inpu
 	if input == nil || input.PublicationID == "" {
 		return domain.NewValidationError(domain.ErrInvalidArgument, "publication_id is required")
 	}
+	lock, err := acquirePublicationLock(s.projectRoot, "rollback", input.Actor)
+	if err != nil {
+		return err
+	}
+	defer lock.Release()
 
 	// Load publication.
 	readTx, err := s.db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
