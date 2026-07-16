@@ -973,3 +973,111 @@ registradas para endurecer en el Tramo 5 junto con las de los Recorridos B y D.
 Recorrido F — actualización segura de Skills instaladas
 (`setup status` / `upgrade-skills --dry-run` / `--apply`). **No tocado en este
 recorrido.**
+
+---
+
+## 2026-07-14 — Recorrido F: actualización segura de Skills instaladas
+
+**Rama:** `fix/v019-contract-recovery`
+**Commit de partida:** `555d8ca` (cierre del Recorrido E)
+
+### Problema reparado (BASELINE-GAP Hallazgo 11)
+
+`internal/setup/skill.go` omitía cualquier Skill ya existente («Existing skills
+are skipped, never overwritten», `skill.go:20-21,49-54`). Corregir las Skills del
+repositorio (Recorrido A) NO reparaba las copias ya instaladas en las máquinas de
+usuarios de ≤v0.1.9: seguían citando tools inexistentes. Actualizar el binario no
+ofrecía ninguna ruta para actualizarlas.
+
+### Commits
+
+| Hash | Mensaje | Rol |
+|------|---------|-----|
+| `75c3801` | `test: require safe upgrade of installed skills` | **Prueba roja.** Los 7 tests fallan por falta de manifiesto y del subcomando `upgrade-skills`; el paquete compila. |
+| `d06b934` | `feat: safely upgrade managed skills` | Implementación mínima que los pone en verde. |
+| *(este)* | `docs: record Recorrido F closure in the recovery log` | Documentación. |
+
+### Diseño
+
+- **Manifiesto por Skill instalada** (`internal/setup/skillmanifest.go`):
+  `{name, version, source_sha256, installed_sha256, managed_by}`. Se persiste en
+  el índice oculto `<skills-dir>/.royo-learn/manifests/<name>.json`, junto a las
+  Skills pero fuera de cualquier directorio de Skill (no tiene `SKILL.md`, así que
+  ni los agentes ni `InstallSkills` lo tratan como Skill). `InstallSkills` ahora
+  escribe el manifiesto en cada instalación nueva; los hashes se calculan con
+  `HashSkillDir` (SHA-256 determinista sobre los mismos archivos que copia el
+  instalador, rutas normalizadas a `/`). La versión sale del frontmatter de
+  `SKILL.md`.
+- **Comandos** (`cmd/royo-learn/setup.go`): `setup upgrade-skills --dry-run`
+  (por defecto) y `--apply`. Cableados en el dispatcher `runSetup`. `setup status`
+  ya existía. Reutiliza `resolveSkillsSource` y `copyDir`/`writeFileAtomic`
+  existentes; no reimplementa hashing ni copia de archivos.
+- **Política exacta** (`internal/setup/skillupgrade.go`, `UpgradeSkills`):
+  - hash instalado == `installed_sha256` del manifiesto (intacto) → respaldar,
+    actualizar, registrar nueva versión (`upgrade`).
+  - hash instalado != manifiesto (modificado por el usuario) → NO sobrescribir;
+    crear versión candidata en `.royo-learn/candidates/<name>`, mostrar diff,
+    registrar conflicto en `.royo-learn/conflicts/<name>.json` (`conflict`).
+  - sin manifiesto de royo-learn / `managed_by` distinto → no tocarla
+    (`unmanaged`).
+  - hash instalado == hash de origen → `up_to_date` (idempotente).
+- **Aplicación atómica y recuperable** (`performUpgrade`): se prepara la versión
+  nueva en `staging` aparte → se respalda la copia actual ANTES de sobrescribir →
+  swap (borrar original, materializar staging). Si el swap falla tras borrar el
+  original, se restaura el backup. Dry-run por defecto (disciplina de D7): sólo
+  `--apply` escribe; un `--dry-run` explícito gana sobre `--apply`.
+
+### Los siete tests obligatorios
+
+Todos en `cmd/royo-learn/setup_upgrade_test.go`, conducidos SÓLO por la interfaz
+pública `royo-learn setup ...` (home aislado vía `HOME`/`USERPROFILE`).
+
+| Test | Qué prueba |
+|------|------------|
+| `TestUpgradeSkills_FreshInstallWritesManifest` | instalación nueva → instala y escribe manifiesto (`source==installed`, `managed_by=royo-learn`). |
+| `TestUpgradeSkills_CleanUpgrade` | upgrade sin modificaciones → respalda y actualiza; manifiesto pasa a v2. |
+| `TestUpgradeSkills_UserModifiedNotOverwritten` | upgrade con personalización → `conflict`; original **byte a byte** intacto; candidato con la versión nueva; diff presente. |
+| `TestUpgradeSkills_BackupIsRestorable` | el backup se crea antes de sobrescribir y su `SKILL.md` == original (restaurable). |
+| `TestUpgradeSkills_DryRunWritesNothing` | `--dry-run` (defecto) no toca Skill ni manifiesto ni crea backups; reporta `upgrade` (lo que HARÍA). |
+| `TestUpgradeSkills_IdempotentRepeat` | segunda corrida `--apply` → `up_to_date`, no-op. |
+| `TestUpgradeSkills_RecoveryAfterFailure` | fallo a mitad de upgrade (obstáculo en `staging`) → error, original byte a byte intacto, manifiesto en v1; tras quitar el obstáculo, la re-corrida recupera y actualiza. |
+
+Prueba roja verificada antes de implementar: los 7 fallan por «unknown setup
+subcommand "upgrade-skills"» y por manifiesto ausente.
+
+### Comandos ejecutados — resultado real
+
+- `go build ./...` limpio; `go vet ./...` limpio.
+- `go test -p 1 -count=1 ./...` → exit 1; la ÚNICA falla es
+  `internal/buildinfo` (`fork/exec ... buildinfo.test.exe: Access is denied`),
+  ruido ambiental de AV/Windows en un paquete no tocado; falla igual en
+  aislamiento. `cmd/royo-learn` e `internal/setup` en verde. Las tres flakes de
+  teardown de Windows (Recorridos B/D/E) pasaron en esta corrida.
+- `go test -race -p 1 -count=1 ./internal/setup/` → **ok**;
+  `go test -race -p 1 -count=1 -run 'TestUpgradeSkills|TestSetup' ./cmd/royo-learn/`
+  → **ok**.
+- Humo con binario real: instalar v1 (manifiesto escrito) → dry-run (nada
+  escrito) → `--apply` (backup creado, v2 en disco) → repetición (`up_to_date`);
+  y sobre Skill personalizada: `--apply` → `conflict`, hash del `SKILL.md`
+  idéntico antes y después (preservado byte a byte), candidato con v2, conflicto
+  registrado.
+
+### Puerta de salida del Recorrido F
+
+- [x] Manifiesto por Skill instalada, escrito en instalación nueva → **PASS**
+- [x] `setup upgrade-skills --dry-run` (defecto) y `--apply` cableados → **PASS**
+- [x] Skill intacta se actualiza con backup; modificada NO se sobrescribe → **PASS**
+- [x] Skill sin manifiesto de royo-learn no se toca → **PASS**
+- [x] Backup previo a la sobrescritura, restaurable → **PASS**
+- [x] Idempotente; recuperación tras fallo sin Skill a medio escribir → **PASS**
+- [x] Los 7 tests obligatorios, por la interfaz pública, en verde → **PASS**
+
+**Resultado del Recorrido F: PASS. Sin FAIL.** La única falla de la suite
+completa es la ambiental de `internal/buildinfo` (AV/Windows), ajena a este
+recorrido. Criterio de aceptación del plan cumplido: actualizar el binario ofrece
+una ruta segura para actualizar las Skills incompatibles ya instaladas.
+
+### Siguiente paso
+
+Tramo 3 — puerta de publicación del Hito 1 (`v0.1.10`). **Fuera del alcance de
+este recorrido; no tocado.**
