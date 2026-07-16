@@ -8,6 +8,10 @@
 [![हिन्दी](https://img.shields.io/badge/lang-hi-orange.svg)](README.hi.md)
 [![Português](https://img.shields.io/badge/lang-pt-lightgrey.svg)](README.pt.md)
 
+> **Tradução desatualizada.** Este documento não reflete as mudanças de contrato do
+> Marco 2 (D17, D18) nem a seção "Who does what". A fonte de verdade é o
+> [README em inglês](../README.md).
+
 > 🇧🇷 **Esta tradução ainda não está disponível.**
 >
 > O README canônico está em [inglês](../README.md).

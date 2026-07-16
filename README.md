@@ -149,6 +149,43 @@ royo-learn        # Linux/macOS
 royo-learn.exe    # Windows
 ```
 
+## Who does what
+
+The division of labour between the model and this engine is the whole design.
+Every line below describes behaviour that is demonstrated by a test in this
+repository — nothing here is aspirational.
+
+**What the LLM does.** It interprets the conversation, identifies what is worth
+keeping, structures it into a learning, proposes a destination, and recommends
+relationships to existing learnings. Judgement is the model's job.
+
+**What Royo-Learn does.** It validates the payload, persists it, records
+evidence, guarantees states, requires explicit human approval where policy
+demands it, publishes, verifies what it wrote, audits, reverts, and measures
+recurrences. Custody and governance are the engine's job.
+
+**What Royo-Learn does NOT do.**
+
+- It does not understand conversations by itself.
+- It does not decide on its own that an observation is a rule.
+- It does not approve on your behalf.
+- It does not replace Engram.
+- It does not need an internal LLM provider.
+- It does not use embeddings or a vector database — retrieval is FTS5.
+- It does not guarantee any capability it has not demonstrated.
+
+### Generated references
+
+These are derived from the code's own registries and validated in CI, so they
+cannot advertise something the binary does not have:
+
+| Documento | Fuente |
+|-----------|--------|
+| [CLI_REFERENCE.md](docs/generated/CLI_REFERENCE.md) | `commandRegistry` |
+| [MCP_REFERENCE.md](docs/generated/MCP_REFERENCE.md) | the MCP tool registry |
+| [PROFILES.md](docs/generated/PROFILES.md) | the MCP tool registry |
+| [ERROR_REFERENCE.md](docs/generated/ERROR_REFERENCE.md) | `AllErrorCodes()` |
+
 ## Installation
 
 ### Linux / macOS / WSL

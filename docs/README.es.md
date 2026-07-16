@@ -8,6 +8,10 @@
 [![हिन्दी](https://img.shields.io/badge/lang-hi-orange.svg)](README.hi.md)
 [![Português](https://img.shields.io/badge/lang-pt-lightgrey.svg)](README.pt.md)
 
+> **Traducción desactualizada.** Este documento no refleja los cambios de contrato
+> del Hito 2 (D17, D18) ni la sección «Who does what». La fuente de verdad es el
+> [README en inglés](../README.md). No lo tomes como contrato hasta que se actualice.
+
 **Agent Royo Learn** es un motor local de aprendizaje institucional para agentes de IA.
 
 No reemplaza a Gentle-AI ni a Engram:

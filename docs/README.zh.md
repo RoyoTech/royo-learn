@@ -8,6 +8,9 @@
 [![हिन्दी](https://img.shields.io/badge/lang-hi-orange.svg)](README.hi.md)
 [![Português](https://img.shields.io/badge/lang-pt-lightgrey.svg)](README.pt.md)
 
+> **翻译已过时。** 本文档未反映里程碑 2 的合同变更（D17、D18），也没有 “Who does what”
+> 一节。以[英文 README](../README.md) 为准。
+
 > 🇨🇳 **此翻译尚未完成。**
 >
 > 权威 README 为[英文版](../README.md)。

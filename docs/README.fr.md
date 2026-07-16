@@ -8,6 +8,10 @@
 [![हिन्दी](https://img.shields.io/badge/lang-hi-orange.svg)](README.hi.md)
 [![Português](https://img.shields.io/badge/lang-pt-lightgrey.svg)](README.pt.md)
 
+> **Traduction obsolète.** Ce document ne reflète pas les changements de contrat du
+> jalon 2 (D17, D18) ni la section « Who does what ». La source de vérité est le
+> [README en anglais](../README.md).
+
 > 🇫🇷 **Cette traduction n'est pas encore disponible.**
 >
 > Le README canonique est en [anglais](../README.md).

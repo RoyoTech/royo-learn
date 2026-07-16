@@ -8,6 +8,10 @@
 [![हिन्दी](https://img.shields.io/badge/lang-hi-orange.svg)](README.hi.md)
 [![Português](https://img.shields.io/badge/lang-pt-lightgrey.svg)](README.pt.md)
 
+> **Veraltete Übersetzung.** Dieses Dokument spiegelt weder die Vertragsänderungen
+> von Meilenstein 2 (D17, D18) noch den Abschnitt „Who does what“ wider. Die Quelle
+> der Wahrheit ist die [englische README](../README.md).
+
 > 🇩🇪 **Diese Übersetzung ist noch nicht verfügbar.**
 >
 > Die kanonische README ist auf [Englisch](../README.md).

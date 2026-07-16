@@ -8,6 +8,9 @@
 [![हिन्दी](https://img.shields.io/badge/lang-hi-orange.svg)](README.hi.md)
 [![Português](https://img.shields.io/badge/lang-pt-lightgrey.svg)](README.pt.md)
 
+> **अनुवाद पुराना है।** यह दस्तावेज़ माइलस्टोन 2 के अनुबंध परिवर्तनों (D17, D18) या
+> "Who does what" अनुभाग को नहीं दर्शाता। सत्य का स्रोत [अंग्रेज़ी README](../README.md) है।
+
 > 🇮🇳 **यह अनुवाद अभी उपलब्ध नहीं है।**
 >
 > आधिकारिक README [अंग्रेज़ी](../README.md) में है।
