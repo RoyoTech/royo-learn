@@ -55,82 +55,47 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return printHelp(stdout)
 	}
 
-	switch args[0] {
-	case "version":
-		return runVersion(args[1:], stdout, stderr)
-	case "init":
-		return runInit(args[1:], stdout, stderr)
-	case "doctor":
-		return runDoctor(args[1:], stdout, stderr)
-	case "capture":
-		return runCapture(args[1:], stdout, stderr)
-	case "curate":
-		return runCurate(args[1:], stdout, stderr)
-	case "get":
-		return runGet(args[1:], stdout, stderr)
-	case "search":
-		return runSearch(args[1:], stdout, stderr)
-	case "occurrence":
-		return runOccurrence(args[1:], stdout, stderr)
-	case "evidence":
-		return runEvidence(args[1:], stdout, stderr)
-	case "preview":
-		return runPreview(args[1:], stdout, stderr)
-	case "approve":
-		return runApprove(args[1:], stdout, stderr)
-	case "publish":
-		return runPublish(args[1:], stdout, stderr)
-	case "rollback":
-		return runRollback(args[1:], stdout, stderr)
-	case "mcp-serve":
-		return runMCPServe(args[1:], stdout, stderr)
-	case "engram-health":
-		return runEngramHealth(args[1:], stdout, stderr)
-	case "engram-search":
-		return runEngramSearch(args[1:], stdout, stderr)
-	case "recurrences":
-		return runRecurrences(args[1:], stdout, stderr)
-	case "metrics":
-		return runMetrics(args[1:], stdout, stderr)
-	case "e2e":
-		return runE2E(args[1:], stdout, stderr)
-	case "setup":
-		return runSetup(args[1:], stdout, stderr)
-	case "self-update":
-		return runSelfUpdate(args[1:], stdout, stderr)
-	default:
-		return writeUnknownCommandError(stderr)
+	cmd, ok := lookupCommand(args[0])
+	if !ok {
+		return writeUnknownCommandError(stderr, args[0])
 	}
+
+	rest := args[1:]
+
+	// Central --help handling: every registered command accepts --help (§4.1).
+	if len(rest) > 0 && (rest[0] == "--help" || rest[0] == "-h") {
+		return printCommandHelp(stdout, cmd)
+	}
+
+	if cmd.pending != "" {
+		return writePendingCommandError(stderr, cmd)
+	}
+
+	// Deprecated aliases keep working but warn on stderr, never silently (D8).
+	if cmd.deprecated != "" {
+		_, _ = fmt.Fprintf(stderr,
+			"royo-learn: warning: %q is deprecated and will be removed in %s; use %q\n",
+			cmd.name, deprecationRemovedIn, cmd.deprecated)
+	}
+
+	return cmd.run(rest, stdout, stderr)
 }
 
+// deprecationRemovedIn is the version that retires deprecated command aliases (D8).
+const deprecationRemovedIn = "v0.2.0"
+
 func printHelp(stdout io.Writer) int {
-	_, _ = fmt.Fprintf(stdout, `royo-learn — Capture, curate, and publish reusable learnings from AI-assisted development.
+	_, _ = fmt.Fprint(stdout, `royo-learn — Capture, curate, and publish reusable learnings from AI-assisted development.
 
 Usage:
   royo-learn <command> [flags]
 
 Commands:
-  init           Initialize a new royo-learn project
-  mcp-serve      Start the MCP server over stdio
-  capture        Capture a new learning
-  curate         Curate an existing learning
-  get            Retrieve a single learning by ID
-  occurrence     Record a recurrence of a learning's pattern
-  preview        Preview publication of a learning
-  approve        Approve a publication preview (human authorization)
-  publish        Publish a curated learning
-  rollback       Rollback a published learning
-  doctor         Run system diagnostics
-  search         Search captured learnings
-  engram-health  Check Engram connection health
-  engram-search  Search Engram memory
-  recurrences    List recurrence records
-  metrics        Show learning metrics
-  e2e            Run end-to-end tests
-  setup          Configure the tool for first use
-  version        Print version information
-  self-update    Update to the latest or a specific version
-
+`)
+	for _, c := range visibleCommands() {
+		_, _ = fmt.Fprintf(stdout, "  %-13s  %s\n", c.name, c.summary)
+	}
+	_, _ = fmt.Fprint(stdout, `
 Global flags:
   --project-root string   Explicit project root (most commands)
 
@@ -139,13 +104,15 @@ Run "royo-learn <command> --help" for command-specific flags.
 	return exitSuccess
 }
 
-func writeUnknownCommandError(stderr io.Writer) int {
+// writeUnknownCommandError reports an unknown command, naming the command that
+// was actually invoked and pointing at the command list (D12 correction).
+func writeUnknownCommandError(stderr io.Writer, invoked string) int {
 	_ = logging.WriteError(stderr, logging.ErrorEnvelope{
 		Code:        "invalid_argument",
-		Message:     invalidArgumentsMessage,
+		Message:     fmt.Sprintf("unknown command %q", invoked),
 		Recoverable: true,
-		Details:     map[string]any{},
-		NextAction:  invalidArgumentsNextAction,
+		Details:     map[string]any{"command": invoked},
+		NextAction:  `run "royo-learn --help" to see the available commands`,
 	})
 	return exitInvalidArguments
 }

@@ -196,6 +196,127 @@ func searchEngram(ctx context.Context, root, query string) []map[string]any {
 }
 
 // ---------------------------------------------------------------------------
+// list — list learnings with optional filters (docs/04-CLI-SPEC.md:175)
+// ---------------------------------------------------------------------------
+
+func runList(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("list", flag.ContinueOnError)
+	statusFilter := fs.String("status", "", "filter by learning status")
+	typeFilter := fs.String("type", "", "filter by learning type")
+	scopeFilter := fs.String("scope", "", "filter by scope guess")
+	projectFilter := fs.String("project", "", "reserved: filter by project (current project only for now)")
+	limit := fs.Int("limit", 50, "max results")
+	offset := fs.Int("offset", 0, "results to skip")
+	projectRoot := fs.String("project-root", "", "project root directory")
+	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
+
+	if err := fs.Parse(args); err != nil {
+		return writeRetrievalError(stderr, "invalid_argument", "list: %v", err)
+	}
+	_ = projectFilter // reserved for Hito 2 cross-project listing; declared so the flag is accepted.
+
+	_, db, projectID, exitCode := resolvePublishContext(*projectRoot, stderr)
+	if exitCode != exitSuccess {
+		return exitCode
+	}
+	defer db.Close()
+
+	filter := domain.LearningFilter{Limit: *limit, Offset: *offset}
+	if *statusFilter != "" {
+		filter.Status = []domain.LearningStatus{domain.LearningStatus(*statusFilter)}
+	}
+	if *typeFilter != "" {
+		filter.Type = []domain.LearningType{domain.LearningType(*typeFilter)}
+	}
+	if *scopeFilter != "" {
+		filter.Scope = []domain.Scope{domain.Scope(*scopeFilter)}
+	}
+
+	ctx := context.Background()
+	tx, err := db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return writeRetrievalError(stderr, "invalid_argument", "list: begin tx: %v", err)
+	}
+	learnings, err := storage.ListLearnings(ctx, tx, projectID, filter)
+	tx.Rollback()
+	if err != nil {
+		return writeRetrievalError(stderr, "invalid_argument", "list: %v", err)
+	}
+
+	results := make([]map[string]any, 0, len(learnings))
+	for _, l := range learnings {
+		results = append(results, learningToOutputMap(l))
+	}
+
+	if *jsonFlag {
+		data, _ := json.MarshalIndent(results, "", "  ")
+		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+	} else {
+		for _, l := range learnings {
+			_, _ = fmt.Fprintf(stdout, "%s [%s] %s\n", l.ID, l.Status, l.Title)
+		}
+		if len(learnings) == 0 {
+			_, _ = fmt.Fprintf(stdout, "No learnings.\n")
+		}
+	}
+	return exitSuccess
+}
+
+// ---------------------------------------------------------------------------
+// status — report a learning's lifecycle status (mirrors learning_status)
+// ---------------------------------------------------------------------------
+
+func runStatus(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return writeRetrievalError(stderr, "invalid_argument", "status: a learning id is required as the first argument")
+	}
+	learningID := args[0]
+
+	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	projectRoot := fs.String("project-root", "", "project root directory")
+	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
+	if err := fs.Parse(args[1:]); err != nil {
+		return writeRetrievalError(stderr, "invalid_argument", "status: %v", err)
+	}
+
+	_, db, _, exitCode := resolvePublishContext(*projectRoot, stderr)
+	if exitCode != exitSuccess {
+		return exitCode
+	}
+	defer db.Close()
+
+	ctx := context.Background()
+	tx, err := db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return writeRetrievalError(stderr, "invalid_argument", "status: begin tx: %v", err)
+	}
+	learning, err := storage.GetLearning(ctx, tx, domain.LearningID(learningID))
+	tx.Rollback()
+	if err != nil {
+		return writeRetrievalError(stderr, "invalid_argument", "status: %v", err)
+	}
+	if learning == nil {
+		return writeRetrievalError(stderr, "learning_not_found", "status: learning %q not found", learningID)
+	}
+
+	if *jsonFlag {
+		data, _ := json.MarshalIndent(map[string]any{
+			"learning_id": string(learning.ID),
+			"status":      string(learning.Status),
+			"type":        string(learning.Type),
+			"title":       learning.Title,
+			"revision":    learning.Revision,
+			"updated_at":  learning.UpdatedAt.Format(time.RFC3339),
+		}, "", "  ")
+		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+	} else {
+		_, _ = fmt.Fprintf(stdout, "%s: %s (%s, revision %d)\n",
+			learning.ID, learning.Status, learning.Type, learning.Revision)
+	}
+	return exitSuccess
+}
+
+// ---------------------------------------------------------------------------
 // occurrence — record a recurrence of a learning's pattern (docs/04:261)
 // ---------------------------------------------------------------------------
 

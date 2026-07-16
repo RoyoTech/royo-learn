@@ -276,6 +276,51 @@ Valida que el destino no haya cambiado desde la publicación. Si cambió, bloque
 devuelve el registro existente y no crea una segunda recurrencia. La respuesta
 incluye `new` (`true` si se creó, `false` si fue un reintento técnico).
 
+### `royo-learn status <id>`
+
+Informa el estado de ciclo de vida de un aprendizaje: `status`, tipo, revisión
+y última actualización. Es el equivalente CLI de la tool MCP `learning_status`.
+
+```text
+--project-root
+--json
+```
+
+### `royo-learn recurrences`
+
+Lista los registros de recurrencia de un aprendizaje (lectura de
+`internal/recurrence`, pieza del contrato de D5).
+
+```text
+--learning-id   (obligatorio)
+--limit
+--project-root
+--json
+```
+
+### `royo-learn metrics`
+
+Calcula las métricas de recurrencia de un aprendizaje: frecuencia, intervalo
+medio, tendencia y si necesita revisión. Distingue cero recurrencias, datos
+insuficientes, recurrencia repetida y recurrencia prevenida.
+
+```text
+--learning-id   (obligatorio)
+--project-root
+--json
+```
+
+### `royo-learn setup`
+
+Configura la herramienta para su primer uso. Subcomandos:
+
+```text
+install          registra el servidor MCP e instala las Skills incluidas
+uninstall        revierte la instalación
+status           muestra el estado de las Skills gestionadas
+upgrade-skills   actualiza de forma segura las Skills ya instaladas (--dry-run|--apply)
+```
+
 ### `royo-learn review`
 
 Lista:

@@ -874,11 +874,13 @@ func assertInvalidArgumentsDiagnostic(t *testing.T, output []byte) {
 	if len(diagnostic) != 5 {
 		t.Errorf("diagnostic field count = %d, want 5: %s", len(diagnostic), output)
 	}
+	// D12 correction: an unknown command names the command actually invoked and
+	// points at the command list, instead of always mentioning "version --json".
 	assertDiagnosticField(t, diagnostic, "code", `"invalid_argument"`)
-	assertDiagnosticField(t, diagnostic, "message", `"invalid arguments: expected \"version --json\""`)
+	assertDiagnosticField(t, diagnostic, "message", `"unknown command \"unknown\""`)
 	assertDiagnosticField(t, diagnostic, "recoverable", "true")
-	assertDiagnosticField(t, diagnostic, "details", "{}")
-	assertDiagnosticField(t, diagnostic, "next_action", `"run \"royo-learn version --json\""`)
+	assertDiagnosticField(t, diagnostic, "details", `{"command":"unknown"}`)
+	assertDiagnosticField(t, diagnostic, "next_action", `"run \"royo-learn --help\" to see the available commands"`)
 }
 
 func assertDiagnosticField(t *testing.T, diagnostic map[string]json.RawMessage, field, want string) {

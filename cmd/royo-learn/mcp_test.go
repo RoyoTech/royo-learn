@@ -22,9 +22,12 @@ func TestMCPServe_UninitializedProjectRequiresInit(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 
-	exitCode := run([]string{"mcp-serve", "--project-root", root}, &stdout, &stderr)
+	// Use the canonical "mcp" command (D10). The deprecated "mcp-serve" alias
+	// prints a deprecation warning to stderr, which would precede the JSON
+	// envelope this test decodes.
+	exitCode := run([]string{"mcp", "--project-root", root}, &stdout, &stderr)
 	if exitCode != exitProjectNotFound {
-		t.Fatalf("run(mcp-serve) exit code = %d, want %d; stderr: %s", exitCode, exitProjectNotFound, stderr.String())
+		t.Fatalf("run(mcp) exit code = %d, want %d; stderr: %s", exitCode, exitProjectNotFound, stderr.String())
 	}
 
 	var diagnostic struct {
