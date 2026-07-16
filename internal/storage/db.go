@@ -40,6 +40,12 @@ func Open(path string) (*DB, error) {
 	return &DB{DB: conn, path: path}, nil
 }
 
+// Path returns the filesystem path the database was opened from. It is empty
+// for in-memory databases.
+func (db *DB) Path() string {
+	return db.path
+}
+
 // Close closes the underlying database connection.
 func (db *DB) Close() error {
 	if db.DB == nil {

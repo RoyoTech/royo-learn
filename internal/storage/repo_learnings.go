@@ -191,6 +191,38 @@ func ListLearningsByIDs(ctx context.Context, tx *sql.Tx, ids []domain.LearningID
 	return out, rows.Err()
 }
 
+// ExportAllLearnings returns every learning in a project, ordered
+// deterministically by (created_at, id). Unlike ListLearnings it applies no
+// limit: it is the read side of a complete, portable export (plan 4.6).
+func ExportAllLearnings(ctx context.Context, tx *sql.Tx, projectID domain.ProjectID) ([]*domain.Learning, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT
+			id, project_id, status, type, title, context, observation,
+			reusable_lesson, recommended_procedure_json, limits_text,
+			scope_guess, approved_scope, confidence, evidence_level,
+			proposed_destination, approved_destination_json, retrieval_terms_text,
+			fingerprint, normalized_hash, idempotency_key,
+			actor_json, revision, created_at, updated_at
+		FROM learnings
+		WHERE project_id = ?
+		ORDER BY created_at, id
+	`, string(projectID))
+	if err != nil {
+		return nil, fmt.Errorf("ExportAllLearnings: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*domain.Learning
+	for rows.Next() {
+		l, scanErr := scanLearningFromRows(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("ExportAllLearnings: scan: %w", scanErr)
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
 // UpdateLearning updates an existing learning.
 func UpdateLearning(ctx context.Context, tx *sql.Tx, l *domain.Learning) error {
 	recProcJSON := marshalStringSlice(l.RecommendedProcedure)

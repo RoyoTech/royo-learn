@@ -57,6 +57,10 @@ func init() {
 		{name: "recurrences", summary: "List recurrence records for a learning", run: runRecurrences},
 		{name: "metrics", summary: "Show recurrence metrics for a learning", run: runMetrics},
 		{name: "status", summary: "Report the lifecycle status of a learning", run: runStatus},
+		{name: "review", summary: "List candidates, needs-evidence, approved-not-published and recurrences", run: runReview},
+		{name: "export", summary: "Export a versioned, portable snapshot of the store", run: runExport},
+		{name: "import", summary: "Validate and import a bundle (dry-run by default)", run: runImport},
+		{name: "rebuild-index", summary: "Rebuild the search index and re-materialize records from SQLite", run: runRebuildIndex},
 		{name: "mcp", summary: "Start the MCP server over stdio", run: runMCPServe},
 		{name: "e2e", summary: "Run the end-to-end demonstration", run: runE2E},
 		{name: "setup", summary: "Configure the tool for first use", run: runSetup},
@@ -66,12 +70,6 @@ func init() {
 		{name: "mcp-serve", summary: "Deprecated alias of mcp", run: runMCPServe, deprecated: "mcp"},
 		{name: "engram-health", summary: "Deprecated: folded under doctor", run: runEngramHealth, deprecated: "doctor"},
 		{name: "engram-search", summary: "Deprecated: folded under search --include-engram", run: runEngramSearch, deprecated: "search"},
-
-		// Pending (Hito 2 §4.6). Documented in docs/04 but not yet implemented.
-		{name: "review", pending: "Hito 2 §4.6"},
-		{name: "export", pending: "Hito 2 §4.6"},
-		{name: "import", pending: "Hito 2 §4.6"},
-		{name: "rebuild-index", pending: "Hito 2 §4.6"},
 	}
 }
 

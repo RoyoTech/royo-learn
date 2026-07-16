@@ -126,6 +126,20 @@ func scanRecurrenceRows(rows *sql.Rows) ([]*domain.RecurrenceRecord, error) {
 	return out, rows.Err()
 }
 
+// RecurrenceExists reports whether a recurrence record with the given ID is
+// already stored. It is the idempotency guard for a portable import (plan 4.6).
+func RecurrenceExists(ctx context.Context, tx *sql.Tx, id domain.RecurrenceRecordID) (bool, error) {
+	var one int
+	err := tx.QueryRowContext(ctx, `SELECT 1 FROM recurrence_records WHERE id = ?`, string(id)).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("RecurrenceExists: %w", err)
+	}
+	return true, nil
+}
+
 // ListRecurrenceRecords returns recurrence records for a given fingerprint,
 // ordered by occurred_at DESC.
 func ListRecurrenceRecords(ctx context.Context, tx *sql.Tx, projectID domain.ProjectID, fingerprint string, limit int) ([]*domain.RecurrenceRecord, error) {

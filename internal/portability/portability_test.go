@@ -294,7 +294,11 @@ func TestImport_ConflictIsNotSilentlyOverwritten(t *testing.T) {
 	// Destination already holds a learning with the SAME id but DIFFERENT content.
 	dst, dstDir, dstProj := newFileDB(t)
 	conflicting := seedLearning(t, dst, dstProj.ID, "different-title", "hash-DIFFERENT")
-	// Force the same ID as the incoming record.
+	// Drop the seeded evidence first so re-pointing the learning id does not
+	// break the evidence foreign key, then force the id collision.
+	if _, err := dst.DB.Exec("DELETE FROM evidence WHERE learning_id = ?", string(conflicting.ID)); err != nil {
+		t.Fatalf("clear evidence: %v", err)
+	}
 	if _, err := dst.DB.Exec("UPDATE learnings SET id = ? WHERE id = ?", string(l.ID), string(conflicting.ID)); err != nil {
 		t.Fatalf("force id collision: %v", err)
 	}
