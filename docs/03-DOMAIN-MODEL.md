@@ -61,6 +61,18 @@ superseded
 archived
 ```
 
+### Reversión de una publicación
+
+Un rollback exitoso devuelve el aprendizaje a `approved`: la curación sigue
+siendo válida y solo se deshizo la materialización publicada. La publicación
+pasa a `rolled_back` y el aprendizaje a `approved` en una misma transacción.
+Si la restauración falla, la publicación pasa a `failed` y el aprendizaje
+permanece `published`, porque no puede afirmarse que dejó de estar publicado.
+
+La arista `published → approved` no pertenece a `domain.ValidTransitions`.
+Esa tabla gobierna la curación; solo el ciclo de vida de publicación puede
+restaurar archivos y revocar el estado publicado de manera coordinada (D18).
+
 ## Alcances
 
 ```text
@@ -306,6 +318,9 @@ type Actor struct {
 
 - Un `published` siempre tiene al menos una publicación verificada.
 - Un `approved` siempre tiene curación.
+- Toda operación que cambia la verdad de un aprendizaje re-materializa su
+  registro Markdown desde SQLite. Si esa tarea posterior al commit falla, la
+  respuesta declara el estado ya confirmado y prohíbe el reintento ciego (D18).
 - Un `Approval` solo vale para un `PreviewHash`.
 - Una publicación no puede escapar de una raíz autorizada.
 - Una evidencia nunca contiene un secreto conocido sin redacción.

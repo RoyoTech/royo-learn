@@ -57,6 +57,15 @@
 - [ ] publish.
 - [ ] verify.
 - [ ] rollback.
+- [ ] tras `publish`, SQLite y el registro Markdown reflejan `published`.
+- [ ] tras un rollback exitoso, el aprendizaje vuelve a `approved` y el registro
+      Markdown refleja ese estado; un rollback fallido no lo cambia (D18).
+- [ ] antes de la primera escritura existe una publicación `in_progress` con
+      metadatos suficientes para recuperar todos los destinos (D20).
+- [ ] un destino modificado fuera del proceso nunca se sobrescribe durante
+      publicación o rollback; se devuelve un patch de reversión accionable (D20).
+- [ ] CLI y MCP conservan `code`, `recoverable`, `details`, `next_action` y la
+      ruta del artefacto de recuperación de un error de rollback.
 - [ ] occurrence.
 - [ ] métricas.
 

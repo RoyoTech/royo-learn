@@ -31,6 +31,10 @@
 | D14 | Las instrucciones de `initialize` mienten sobre el perfil | Tramo 0 — Hallazgo 18 |
 | D15 | **Una Skill no cita `learning_approve` hasta que exista** | Tramo 2 — Recorrido A |
 | D16 | Los aliases deprecated no se anuncian: aclaración de D14 | Tramo 2 — Recorrido A |
+| D17 | Seis operaciones se adelantan al Hito 1 | Tramo 2 — Recorrido E |
+| D18 | Estado del aprendizaje tras rollback y materialización del registro | Cierre de seguridad v0.1.10 |
+| D19 | Compatibilidad JSON de `PolicyEvaluation` | Cierre de seguridad v0.1.10 |
+| D20 | Persistencia y convergencia de recuperación | Cierre de seguridad v0.1.10 |
 
 ---
 
@@ -1707,3 +1711,106 @@ obligatorios, es decir, el soft-pass que este recorrido existe para erradicar.
 ### Fecha
 
 2026-07-14
+
+---
+
+## D18 — Estado tras rollback y materialización desde SQLite
+
+### Contexto
+
+`publish` y `rollback` cambiaban el estado canónico en SQLite sin regenerar el
+registro Markdown. Además, un rollback exitoso restauraba los archivos pero
+dejaba el aprendizaje en `published`. El resultado era una verdad contradictoria
+entre base, registro derivado y filesystem.
+
+### Decisión
+
+1. Un rollback exitoso confirma en una misma transacción la publicación
+   `rolled_back` y el aprendizaje `approved`.
+2. Un rollback fallido no cambia el aprendizaje: conserva `published`.
+3. `published → approved` es una transición operacional de publicación, no una
+   acción de curación, y no se añade a `domain.ValidTransitions`.
+4. La materialización vive en `internal/record`, que solo depende de dominio.
+   `capture`, `curate` y `publish` lo consumen sin dependencias entre servicios
+   hermanos; `internal/publish` no importa `internal/capture`.
+5. `publish.Service` siempre dispone de un directorio de registros: usa
+   `<project>/.royo-learn/records` por defecto y admite un override explícito para
+   composición y pruebas.
+6. Si SQLite ya confirmó el estado pero fallan la materialización o el journal,
+   se intentan ambas tareas y se devuelve un error no recuperable con
+   `committed=true`, identificador, estado y causas unidas. No se revierte ni se
+   invita a repetir la publicación a ciegas.
+
+### Justificación
+
+SQLite es la fuente de verdad (D6). Un derivado que no se regenera cuando cambia
+esa verdad es obsoleto. `approved` ya expresa exactamente el estado posterior al
+rollback: curado, aprobado y no publicado; crear otro estado ampliaría el dominio
+sin aportar semántica.
+
+### Fecha
+
+2026-07-16
+
+---
+
+## D19 — Compatibilidad JSON de `PolicyEvaluation`
+
+### Contexto
+
+La respuesta pública de preview ya exponía `PolicyEvaluation` con claves
+`PolicyName`, `Passed` y `Reason`. Renombrarlas a `snake_case` en una versión de
+estabilización rompería consumidores aunque fuese más consistente con el resto
+del API.
+
+### Decisión
+
+Se preservan esas tres claves PascalCase mediante tags JSON explícitos. La
+excepción queda fijada por `TestPolicyEvaluationPreservesPublicJSONKeys`;
+cualquier cambio posterior requiere versión y migración de contrato, no una
+limpieza silenciosa.
+
+### Fecha
+
+2026-07-16
+
+---
+
+## D20 — Persistencia previa y recuperación convergente
+
+### Contexto
+
+Una publicación modifica varios destinos y combina SQLite, backups, journal y
+filesystem. Sin una identidad persistida antes de escribir, o si el último
+reemplazo ignora cambios concurrentes, una interrupción puede dejar archivos
+modificados sin una ruta segura y observable de recuperación.
+
+### Decisión
+
+1. Antes de la primera escritura se persiste una publicación `in_progress` con
+   `publication_id`, destinos, existencia y modo originales, checksums de backup,
+   hash original, hash publicado esperado y estado de recuperación por destino.
+2. Backups, journal y artefactos se confinan a raíces autorizadas; traversal,
+   symlinks y escapes se rechazan. Los backups nacen del mismo snapshot leído una
+   vez, usan nombres sin colisión y sincronizan contenido antes de continuar.
+3. La escritura final usa compare-and-swap contra la identidad del snapshot. Un
+   cambio externo en la frontera final se preserva y se informa como conflicto.
+4. Rollback converge por destino: reconoce estados ya restaurados, persiste cada
+   avance y puede reintentarse después de un fallo de SQLite sin deshacer trabajo
+   válido.
+5. Metadatos de rollback vacíos, malformados o heredados incompletos fallan
+   cerrados. El destino no se toca y se crea un artefacto para recuperación manual.
+6. Un conflicto nunca sobrescribe el destino. La CLI y MCP reciben el código real,
+   detalles, `next_action` y `recovery_artifact`; el journal terminal nunca falla
+   en silencio.
+
+### Justificación
+
+No se intenta una transacción distribuida ni se añade un outbox. SQLite conserva
+la identidad canónica del intento; los efectos derivados son idempotentes,
+auditables y reconciliables. Esta es la opción mínima que mantiene verdad y
+recuperabilidad ante interrupciones reales.
+
+### Fecha
+
+2026-07-16

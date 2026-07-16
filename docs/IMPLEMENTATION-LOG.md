@@ -1242,3 +1242,89 @@ verde salvo el ruido ambiental de AV (`internal/buildinfo`), reproducido como
 no-código; no existe ningún soft-pass nuevo; el README describe exactamente el
 comportamiento demostrado. El comando de release queda listo y **detenido** para
 aprobación humana. No se publicó nada.
+
+---
+
+## 2026-07-16 — Cierre de seguridad del candidato v0.1.10
+
+La revisión posterior a `66a90da` encontró que el veredicto anterior era
+prematuro: publicación y rollback aún tenían ventanas de pérdida de identidad,
+sobrescritura concurrente, recuperación no convergente y divergencia entre
+SQLite y el registro Markdown. Esta entrada **supersede el veredicto operativo
+READY-FOR-RELEASE anterior** sin reescribir su evidencia histórica.
+
+### Rama y alcance
+
+- Rama: `fix/v0110-release-safety`.
+- Base exacta: `66a90daaac98ed6e64bbe1235dbe425cde7f18c3`.
+- Alcance: seguridad de publicación/rollback, verdad derivada, salida de
+  recuperación CLI/MCP, CI y documentación de candidato.
+- Fuera de alcance: Hito 2, outbox, proveedor LLM, embeddings, push, tag, PR y
+  GoReleaser.
+
+### Unidades TDD
+
+| Unidad | RED | GREEN |
+|--------|-----|-------|
+| Backups, rutas y CAS | `7d3cb3f` | `c4055d6` |
+| Intento alcanzable y rollback convergente | `6e9d45e` | `99c6397` |
+| Verdad SQLite/Markdown tras publish y rollback | `0db17d3` | `58ba1bb` |
+| Errores de recuperación CLI/MCP | `40320ab` | `d0ba329` |
+| Matriz CI y portabilidad | — | `29f784d` |
+
+### Resultado técnico
+
+1. La publicación `in_progress` y sus metadatos completos existen antes de la
+   primera escritura. El mismo `publication_id` identifica SQLite y journal.
+2. Los backups se generan desde un snapshot único, quedan confinados y
+   sincronizados, preservan modo y evitan colisiones de basename.
+3. Las escrituras usan CAS hasta la frontera final. Un cambio externo se
+   conserva y se informa; nunca se reemplaza por una restauración automática.
+4. Rollback persiste progreso por destino, reconoce restauraciones ya hechas y
+   converge después de fallos de SQLite. Metadatos heredados no verificables
+   fallan cerrados y producen un artefacto.
+5. `internal/record` materializa la verdad confirmada. Publish no importa
+   capture; rollback exitoso confirma `rolled_back` + `approved` en una misma
+   transacción.
+6. CLI y MCP proyectan el mismo error de dominio. Los conflictos conservan el
+   patch de reversión, detalles y siguiente acción; no se degradan a texto.
+7. D19 fija explícitamente las claves JSON heredadas `PolicyName`, `Passed` y
+   `Reason` para no romper consumidores de `v0.1.x`.
+
+### Evidencia ejecutada
+
+```text
+go test -race -count=1 ./internal/record ./internal/capture ./internal/curate ./internal/publish ./internal/storage
+  → PASS
+
+go test -race -count=1 ./internal/domain ./internal/mcpserver ./cmd/royo-learn
+  → PASS
+
+go test -count=1 ./internal/integration ./internal/publish ./internal/storage
+  → PASS
+
+go vet ./...
+  → PASS
+
+go test -race -count=1 ./...
+  → PASS completo, sin cache; todos los paquetes ok
+
+GOOS={linux,darwin,windows} GOARCH={amd64,arm64} CGO_ENABLED=0 go build ./cmd/royo-learn
+  → PASS en las seis combinaciones
+
+binario instalado en GOBIN temporal: init + doctor --json + e2e --temp
+  → PASS; E2E 37/37
+```
+
+Una corrida anterior de `go test ./...` no llegó a ejecutar
+`internal/buildinfo.test.exe`: Windows devolvió `Access is denied`, incluso al
+reintentar ese paquete aislado. La corrida final completa, sin cache y con race
+sí pasó. El incidente se conserva como flake ambiental intermitente. La CI ahora
+exige `-race` en Linux y prueba Windows/macOS sin race sobre Go mínimo y estable;
+esa matriz está configurada pero **NOT_RUN** hasta que un humano autorice push.
+
+### Veredicto
+
+**CANDIDATO PREPARADO, RELEASE BLOQUEADO POR CI NO EJECUTADA.** No se creó tag,
+no se hizo push, no se abrió PR y no se ejecutó GoReleaser. El informe final
+vigente es `docs/FINAL-IMPLEMENTATION-REPORT.md`.
