@@ -188,10 +188,18 @@ func (h *p2Harness) previewAndPublish(t *testing.T, lid domain.LearningID) domai
 	if err != nil {
 		t.Fatalf("preview %s: %v", lid, err)
 	}
+	approval, err := h.publishSvc.Approve(h.ctx, h.project.ID, &ApproveInput{
+		LearningID: lid, PreviewHash: prev.Preview.PreviewHash,
+		ApprovedBy: "test", Reason: "multi-target fixture", ApprovalEvidence: "test", Actor: h.actor,
+	})
+	if err != nil {
+		t.Fatalf("approve %s: %v", lid, err)
+	}
 	pub, err := h.publishSvc.Publish(h.ctx, h.project.ID, &PublishInput{
 		Apply:       true,
 		LearningID:  lid,
 		PreviewHash: prev.Preview.PreviewHash,
+		ApprovalID:  &approval.ID,
 		Force:       true,
 		Actor:       h.actor,
 	})
@@ -443,6 +451,13 @@ func TestP2_PreviewMatchesPublishPath(t *testing.T) {
 	if strings.Contains(gotTargetPath, "SKILL.md/SKILL.md") {
 		t.Errorf("P2: path-doubling bug present in preview: %q", gotTargetPath)
 	}
+	approval, err := h.publishSvc.Approve(h.ctx, h.project.ID, &ApproveInput{
+		LearningID: lidA, PreviewHash: prev.Preview.PreviewHash,
+		ApprovedBy: "test", Reason: "multi-target fixture", ApprovalEvidence: "test", Actor: h.actor,
+	})
+	if err != nil {
+		t.Fatalf("P2: approve: %v", err)
+	}
 
 	// Publish using the SAME preview (do not re-preview — that would conflict)
 	// and confirm the file lands at the exact path preview reported.
@@ -450,6 +465,7 @@ func TestP2_PreviewMatchesPublishPath(t *testing.T) {
 		Apply:       true,
 		LearningID:  lidA,
 		PreviewHash: prev.Preview.PreviewHash,
+		ApprovalID:  &approval.ID,
 		Force:       true,
 		Actor:       h.actor,
 	})

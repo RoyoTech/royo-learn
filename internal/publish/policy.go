@@ -2,6 +2,7 @@ package publish
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -59,6 +60,26 @@ func PlanSignature(targets []domain.PublicationPlanTarget) string {
 	}
 	sort.Strings(parts)
 	return strings.Join(parts, "\n")
+}
+
+func previewHash(learningID domain.LearningID, targets []domain.PublicationPlanTarget, policySignature string) string {
+	payload := fmt.Sprintf("learning=%s\npolicy=%s\n%s", learningID, policySignature, PlanSignature(targets))
+	return HashContent([]byte(payload))
+}
+
+func requiresSensitiveApproval(targets []TargetResolution) bool {
+	if len(targets) > 1 {
+		return true
+	}
+	for _, target := range targets {
+		if filepath.Clean(target.Path) == "AGENTS.md" || filepath.Clean(target.Root) == "shared" {
+			return true
+		}
+		if target.Exists && strings.EqualFold(filepath.Base(target.Path), "SKILL.md") {
+			return true
+		}
+	}
+	return false
 }
 
 // policyPreferenceTypeRequiresHuman: preference-type learnings routed to shared

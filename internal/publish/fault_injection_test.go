@@ -69,7 +69,7 @@ func TestFault_FirstFileWriteFails(t *testing.T) {
 	svc.writer = &faultyWriter{real: NewWriter(env.projectRoot), failAt: 1}
 
 	_, err := svc.Publish(ctx, env.projectID, &PublishInput{
-		LearningID: env.learningID, PreviewHash: env.previewHash,
+		LearningID: env.learningID, PreviewHash: env.previewHash, ApprovalID: env.approvalID,
 		Apply: true, Force: true, Actor: env.actor,
 	})
 	if err == nil {
@@ -93,7 +93,7 @@ func TestFault_SecondFileWriteFails(t *testing.T) {
 	svc.writer = fw
 
 	_, err := svc.Publish(ctx, env.projectID, &PublishInput{
-		LearningID: env.learningID, PreviewHash: env.previewHash,
+		LearningID: env.learningID, PreviewHash: env.previewHash, ApprovalID: env.approvalID,
 		Apply: true, Force: true, Actor: env.actor,
 	})
 	if err == nil {
@@ -122,7 +122,7 @@ func TestFault_VerificationFails(t *testing.T) {
 	svc.writer = &faultyWriter{real: NewWriter(env.projectRoot), corruptAt: 1}
 
 	_, err := svc.Publish(ctx, env.projectID, &PublishInput{
-		LearningID: env.learningID, PreviewHash: env.previewHash,
+		LearningID: env.learningID, PreviewHash: env.previewHash, ApprovalID: env.approvalID,
 		Apply: true, Force: true, Actor: env.actor,
 	})
 	if err == nil {
@@ -154,7 +154,7 @@ func TestFault_JournalAttemptFails(t *testing.T) {
 	}
 
 	_, err := svc.Publish(ctx, env.projectID, &PublishInput{
-		LearningID: env.learningID, PreviewHash: env.previewHash,
+		LearningID: env.learningID, PreviewHash: env.previewHash, ApprovalID: env.approvalID,
 		Apply: true, Force: true, Actor: env.actor,
 	})
 	if err == nil {
@@ -186,7 +186,7 @@ func TestFault_FinalSQLiteUpdateFails(t *testing.T) {
 	}
 
 	_, err := svc.Publish(ctx, env.projectID, &PublishInput{
-		LearningID: env.learningID, PreviewHash: env.previewHash,
+		LearningID: env.learningID, PreviewHash: env.previewHash, ApprovalID: env.approvalID,
 		Apply: true, Force: true, Actor: env.actor,
 	})
 	if err == nil {
@@ -218,7 +218,7 @@ func TestFault_RollbackItselfFailsEmitsRecoveryInstruction(t *testing.T) {
 	}
 
 	_, err := svc.Publish(ctx, env.projectID, &PublishInput{
-		LearningID: env.learningID, PreviewHash: env.previewHash,
+		LearningID: env.learningID, PreviewHash: env.previewHash, ApprovalID: env.approvalID,
 		Apply: true, Force: true, Actor: env.actor,
 	})
 	if err == nil {
@@ -268,7 +268,8 @@ func TestFault_DestinationModifiedAfterPreviewIsRefused(t *testing.T) {
 
 	_, err = svc.Publish(ctx, env.projectID, &PublishInput{
 		LearningID: env.learningID, PreviewHash: prev.Preview.PreviewHash,
-		Apply: true, Force: true, Actor: env.actor,
+		ApprovalID: env.approvalID,
+		Apply:      true, Force: true, Actor: env.actor,
 	})
 	if err == nil {
 		t.Fatal("publish must refuse a destination that changed after the preview")

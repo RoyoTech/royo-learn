@@ -68,7 +68,7 @@ func TestPublishMaterializationFailureReportsCommittedState(t *testing.T) {
 	svc.faults = &FaultHooks{BeforeMaterialize: func() error { return materializeErr }}
 
 	_, err := svc.Publish(context.Background(), env.projectID, &PublishInput{
-		LearningID: env.learningID, PreviewHash: env.previewHash,
+		LearningID: env.learningID, PreviewHash: env.previewHash, ApprovalID: env.approvalID,
 		Apply: true, Force: true, Actor: env.actor,
 	})
 	assertCommittedError(t, err, domain.PubStatusCompleted)
@@ -93,7 +93,7 @@ func TestPublishPreservesMaterializationAndTerminalAuditFailures(t *testing.T) {
 	}
 
 	_, err := svc.Publish(context.Background(), env.projectID, &PublishInput{
-		LearningID: env.learningID, PreviewHash: env.previewHash,
+		LearningID: env.learningID, PreviewHash: env.previewHash, ApprovalID: env.approvalID,
 		Apply: true, Force: true, Actor: env.actor,
 	})
 	assertCommittedError(t, err, domain.PubStatusCompleted)

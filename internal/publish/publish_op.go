@@ -57,25 +57,8 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 		return nil, domain.NewConflictError(domain.ErrPreviewHashMismatch,
 			"preview has been invalidated — regenerate before publishing")
 	}
-
-	// 3. Check approval if required. When the preview requires approval the
-	// caller MUST name the specific approval_id: finding "some compatible"
-	// approval is not enough (D11 §11.1). The approval must be the one bound to
-	// THIS preview hash, and CheckApproval enforces its expiry and revocation.
-	var approval *domain.Approval
-	if preview.RequiresApproval {
-		if input.ApprovalID == nil || *input.ApprovalID == "" {
-			return nil, domain.NewValidationError(domain.ErrApprovalRequired,
-				"approval_id is required to publish this preview — obtain one with 'royo-learn approve' / learning_approve")
-		}
-		approval, err = s.CheckApproval(ctx, input.PreviewHash)
-		if err != nil {
-			return nil, err
-		}
-		if approval.ID != *input.ApprovalID {
-			return nil, domain.NewValidationError(domain.ErrApprovalInvalid,
-				"provided approval_id does not match the valid approval bound to this preview")
-		}
+	if err := validatePreviewIntegrity(preview, input.LearningID); err != nil {
+		return nil, err
 	}
 
 	// 4. Get the latest curation.
@@ -133,6 +116,32 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 	if err != nil {
 		return nil, fmt.Errorf("Publish: resolve targets: %w", err)
 	}
+	policies := EvaluatePolicies(learning, curation)
+	if preview.Plan.PolicySignature != PolicySignature(policies) {
+		return nil, previewMismatch("curation or policy changed after preview; regenerate the preview")
+	}
+	plannedContents, err := validatePlannedTargets(preview, targets)
+	if err != nil {
+		return nil, err
+	}
+
+	// Approval is derived from current resolved impact, never trusted from the
+	// persisted boolean alone.
+	var approval *domain.Approval
+	if RequiresHumanApproval(policies) || requiresSensitiveApproval(targets) {
+		if input.ApprovalID == nil || *input.ApprovalID == "" {
+			return nil, domain.NewValidationError(domain.ErrApprovalRequired,
+				"approval_id is required to publish this preview — obtain one with 'royo-learn approve' / learning_approve")
+		}
+		approval, err = s.CheckApproval(ctx, input.PreviewHash)
+		if err != nil {
+			return nil, err
+		}
+		if approval.ID != *input.ApprovalID || approval.LearningID != input.LearningID {
+			return nil, domain.NewValidationError(domain.ErrApprovalInvalid,
+				"provided approval_id does not match this learning and preview")
+		}
+	}
 
 	// Dry-run gate (D7): validation has passed, but a write requires an explicit
 	// Apply. Without it, return the plan and touch NO file. This runs AFTER the
@@ -189,17 +198,12 @@ func (s *Service) Publish(ctx context.Context, projectID domain.ProjectID, input
 		backupEntries = append(backupEntries, *entry)
 	}
 
-	// 8b. Compose every output before recording the attempt so rollback metadata
-	// can contain the exact expected post-publication identity before any write.
-	targetContents := s.buildPublishContents(ctx, targets, learning, curation, targetCtx)
-	composedContents := make([]string, len(targets))
+	// 8b. Apply the exact posterior bytes persisted by the preview. Mutable
+	// learning and curation state is never used to recompose authorized output.
+	composedContents := plannedContents
 	rollbackEntries := make([]domain.RollbackEntry, len(targets))
-	for i, target := range targets {
-		contentToWrite, composeErr := s.composeTargetContent(target, targetContents[i].Content, input.LearningID, targetCtx)
-		if composeErr != nil {
-			return nil, fmt.Errorf("Publish: compose %s: %w", target.Path, composeErr)
-		}
-		composedContents[i] = contentToWrite
+	for i := range targets {
+		contentToWrite := composedContents[i]
 		expectedHash := HashContent([]byte(contentToWrite))
 		backupEntries[i].ExpectedPublishedHash = expectedHash
 		rollbackEntries[i] = domain.RollbackEntry{
@@ -450,9 +454,6 @@ func (s *Service) composeTargetContent(target TargetResolution, proposed string,
 // content hash against the prior hash the preview recorded. A bare preview with
 // no recorded targets skips the check (backward compatibility).
 func (s *Service) validateCurrentHashes(preview *domain.PublicationPreview, targets []TargetResolution) error {
-	if preview == nil || len(preview.Plan.Targets) == 0 {
-		return nil
-	}
 	priorByKey := make(map[string]string, len(preview.Plan.Targets))
 	for _, pt := range preview.Plan.Targets {
 		priorByKey[filepath.Join(pt.Root, pt.Path)] = pt.PriorHash
@@ -463,16 +464,67 @@ func (s *Service) validateCurrentHashes(preview *domain.PublicationPreview, targ
 		if !ok {
 			continue
 		}
-		var current string
-		if data, err := os.ReadFile(filepath.Join(s.projectRoot, key)); err == nil {
-			current = HashContent(data)
+		snapshot, err := NewBackupManager(s.projectRoot, s.backupDir).SnapshotFile(key)
+		if err != nil {
+			return fmt.Errorf("inspect destination %s: %w", target.Path, err)
 		}
+		current := snapshot.Hash
 		if current != recorded {
 			return domain.NewConflictError(domain.ErrTargetChanged,
 				fmt.Sprintf("destination %s changed on disk after the preview was taken — regenerate the preview and re-approve", target.Path))
 		}
 	}
 	return nil
+}
+
+func validatePreviewIntegrity(preview *domain.PublicationPreview, learningID domain.LearningID) error {
+	if preview == nil || preview.LearningID != learningID || preview.Plan.LearningID != learningID {
+		return previewMismatch("preview does not belong to the requested learning")
+	}
+	if len(preview.Plan.Targets) == 0 || preview.Plan.PolicySignature == "" {
+		return previewMismatch("persisted preview plan is incomplete")
+	}
+	seen := make(map[string]struct{}, len(preview.Plan.Targets))
+	for _, target := range preview.Plan.Targets {
+		key := filepath.Join(target.Root, target.Path)
+		if target.Root == "" || target.Path == "" || target.Operation == "" || target.PosteriorHash == "" {
+			return previewMismatch("persisted preview target is incomplete")
+		}
+		if _, duplicate := seen[key]; duplicate {
+			return previewMismatch("persisted preview contains a duplicate target")
+		}
+		seen[key] = struct{}{}
+		if HashContent([]byte(target.Content)) != target.PosteriorHash {
+			return previewMismatch("persisted preview posterior bytes do not match their hash")
+		}
+	}
+	if previewHash(learningID, preview.Plan.Targets, preview.Plan.PolicySignature) != preview.PreviewHash {
+		return previewMismatch("persisted preview plan does not match its hash")
+	}
+	return nil
+}
+
+func validatePlannedTargets(preview *domain.PublicationPreview, targets []TargetResolution) ([]string, error) {
+	if len(preview.Plan.Targets) != len(targets) {
+		return nil, previewMismatch("resolved target set differs from the persisted preview plan")
+	}
+	planned := make(map[string]domain.PublicationPlanTarget, len(preview.Plan.Targets))
+	for _, target := range preview.Plan.Targets {
+		planned[filepath.Join(target.Root, target.Path)] = target
+	}
+	contents := make([]string, len(targets))
+	for i, target := range targets {
+		entry, ok := planned[filepath.Join(target.Root, target.Path)]
+		if !ok || entry.Operation != target.Operation {
+			return nil, previewMismatch("resolved target or operation differs from the persisted preview plan")
+		}
+		contents[i] = entry.Content
+	}
+	return contents, nil
+}
+
+func previewMismatch(message string) error {
+	return domain.NewConflictError(domain.ErrPreviewHashMismatch, message)
 }
 
 // compensate rolls back every backed-up file after a post-write failure,

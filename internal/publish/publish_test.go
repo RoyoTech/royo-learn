@@ -1224,12 +1224,6 @@ func TestPublish_RollbackFailureObserved(t *testing.T) {
 		},
 		Actor: actor, CreatedAt: now,
 	}
-	preview := &domain.PublicationPreview{
-		ID:         domain.PreviewID(uuid.Must(uuid.NewV7()).String()),
-		LearningID: learningID, PreviewHash: previewHash,
-		RequiresApproval: false, CreatedAt: now,
-	}
-
 	if err := storage.WithTx(ctx, db, func(tx *sql.Tx) error {
 		proj := &domain.Project{
 			ID: projectID, ProjectKey: "rb-test", DisplayName: "RB Test",
@@ -1244,16 +1238,28 @@ func TestPublish_RollbackFailureObserved(t *testing.T) {
 		if err := storage.SaveCuration(ctx, tx, curation); err != nil {
 			return err
 		}
-		return storage.SavePreview(ctx, tx, preview)
+		return nil
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
 	svc := NewService(db, projectRoot, backupDir, journalDir)
+	previewResult, err := svc.Preview(ctx, projectID, &PreviewInput{LearningID: learningID, Actor: actor})
+	if err != nil {
+		t.Fatalf("Preview: %v", err)
+	}
+	previewHash = previewResult.Preview.PreviewHash
+	approval, err := svc.Approve(ctx, projectID, &ApproveInput{
+		LearningID: learningID, PreviewHash: previewHash, ApprovedBy: "test",
+		Reason: "fault fixture", ApprovalEvidence: "test", Actor: actor,
+	})
+	if err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
 	_, pubErr := svc.Publish(ctx, projectID, &PublishInput{
 		Apply:      true,
 		LearningID: learningID, PreviewHash: previewHash,
-		Force: true, Actor: actor,
+		ApprovalID: &approval.ID, Force: true, Actor: actor,
 	})
 
 	if pubErr == nil {
@@ -1497,8 +1503,7 @@ func TestPublish_E2E(t *testing.T) {
 	projectID := domain.ProjectID(uuid.Must(uuid.NewV7()).String())
 	learningID := domain.LearningID(uuid.Must(uuid.NewV7()).String())
 	curationID := domain.CurationID(uuid.Must(uuid.NewV7()).String())
-	previewID := domain.PreviewID(uuid.Must(uuid.NewV7()).String())
-	previewHash := HashContent([]byte("e2e-preview-content"))
+	previewHash := ""
 
 	actor := domain.Actor{Kind: "agent", Name: "test"}
 	skillPath := "e2e-skill/SKILL.md"
@@ -1532,15 +1537,6 @@ func TestPublish_E2E(t *testing.T) {
 		CreatedAt: now,
 	}
 
-	preview := &domain.PublicationPreview{
-		ID:               previewID,
-		LearningID:       learningID,
-		PreviewHash:      previewHash,
-		Risk:             domain.RiskMedium,
-		RequiresApproval: false,
-		CreatedAt:        now,
-	}
-
 	if err := storage.WithTx(ctx, db, func(tx *sql.Tx) error {
 		proj := &domain.Project{
 			ID:            projectID,
@@ -1559,9 +1555,6 @@ func TestPublish_E2E(t *testing.T) {
 		if err := storage.SaveCuration(ctx, tx, curation); err != nil {
 			return fmt.Errorf("SaveCuration: %w", err)
 		}
-		if err := storage.SavePreview(ctx, tx, preview); err != nil {
-			return fmt.Errorf("SavePreview: %w", err)
-		}
 		return nil
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -1569,6 +1562,11 @@ func TestPublish_E2E(t *testing.T) {
 
 	// --- Publish ---
 	svc := NewService(db, projectRoot, backupDir, journalDir)
+	previewResult, err := svc.Preview(ctx, projectID, &PreviewInput{LearningID: learningID, Actor: actor})
+	if err != nil {
+		t.Fatalf("Preview: %v", err)
+	}
+	previewHash = previewResult.Preview.PreviewHash
 	result, err := svc.Publish(ctx, projectID, &PublishInput{
 		Apply:       true,
 		LearningID:  learningID,
@@ -1635,6 +1633,7 @@ type publishTestEnv struct {
 	projectID   domain.ProjectID
 	learningID  domain.LearningID
 	previewHash string
+	approvalID  *domain.ApprovalID
 	actor       domain.Actor
 }
 
@@ -1664,7 +1663,6 @@ func seedPublishEnv(t *testing.T, skillPath string, precreateFile bool, initialC
 	now := utcNowPublish()
 	projectID := domain.ProjectID(uuid.Must(uuid.NewV7()).String())
 	learningID := domain.LearningID(uuid.Must(uuid.NewV7()).String())
-	previewHash := HashContent([]byte("test-preview-" + skillPath))
 	actor := domain.Actor{Kind: "agent", Name: "test"}
 
 	decision := domain.CurationApproveNewSkill
@@ -1701,19 +1699,27 @@ func seedPublishEnv(t *testing.T, skillPath string, precreateFile bool, initialC
 		if err := storage.SaveCuration(ctx, tx, curation); err != nil {
 			return err
 		}
-		preview := &domain.PublicationPreview{
-			ID:         domain.PreviewID(uuid.Must(uuid.NewV7()).String()),
-			LearningID: learningID, PreviewHash: previewHash,
-			RequiresApproval: false, CreatedAt: now,
-		}
-		return storage.SavePreview(ctx, tx, preview)
+		return nil
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
+	}
+	svc := NewService(db, projectRoot, backupDir, journalDir)
+	previewResult, err := svc.Preview(ctx, projectID, &PreviewInput{LearningID: learningID, Actor: actor})
+	if err != nil {
+		t.Fatalf("seed preview: %v", err)
+	}
+	approval, err := svc.Approve(ctx, projectID, &ApproveInput{
+		LearningID: learningID, PreviewHash: previewResult.Preview.PreviewHash,
+		ApprovedBy: "test", Reason: "test fixture", ApprovalEvidence: "test", Actor: actor,
+	})
+	if err != nil {
+		t.Fatalf("seed approval: %v", err)
 	}
 
 	return &publishTestEnv{
 		db: db, projectRoot: projectRoot, backupDir: backupDir, journalDir: journalDir,
-		projectID: projectID, learningID: learningID, previewHash: previewHash, actor: actor,
+		projectID: projectID, learningID: learningID, previewHash: previewResult.Preview.PreviewHash,
+		approvalID: &approval.ID, actor: actor,
 	}
 }
 
@@ -1735,6 +1741,7 @@ func TestPublish_BeginTxErrorsChecked(t *testing.T) {
 		Apply:       true,
 		LearningID:  env.learningID,
 		PreviewHash: env.previewHash,
+		ApprovalID:  env.approvalID,
 		Force:       true,
 		Actor:       env.actor,
 	})
@@ -1760,6 +1767,7 @@ func TestPublish_JournalWrittenBeforeDBCommit(t *testing.T) {
 		Apply:       true,
 		LearningID:  env.learningID,
 		PreviewHash: env.previewHash,
+		ApprovalID:  env.approvalID,
 		Force:       true,
 		Actor:       env.actor,
 	})
@@ -1811,6 +1819,7 @@ func TestPublish_JournalFailurePreventsDBCommit(t *testing.T) {
 		Apply:       true,
 		LearningID:  env.learningID,
 		PreviewHash: env.previewHash,
+		ApprovalID:  env.approvalID,
 		Force:       true,
 		Actor:       env.actor,
 	})
@@ -1903,6 +1912,7 @@ func TestPublish_OptimisticLock_NoFalsePositive(t *testing.T) {
 		Apply:       true,
 		LearningID:  env.learningID,
 		PreviewHash: env.previewHash,
+		ApprovalID:  env.approvalID,
 		Force:       false, // no force → optimistic lock check runs
 		Actor:       env.actor,
 	})
@@ -1934,6 +1944,7 @@ func TestPublish_ForceSkipsOptimisticLock(t *testing.T) {
 		Apply:       true,
 		LearningID:  env.learningID,
 		PreviewHash: env.previewHash,
+		ApprovalID:  env.approvalID,
 		Force:       true, // force → hash check is skipped
 		Actor:       env.actor,
 	})

@@ -25,7 +25,7 @@ func TestPublishPersistsReachableAttemptBeforeFirstWrite(t *testing.T) {
 	}
 
 	_, err := svc.Publish(context.Background(), env.projectID, &PublishInput{
-		LearningID: env.learningID, PreviewHash: env.previewHash,
+		LearningID: env.learningID, PreviewHash: env.previewHash, ApprovalID: env.approvalID,
 		Apply: true, Force: true, Actor: env.actor,
 	})
 	publicationID := recoveryIDFromError(t, err)
@@ -58,7 +58,7 @@ func TestCrashAfterFirstWriteIsRecoverableByAdvertisedID(t *testing.T) {
 	}
 
 	_, err := svc.Publish(context.Background(), env.projectID, &PublishInput{
-		LearningID: env.learningID, PreviewHash: env.previewHash,
+		LearningID: env.learningID, PreviewHash: env.previewHash, ApprovalID: env.approvalID,
 		Apply: true, Force: true, Actor: env.actor,
 	})
 	publicationID := recoveryIDFromError(t, err)
@@ -224,7 +224,7 @@ func TestRollbackConflictPreservesTargetAndEmitsPatch(t *testing.T) {
 func publishForRecovery(t *testing.T, svc *Service, env *publishTestEnv) domain.PublicationID {
 	t.Helper()
 	result, err := svc.Publish(context.Background(), env.projectID, &PublishInput{
-		LearningID: env.learningID, PreviewHash: env.previewHash,
+		LearningID: env.learningID, PreviewHash: env.previewHash, ApprovalID: env.approvalID,
 		Apply: true, Force: true, Actor: env.actor,
 	})
 	if err != nil {

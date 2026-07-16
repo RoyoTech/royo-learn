@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -131,9 +130,9 @@ func TestPublishRejectsCurationDestinationDrift(t *testing.T) {
 
 	curation := &domain.Curation{
 		ID: domain.CurationID(uuid.Must(uuid.NewV7()).String()), LearningID: env.learningID,
-		Decision: domain.CurationApproveNewSkill,
+		Decision:    domain.CurationApproveNewSkill,
 		Destination: &domain.Destination{Type: domain.DestSkill, Root: "skills", Path: "curation-after/SKILL.md", Required: true},
-		Actor: env.actor, CreatedAt: time.Now().UTC().Add(time.Second),
+		Actor:       env.actor, CreatedAt: time.Now().UTC().Add(time.Second),
 	}
 	if err := storage.WithTx(context.Background(), env.db, func(tx *sql.Tx) error {
 		return storage.SaveCuration(context.Background(), tx, curation)
@@ -167,13 +166,18 @@ func TestPublishDerivesApprovalFromExistingSkillImpact(t *testing.T) {
 	assertDomainCode(t, err, domain.ErrApprovalRequired)
 }
 
-func generatePreview(t *testing.T, svc *Service, env *publishTestEnv) *domain.PublicationPreview {
+func generatePreview(t *testing.T, _ *Service, env *publishTestEnv) *domain.PublicationPreview {
 	t.Helper()
-	result, err := svc.Preview(context.Background(), env.projectID, &PreviewInput{LearningID: env.learningID, Actor: env.actor})
+	tx, err := env.db.DB.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		t.Fatalf("Preview: %v", err)
+		t.Fatalf("begin preview read: %v", err)
 	}
-	return result.Preview
+	defer tx.Rollback()
+	preview, err := storage.GetPreviewByHash(context.Background(), tx, env.previewHash)
+	if err != nil {
+		t.Fatalf("GetPreviewByHash: %v", err)
+	}
+	return preview
 }
 
 func mutateStoredPlan(t *testing.T, db *storage.DB, hash string, mutate func(*domain.PublicationPlan)) {
@@ -198,8 +202,8 @@ func mutateStoredPlan(t *testing.T, db *storage.DB, hash string, mutate func(*do
 
 func assertDomainCode(t *testing.T, err error, code domain.ErrorCode) {
 	t.Helper()
-	var domainErr *domain.DomainError
-	if !errors.As(err, &domainErr) || domainErr.Code != code {
+	domainErr, ok := domain.AsDomainError(err)
+	if !ok || domainErr.Code != code {
 		t.Fatalf("error = %v, want domain code %s", err, code)
 	}
 }

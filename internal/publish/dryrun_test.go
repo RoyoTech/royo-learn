@@ -34,6 +34,7 @@ func TestPublish_DryRunByDefaultWritesNothing(t *testing.T) {
 	res, err := svc.Publish(ctx, env.projectID, &PublishInput{
 		LearningID:  env.learningID,
 		PreviewHash: prev.Preview.PreviewHash,
+		ApprovalID:  env.approvalID,
 		Apply:       false, // default: dry run
 		Actor:       env.actor,
 	})
@@ -83,6 +84,7 @@ func TestPublish_ApplyWritesAndMarksPublished(t *testing.T) {
 	res, err := svc.Publish(ctx, env.projectID, &PublishInput{
 		LearningID:  env.learningID,
 		PreviewHash: prev.Preview.PreviewHash,
+		ApprovalID:  env.approvalID,
 		Apply:       true,
 		Force:       true,
 		Actor:       env.actor,

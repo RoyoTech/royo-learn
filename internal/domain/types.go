@@ -361,6 +361,7 @@ type PublicationPlan struct {
 	Verification     []CommandSpec           `json:"verification"`
 	RequiresApproval bool                    `json:"requires_approval"`
 	Risk             RiskLevel               `json:"risk"`
+	PolicySignature  string                  `json:"policy_signature"`
 	Targets          []PublicationPlanTarget `json:"targets,omitempty"`
 }
 
@@ -378,6 +379,9 @@ type PublicationPlanTarget struct {
 	PriorHash string `json:"prior_hash"`
 	// PosteriorHash is the SHA-256 of the content the plan would write.
 	PosteriorHash string `json:"posterior_hash"`
+	// Content is the exact posterior byte sequence authorized by the preview.
+	// Publish applies these bytes rather than recomposing mutable source state.
+	Content string `json:"content"`
 }
 
 // CommandSpec describes a verification command.
