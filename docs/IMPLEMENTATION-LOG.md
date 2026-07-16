@@ -1399,3 +1399,140 @@ mantenía fuera sólo del Hito 1).
 Tramo 4 · Parte 2 (§4.4 recurrencias/idempotencia conectadas end-to-end, §4.5
 búsqueda y relaciones) y Parte 3 (§4.6 export/import/rebuild-index/review, §4.7
 coherencia SQLite–Markdown, §4.8 migraciones). Fuera del alcance de esta parte.
+
+---
+
+## 2026-07-16 — Tramo 4 · Parte 2: recurrencias/idempotencia y búsqueda/relaciones (§4.4–§4.5)
+
+**Commit de partida:** `b61e4c7` (cierre del Tramo 4 · Parte 1).
+
+Hito 2 en desarrollo. No publica nada. Alcance exacto: §4.4 y §4.5. Nada de
+§4.6/§4.7/§4.8, Tramo 5 ni Tramo 6.
+
+### Commits
+
+| Hash | Mensaje | Sección |
+|------|---------|---------|
+| `6798579` | `test: require D5 three-case capture, nine-field recurrence read, four metric states` | §4.4 (prueba roja) |
+| `efd5ecc` | `feat: connect recurrences end-to-end with D5 and four metric states` | §4.4 (verde) |
+| `b178af9` | `test: require relation propose/confirm lifecycle and suggest-not-decide capture` | §4.5 (prueba roja) |
+| `eae3dce` | `feat: add FTS5 similar-candidate suggestion and relation propose/confirm` | §4.5 (verde) |
+| *(este)* | `docs: record Tramo 4 Parte 2 closure in the recovery log` | Documentación. |
+
+### §4.4 — Recurrencias e idempotencia
+
+**Los nueve campos de la ocurrencia.** El plan enumera nueve campos por
+ocurrencia: learning ID, fingerprint, evento, fecha, resultado, si se recuperó
+el aprendizaje, si se activó la Skill, evidencia y actor. Ya se persistían todos
+(`internal/storage/repo_recurrence.go` → `SaveRecurrenceRecord`, columnas de la
+migración 003), pero **las lecturas descartaban seis** de ellos: los tres
+listados (`ListRecurrenceRecords`, `ListRecurrencesByLearning`,
+`ListAllRecurrences`) solo seleccionaban seis columnas. Ahora un escáner
+compartido (`scanRecurrenceRows`, constante `recurrenceColumns`) devuelve los
+nueve. Se exponen por CLI (`royo-learn recurrences`) y MCP
+(`learning_list_recurrences`, vía `recurrenceToMap`). Prueba:
+`internal/recurrence/state_test.go` → `TestListRecurrences_ReturnsNineFields`
+verifica el ida y vuelta de los nueve campos por las rutas de lectura.
+
+**Semántica D5 (tres casos).** Se aplica exactamente en la captura
+(`internal/capture/capture.go`):
+
+```text
+misma idempotency_key       → reintento técnico: no crea aprendizaje ni recurrencia
+distinta key + mismo hash   → evento equivalente: reutiliza el aprendizaje y registra recurrencia
+sin key + mismo hash        → deduplicación conservadora: no registra recurrencia automática
+```
+
+El caso 2 (evento equivalente) **faltaba**: antes caía en la deduplicación por
+hash sin registrar recurrencia, como el caso 3. Ahora, si llega una clave nueva
+sobre contenido ya existente, se registra una recurrencia (`OutcomeRecurred`)
+protegida por esa misma clave para que un reintento no la duplique. El resultado
+de captura expone `RecurrenceRecorded`. Prueba:
+`internal/capture/d5_test.go` → `TestCapture_D5ThreeCases`, con los tres casos y
+sus conteos de recurrencia (0, 1 idempotente, 0).
+
+**Cuatro estados de métrica.** `ComputeMetrics` ahora clasifica el estado
+(`domain.RecurrenceState`) además de la tendencia:
+
+| Estado | Regla |
+|--------|-------|
+| `zero_recurrences` | Sin registros. |
+| `insufficient_data` | Un registro sin resultado `prevented`. |
+| `repeated_recurrence` | Dos o más registros. |
+| `prevented_recurrence` | El registro más reciente tiene resultado `prevented`. |
+
+La clasificación es conservadora (D5): un único evento no-prevenido nunca se
+afirma como problema repetido. Se expone por CLI (`royo-learn metrics`) y MCP
+(`learning_compute_metrics`). Prueba:
+`internal/recurrence/state_test.go` → `TestComputeMetrics_FourStates`, un
+subtest por estado.
+
+### §4.5 — Búsqueda y relaciones
+
+**Sugerencia de candidatos similares (FTS5).** La captura devuelve
+`similar_candidates`: aprendizajes existentes que FTS5 sugiere como parecidos.
+Como `storage.Search` usa semántica AND (poca cobertura para sugerir), se añadió
+`storage.SuggestSimilar`, que construye una expresión OR sobre términos salientes
+(longitud ≥ 4, deduplicados, tope de 16) y ordena por `rank`, excluyendo el
+propio aprendizaje. Es **solo sugerencia**: la captura nunca crea una relación
+por su cuenta. Se expone por CLI y MCP (`capture` / `learning_capture`). Prueba:
+`internal/capture/suggest_test.go` →
+`TestCapture_SuggestsSimilarButNeverDecides` (sugiere el aprendizaje previo y
+verifica que **no** existe ninguna relación creada autónomamente).
+
+**Relaciones explícitas propuesta→confirmación.** El modelo de relación
+(`domain.LearningRelation`) gana un ciclo de vida: `status`
+(`proposed`/`confirmed`), `ProposedBy`, `ConfirmedBy` (nulo hasta confirmar) y
+`ConfirmedAt`. El agente propone (`curate --action relate` →
+`ProposeRelation`, estado `proposed`) y la curación confirma
+(`curate --action confirm-relation` → `ConfirmRelation`). Se persisten el tipo,
+ambos learning IDs, quién propuso y quién confirmó. Los seis tipos del plan ya
+existían en el dominio: `duplicate_of extends supersedes contradicts narrows
+related`. La migración `004_relation_lifecycle.sql` añade las columnas de forma
+aditiva y respalda las filas previas como `proposed` **sin fabricar** un
+confirmante (coherente con §4.8: no autoaprobar registros antiguos). Pruebas:
+`internal/curate/propose_confirm_test.go` (`TestRelation_ProposeThenConfirm`,
+`TestConfirmRelation_UnknownFails`) y el recorrido vertical por CLI en
+`cmd/royo-learn/relations_cli_test.go`
+(`TestCLI_RelationProposeThenConfirm`, `TestCLI_ConfirmUnknownRelationFails`).
+
+**Sin embeddings ni base vectorial.** No se añadió ninguna dependencia nueva ni
+almacenamiento vectorial (plan §1.2). La búsqueda de similares reutiliza FTS5.
+
+### Decisiones
+
+Sin contradicción de contrato nueva: no se abrió una decisión D nueva. D5 se
+aplicó tal cual estaba escrita. La documentación del ciclo relación
+propuesta→confirmación se añadió a `docs/04-CLI-SPEC.md` junto al código para que
+contrato y código avancen juntos (§1.1).
+
+### Comandos ejecutados — resultado real
+
+```text
+go build ./...   → OK
+go vet ./...     → OK
+go test -race -p 1 -count=1 ./...  → 19 paquetes ok / 0 fail  (SEÑAL FIABLE, VERDE)
+go test -p 1 -count=1 ./...        → 1 flake de teardown de Windows en internal/publish
+                                     (TestP2_ExplicitAreaGroupsDifferentTerms, "directory is not
+                                     empty") + internal/buildinfo "Access is denied" del antivirus.
+                                     Ambos ENVIRONMENTAL: publish pasa aislado; buildinfo es un
+                                     fallo de build por AV, no de código.
+```
+
+Clasificación: cero fallos reales. Todo fallo del modo no-race es ambiental
+(pasa aislado o es interferencia del AV en el build), como documenta la línea
+base del Tramo 4 · Parte 1.
+
+### Puerta de salida — Tramo 4 · Parte 2
+
+| Sección | Criterio de salida | Estado |
+|---------|--------------------|--------|
+| §4.4 | Recurrencias conectadas end-to-end con los nueve campos persistidos y devueltos; D5 en sus tres casos; métricas con los cuatro estados; una prueba por criterio | **PASS** |
+| §4.5 | FTS5 sugiere candidatos sin decidir; relaciones explícitas con ciclo propuesta→confirmación que persiste tipo, ambos IDs, proponente y confirmante; sin embeddings ni base vectorial | **PASS** |
+
+**Resultado del Tramo 4 · Parte 2: PASS en §4.4 y §4.5. Sin FAIL.**
+
+### Siguiente paso
+
+Tramo 4 · Parte 3 (§4.6 export/import/rebuild-index/review, §4.7 coherencia
+SQLite–Markdown, §4.8 migraciones). Fuera del alcance de esta parte.
