@@ -84,6 +84,21 @@ func TestBackupManagerRejectsSymlinkedBackupRoot(t *testing.T) {
 	}
 }
 
+func TestJournalRejectsSymlinkedRoot(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	journalRoot := filepath.Join(root, ".royo-learn")
+	if err := os.Symlink(outside, journalRoot); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+		t.Fatalf("create journal-root symlink: %v", err)
+	}
+	if _, err := NewJournal(root, journalRoot); err == nil || !strings.Contains(err.Error(), "journal root") {
+		t.Fatalf("NewJournal error = %v, want journal-root rejection", err)
+	}
+}
+
 func TestWriterCASPreservesFinalBoundaryReplacement(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "target.txt")
