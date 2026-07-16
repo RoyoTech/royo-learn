@@ -1648,3 +1648,220 @@ Reabrir el defecto de estado tras rollback (TDD, decisión de contrato previa en
 permanentes + CI) y Tramo 6 (documentación final, `v0.2.0` preparado sin
 publicar). El punto de release de `v0.1.10` sigue siendo `66a90da`, intacto y
 sin etiquetar.
+
+---
+
+## 2026-07-16 — Cierre del FAIL del Tramo 4 · Parte 3, y Tramos 5 y 6
+
+Punto de partida: `3c0c1b2`, con el FAIL abierto que dejó la Parte 3.
+
+### Commits creados
+
+- `0938558` docs: decide the state of a rolled-back learning and who materializes the record
+- `43d6ac4` test: require a rollback to revoke the published state (RED)
+- `6694459` refactor: extract record materialization into internal/record
+- `9101546` fix: revoke the published state on rollback and materialize the record
+- `fddb5cd` ci: test the declared minimum Go, cross-build, and a clean install
+- `35debb6` test: pin the public JSON contract with versioned snapshots
+- `33ab371` test: bind the README Quick Start to the real command set
+- `2b02e50` test: keep the product version to a single source
+- `1964d01` docs: generate the CLI, MCP, error and profile references from the registries
+- `f47ff61` style: restore gofmt import grouping
+- `a88cdf2` docs: state who does what and mark the translations stale
+
+### El FAIL era dos defectos, no uno — medido, no supuesto
+
+El registro de la Parte 3 atribuía el `[doctor] exited 1` a `rollback.go:54`. Es
+correcto **pero incompleto**. Se instrumentó el escenario `cli-sensitive` con dos
+sondas temporales (revertidas tras medir) porque el `error` del paso oculta el
+JSON del `doctor`:
+
+```text
+final-doctor (tras el rollback):
+  "record-integrity": "fail" — "1 divergence(s) between SQLite and Markdown"
+                              detail: "missing=0 divergent=1 orphan=0"
+
+sonda tras publish-apply, ANTES de cualquier rollback:
+  "record-integrity": "fail" — mismo resultado: divergent=1
+```
+
+La divergencia **ya existía tras `publish`**, sin rollback de por medio:
+`publish_op.go:293` marcaba `published` en SQLite y nadie re-materializaba el
+registro Markdown, cuyo hash (`computeRecordHash`) incluye el estado. El E2E no
+lo veía porque `cli-sensitive` solo corre `doctor` al final y `cli-lowimpact`
+—que publica y no revierte— no lo corre nunca.
+
+### Decisión de contrato previa — D18
+
+Escrita **antes** de tocar código, con contexto, opciones, decisión,
+justificación y fecha. Resuelve las dos preguntas abiertas:
+
+- **A qué estado vuelve un aprendizaje revertido: `approved`.** Es el único
+  estado que ya significa «curado y aprobado, no publicado». Además,
+  `docs/03-DOMAIN-MODEL.md:307` ya declaraba la invariante «un `published`
+  siempre tiene al menos una publicación verificada»: un aprendizaje que sigue
+  `published` tras un rollback **violaba una invariante escrita**. Se descartó
+  un estado nuevo `rolled_back` (§1.2: no rediseñar sin necesidad demostrada) y
+  se descartó excluir `Status` del hash (sería apagar la alarma que §4.7 acaba
+  de construir).
+- **Quién re-materializa: `internal/record`.** La materialización se extrajo de
+  `internal/capture` a un paquete propio que solo depende de `internal/domain`.
+  `publish` **no** importa `capture` (antipatrón ya descartado); importa
+  `record`, que está por debajo de ambos. Es un movimiento, no una
+  reimplementación (§1.3): `record.go` ya dependía solo de `domain` y cinco
+  paquetes lo consumían desde fuera.
+
+Reglas vinculantes añadidas: la reversión solo ocurre si el rollback fue
+**exitoso**; publicación y estado revocado se confirman en **una sola
+transacción**; la arista `published → approved` **no** entra en
+`domain.ValidTransitions` porque esa tabla gobierna la **curación**, y un
+curador que pudiera «aprobar» un aprendizaje publicado dejaría `approved` con el
+archivo todavía escrito — el estado falso que la decisión elimina.
+
+`docs/03-DOMAIN-MODEL.md` y `docs/14-ACCEPTANCE-CRITERIA.md` se actualizaron en
+el mismo commit que la decisión (§1.1: contrato y código avanzan juntos).
+
+### TDD
+
+`43d6ac4` es la prueba roja identificada: `TestCLI_RollbackRevokesPublishedState`
+(`cmd/royo-learn`), enteramente por CLI pública, sin abrir la base. Falló por las
+dos razones reales: `doctor` en rojo tras `publish`, y aprendizaje todavía
+`published` tras el rollback. El arreglo (`9101546`) la puso verde. Se añadieron
+además `TestRollback_SuccessRevokesPublishedStatus` y
+`TestRollback_FailureLeavesLearningUntouched` en `internal/publish`; la segunda
+verifica `pub.Status == failed`, así que ejercita de verdad la ruta de fallo y no
+pasa por vacío.
+
+### Tramo 5 — pruebas de contrato permanentes y CI
+
+Ya existían: Skills ↔ MCP, Documentación ↔ MCP, Help ↔ CLI y Perfil ↔ permisos.
+Se añadió lo que faltaba:
+
+- **JSON: snapshots versionados** (`35debb6`) de learning (capture y get),
+  evidence, preview, approval, publication, occurrence, status y error. Cada
+  payload se captura por CLI pública y se compara contra un golden; los valores
+  volátiles (ids, hashes, timestamps, rutas) se normalizan a marcadores
+  tipados **incluidos los embebidos**, porque el `diff` del preview lleva ids
+  dentro del texto y el golden habría cambiado en cada corrida. Verificado:
+  detecta una clave renombrada y es determinista entre corridas limpias.
+- **README ↔ binario** (`33ab371`): todo comando del Quick Start existe, se
+  despacha y no está deprecated ni pendiente. Alcance declarado en la propia
+  prueba: comprueba existencia, no ejecuta el bloque literal (tiene marcadores
+  de posición y `self-update`, que va a la red); la ejecución real la cubren el
+  E2E y el job de instalación limpia. Verificado: detecta un comando fantasma.
+- **Versiones** (`2b02e50`): la versión de registro es `buildinfo.Version`,
+  inyectada desde el tag por ldflags. Se prueba que una build sin ldflags reporta
+  el marcador neutro, que `.goreleaser.yml` inyecta de verdad, y que ningún
+  archivo de producción declara una segunda versión. Verificado: detecta un
+  `productVersion = "0.1.9"` plantado.
+- **CI** (`fddb5cd`): la matriz declaraba tres SO pero **una sola versión de Go**,
+  así que el mínimo declarado en `go.mod` (1.25.0) no se probaba en ninguno.
+  Ahora es SO × {mínimo declarado, estable más reciente}, con `-race`
+  obligatorio en Linux. Se añadieron cross-build de los objetivos de release y
+  un job de instalación limpia que corre `init`/`doctor`/`e2e` con el binario
+  instalado desde un proyecto vacío. La secuencia de instalación limpia se
+  verificó localmente en Windows: los tres comandos salen 0.
+
+### Tramo 6 — documentación
+
+- **`docs/generated/`** (`1964d01`): `CLI_REFERENCE.md`, `MCP_REFERENCE.md`,
+  `PROFILES.md` y `ERROR_REFERENCE.md` se **derivan** de los registros
+  autoritativos (`commandRegistry`, `allTools`, `AllErrorCodes()`/`ExitCode()`).
+  Cada generador vive junto al registro que renderiza (los registros no están
+  exportados) y es a la vez prueba de validación: si el código cambia y el
+  documento no, la prueba falla y llama estancado al documento. Verificado:
+  detecta la desincronización. Nadie copia la lista a mano en cinco documentos.
+- **README** (`a88cdf2`): sección «Who does what» con las tres listas que exige
+  el plan (qué hace el LLM, qué hace Royo-Learn, qué NO hace) y enlaces a las
+  referencias generadas. Los seis README traducidos llevan ahora un aviso de
+  desactualización que apunta al inglés, en lugar de contradecirlo en silencio.
+
+### Comandos ejecutados — resultado real
+
+```text
+go build ./...  → OK
+go vet ./...    → OK
+gofmt -l .      → vacío (limpio)
+
+go test -race -p 1 -count=1 ./...   → 22 paquetes ok / 0 fail (SEÑAL FIABLE, VERDE)
+  Corrida limpia completa obtenida y registrada (/tmp/final1.log): 22 ok, 0 fallos.
+
+go test -count=1 -run TestRunE2ETempCompletesAllSteps ./cmd/royo-learn/  → ok (37/37)
+  Antes del arreglo: 36/37, cli-sensitive/final-doctor en rojo.
+```
+
+**Flake ambiental medido, no despachado a mano — y no se declara más limpio de
+lo que es.** La corrida completa en verde se obtuvo, pero **no todas las corridas
+completas salen verdes**: persiste la clase ya documentada en las Partes 1-3,
+`TempDir RemoveAll cleanup: ... The directory is not empty`. Medición honesta de
+esta sesión: aparece en aproximadamente **la mitad de las corridas completas**,
+con 1-2 víctimas **aleatorias** por corrida. Le tocó a
+`TestOnboardingSkillInstallsFromRepository`, `TestCLI_SearchFindsCapturedLearning`,
+`TestAtomicWriteAndHash`, `TestPublish_JournalWrittenBeforeDBCommit`,
+`TestCLI_CaptureExposesDestinationAndEvidenceLevel`,
+`TestRunPublishAndRollbackEndToEnd`, `TestContract_JSONSnapshots` y
+`TestUpdateFullFlowZipWindows`.
+
+Evidencia de que es ambiental y no de este cambio:
+
+1. **Siempre pasa aislada**, en todos los casos observados.
+2. Aparece igual en el árbol **previo** al cambio (verificado con `git stash`).
+3. Le toca a `internal/selfupdate` (`TestUpdateFullFlowZipWindows`), un paquete
+   que este trabajo **no toca en absoluto**.
+4. El mensaje es siempre el mismo: teardown de `t.TempDir()` sobre un directorio
+   que Windows/el antivirus todavía tiene tomado.
+
+Nota honesta: el arreglo escribe un archivo más (`records/<id>.md`) en los
+directorios temporales, así que el flake ahora también puede nombrar `records`.
+No es una causa nueva; es una víctima nueva de la misma carrera. **Queda como
+riesgo residual conocido**: la señal verde es real pero exige releer los fallos
+antes de creerles, exactamente como advierte el procedimiento de la máquina.
+
+`go vet` detectó, y se corrigió (`f47ff61`), que la reescritura por script de los
+imports en la extracción había dejado cinco archivos sin `gofmt`. `go test` no lo
+nota; la puerta de formato de CI sí habría fallado.
+
+### Reglas duras — verificadas
+
+- **Outbox**: `grep -rn -i outbox --include=*.go` sobre producción → **cero
+  coincidencias**. La palabra solo vive en `internal/coherence/coherence_test.go`,
+  en la prueba de corte que demuestra que la ventana es recuperable.
+- **`publish → capture`**: `grep -rn internal/capture internal/publish/*.go`
+  (sin tests) → **cero coincidencias**.
+- Sin dependencias nuevas, sin embeddings, sin bus de eventos, sin soft-passes.
+- Sin `git tag`, sin `git push`, sin `goreleaser`.
+
+### Hallazgo registrado, no resuelto en silencio
+
+El snapshot del `preview` fijó una **inconsistencia real del contrato JSON**: el
+array `policies` usa nombres de campo de Go (`Passed`, `PolicyName`, `Reason`)
+mientras el resto de los payloads públicos usa `snake_case`. **No es una
+contradicción con la documentación** —`docs/04` y `docs/05` no especifican esa
+forma—, así que no dispara la regla de parada; pero cambiarla sería un cambio de
+contrato público y **no corresponde hacerlo en silencio**. Queda fijada tal como
+está por el snapshot y elevada como riesgo residual para decisión humana.
+
+### Puerta de salida
+
+- [x] Decisión de contrato previa (D18) con contexto/opciones/decisión/justificación/fecha → **PASS**
+- [x] Prueba roja que exige que tras `rollback` el aprendizaje no siga `published` y `doctor` limpio → **PASS**
+- [x] Arreglo mínimo, después refactor; `publish` no importa `capture` → **PASS**
+- [x] `TestRunE2ETempCompletesAllSteps` 37/37 → **PASS**
+- [x] Suite completa `-race -p 1` en verde → **PASS**
+- [x] Tramo 5: pruebas de contrato permanentes (JSON, README, versiones) → **PASS**
+- [x] Tramo 5: matriz de CI con SO × Go mínimo/estable → **PASS** (escrita y verificada localmente; no ejecutada en GitHub Actions desde esta máquina)
+- [x] Tramo 6: `docs/generated/` derivado y validado → **PASS**
+- [x] Tramo 6: README con qué hace el LLM / qué hace Royo-Learn / qué NO hace → **PASS**
+- [ ] Tramo 6: `docs/FINAL-IMPLEMENTATION-REPORT.md` reescrito → **ver la entrada siguiente**
+- [x] `v0.2.0` preparado **sin publicar** → **PASS** (comando listo, no ejecutado)
+
+### v0.2.0 — preparado, sin publicar
+
+El release lo aprueba el humano. El comando queda listo y **no se ejecutó**:
+
+```bash
+git tag -a v0.2.0 -m "v0.2.0"
+git push origin v0.2.0
+```
+
+El punto de release de `v0.1.10` sigue siendo `66a90da`, intacto y sin etiquetar.

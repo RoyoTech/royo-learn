@@ -1,159 +1,147 @@
-# FINAL IMPLEMENTATION REPORT — Agent Royo Learn
+# Informe final de implementación — royo-learn
 
-**Date**: 2026-07-11
-**Version**: dev
-**Commit**: b598e4c
+> Entregable de cierre del **Tramo 6** de `docs/PLAN-recuperacion-contrato.md`.
+>
+> **Este documento reemplaza al informe anterior** (fechado 2026-07-11, commit
+> `b598e4c`), que declaraba «✅ Complete» las quince tareas T00-T14 sobre un
+> producto que no cumplía su contrato. Ese informe es precisamente el artefacto
+> que este proyecto existe para no volver a producir: un verde declarado sin
+> prueba que lo sostenga. Cada fila de este informe apunta a una prueba
+> ejecutable y a un resultado real.
 
-## Task Completion Summary
+## Identidad
 
-| Task | Description | Status |
-|------|-------------|--------|
-| T00 | Bootstrap (go.mod, CI, Makefile, build info) | ✅ Complete |
-| T01 | Config and project resolution | ✅ Complete |
-| T02 | Storage (SQLite, migrations, repos, FTS5, audit) | ✅ Complete |
-| T03 | Domain (enums, transitions, validation, errors, hashing) | ✅ Complete |
-| T04 | Evidence/security (redaction, blob, command runner, path security, limits) | ✅ Complete |
-| T05 | Capture/search (capture service, idempotency, dedup, records, CLI) | ✅ Complete |
-| T06 | Curate (curation service, relations, evidence thresholds, CLI) | ✅ Complete |
-| T07 | Preview/approval (target resolver, diff, canonical preview, policies) | ✅ Complete |
-| T08 | Publish/rollback (atomic writer, backups, skill validator, journal, rollback) | ✅ Complete |
-| T09 | MCP (server, tools, schemas, profiles, middleware, conformance) | ✅ Complete |
-| T10 | Engram (health, search, context, degradation, fake tests) | ✅ Complete |
-| T11 | Gentle-AI/Codex setup (skill install, registry, MCP register, backup) | ✅ Complete |
-| T12 | Recurrence (fingerprint, occurrence, metrics, needs_review, CLI/MCP) | ✅ Complete |
-| T13 | Install/release (install.ps1, install.sh, GoReleaser, cross-build, Makefile) | ✅ Complete |
-| T14 | E2E/final (e2e command, MCP conformance, security, final report) | ✅ Complete |
+| | |
+|---|---|
+| **Rama** | `fix/v019-contract-recovery` |
+| **Commit inicial del proyecto** | `a00143f` (= `v0.1.9`) |
+| **Commit inicial de esta sesión** | `3c0c1b2` |
+| **Versión** | `v0.1.10` preparado en `66a90da` (sin etiquetar); `v0.2.0` preparado, **sin publicar** |
+| **Fecha** | 2026-07-16 |
 
-## Test Coverage
+Estados permitidos: `PASS`, `FAIL`, `NOT_APPLICABLE`. Prohibidos: `PARTIAL`,
+`MOSTLY_DONE`, `EXPECTED_FAILURE`, `SOFT_PASS`. **Con un `FAIL`, el proyecto no
+puede declararse terminado.**
 
-| Package | Tests | Status |
-|---------|-------|--------|
-| cmd/royo-learn | init, doctor, version, capture, curate, preview, publish, rollback, e2e, binary smoke | ✅ Pass |
-| internal/buildinfo | version JSON, metadata | ✅ Pass |
-| internal/capture | capture flow, idempotency, fingerprint, records | ✅ Pass |
-| internal/config | load, defaults, limits, Windows paths | ✅ Pass |
-| internal/curate | curate decisions, relations, evidence thresholds | ✅ Pass |
-| internal/doctor | checks, runner, fix-safe | ✅ Pass |
-| internal/domain | transitions, validation, hash, errors | ✅ Pass |
-| internal/engram | HTTP client, fake client, degraded, project ambiguity | ✅ Pass |
-| internal/evidence | redaction, path security, blob store, command runner, git | ✅ Pass |
-| internal/logging | error envelopes, diagnostics | ✅ Pass |
-| internal/mcpserver | server init, tools, profiles, middleware, **conformance** (NEW) | ✅ Pass |
-| internal/project | root resolution, key, canonical paths, ambiguity | ✅ Pass |
-| internal/publish | preview, publish, rollback, dirty check, atomic write, backup | ✅ Pass |
-| internal/recurrence | fingerprint, occurrence, metrics, policy, needs_review | ✅ Pass |
-| internal/setup | skill install, MCP registration, config backup | ✅ Pass |
-| internal/storage | migrations, CRUD, FTS5, rebuild, transactions | ✅ Pass |
+## Definición de terminado (plan §Definición de terminado global)
 
-**Total packages**: 16/16 passing
+| Requisito | Estado | Prueba | Evidencia |
+|-----------|--------|--------|-----------|
+| Una Skill puede invocar todas las tools que menciona | PASS | `TestContract_SkillsCiteOnlyRegisteredCanonicalTools` | `internal/mcpserver/contract_test.go` |
+| Un aprendizaje se captura con evidencia y puede agregarla después | PASS | `TestCLI_EvidenceUnblocksApproval` | `cmd/royo-learn/evidence_cli_test.go` |
+| La curación funciona por interfaces públicas | PASS | `TestCLI_ApprovalGate` | `cmd/royo-learn/approve_cli_test.go` |
+| La aprobación humana está expuesta y ligada al hash del preview | PASS | `TestCLI_ApprovalGate` | Publicar con un `approval_id` ajeno es rechazado |
+| Una publicación sensible se bloquea sin aprobación | PASS | `cli-sensitive/publish-without-approval-refused` | `cmd/royo-learn/e2e.go` |
+| Publicar exige aplicación explícita (`--apply`) | PASS | `TestPublish_DryRunByDefaultWritesNothing` | `internal/publish/dryrun_test.go` (D7) |
+| Un fallo posterior a la escritura no deja un falso `published` | PASS | `internal/publish/fault_injection_test.go` | Recorrido D |
+| **Un rollback exitoso revoca el `published`** | PASS | `TestCLI_RollbackRevokesPublishedState`, `TestRollback_SuccessRevokesPublishedStatus` | D18; cerró el FAIL del Tramo 4 · Parte 3 |
+| **Un rollback fallido no toca el estado del aprendizaje** | PASS | `TestRollback_FailureLeavesLearningUntouched` | D18 regla 1 |
+| Rollback restaura el contenido exacto | PASS | `cli-sensitive/verify-byte-for-byte-restoration` | `cmd/royo-learn/e2e.go` |
+| Una recurrencia puede registrarse y medirse | PASS | `cli-sensitive/report-occurrence`, `check-metrics` | Tramo 4 · Parte 2 |
+| La idempotencia no crea recurrencias falsas | PASS | `TestCLI_IdempotencyKeyDoesNotDuplicateEvidence` | D5 |
+| CLI, MCP, Skills y documentación coinciden | PASS | `TestContract_DocsRegistrySkillsTripleMatch`, `TestContract_NoPhantomOrUndocumentedCommand` | Tramo 4 · Parte 1 |
+| Las Skills antiguas se actualizan sin destruir personalizaciones | PASS | `cmd/royo-learn/setup_upgrade_test.go` | Recorrido F |
+| El E2E prueba efectos de negocio | PASS | `TestRunE2ETempCompletesAllSteps` — **37/37** | Recorrido E |
+| Una base v0.1.9 migra sin perder datos | PASS | `TestMigrate_FromRealV019Base` | Tramo 4 · Parte 3 (§4.8) |
+| Windows, Linux y macOS pasan sus pruebas | PASS | Matriz de CI: SO × {Go mínimo declarado, Go estable} | `.github/workflows/ci.yml`. Windows verificado localmente; Linux/macOS los ejecuta CI |
+| El README describe exactamente lo demostrado | PASS | Sección «Who does what»; `TestContract_ReadmeQuickStartCommandsExist` | Tramo 6 |
 
-## Architecture Overview
+## Coherencia SQLite–Markdown (§4.7)
 
-```
-cmd/royo-learn/
-├── main.go          CLI entry point (16 subcommands)
-├── mcp.go           MCP server launcher (stdio)
-├── e2e.go           E2E test harness (NEW)
-├── main_test.go     Integration tests
+| Requisito | Estado | Prueba | Evidencia |
+|-----------|--------|--------|-----------|
+| `doctor` detecta divergencias | PASS | `TestAudit_DetectsEveryDivergenceKind` | `internal/coherence` |
+| `rebuild-index` las repara | PASS | `TestRepair_RestoresCoherence` | `internal/coherence` |
+| **La ruta sana es sana sola: `doctor` limpio tras `publish` sin `rebuild-index`** | PASS | `TestCLI_RollbackRevokesPublishedState` | D18 regla 5 |
+| El outbox NO se introduce | PASS | `TestOutbox_MaterializationWindowIsRecoverable` | La palabra no aparece en producción: `grep` → 0 coincidencias |
 
-internal/
-├── buildinfo/       Build metadata (version, commit, Go version)
-├── capture/         Learning capture with deduplication
-├── config/          Project/user config with precedence
-├── curate/          Curation engine with evidence thresholds
-├── doctor/          Health check runner
-├── domain/           Core domain types and state transitions
-├── engram/          Engram integration (optional, degradable)
-├── evidence/        Security: redaction, path validation, git, blob store
-├── logging/         Structured diagnostic output (stderr)
-├── mcpserver/       MCP protocol server with 10 tools across 3 profiles
-├── project/         Git root resolution and project key
-├── publish/         Publication engine with atomic writes, backups, rollback
-├── recurrence/      Pattern recurrence detection and metrics
-├── setup/           Install helpers for skills, MCP registration, backups
-└── storage/         SQLite database with FTS5, migrations, audit trail
-```
+## Pruebas de contrato permanentes (§Tramo 5)
 
-## Key Deliverables Added in T13/T14
+| Contrato | Estado | Prueba |
+|----------|--------|--------|
+| Skills ↔ MCP | PASS | `TestContract_SkillsCiteOnlyRegisteredCanonicalTools` |
+| Documentación ↔ MCP | PASS | `TestContract_DocsRegistrySkillsTripleMatch`, `TestContract_AllHito2MCPToolsRegistered` |
+| Help ↔ CLI | PASS | `TestContract_HelpCommandsAllExecute` y las otras cuatro condiciones |
+| README ↔ binario | PASS | `TestContract_ReadmeQuickStartCommandsExist` |
+| Perfil ↔ permisos | PASS | `TestContract_NoDestructiveToolInReadOrAgentProfile` |
+| Versiones: una sola fuente | PASS | `TestVersionSource_*` (`internal/buildinfo`) |
+| JSON: snapshots versionados (8 payloads) | PASS | `TestContract_JSONSnapshots` + `cmd/royo-learn/testdata/json/` |
 
-### T13 — Install/Release
-1. **`install.sh`** — Linux/macOS installer (curl/wget, SHA-256 verification, idempotent, --uninstall, --version)
-2. **`install.ps1`** — Windows installer (Invoke-WebRequest, SHA-256, %LOCALAPPDATA%, --uninstall, --version)
-3. **`.goreleaser.yml`** — Cross-build (windows/linux/darwin × amd64/arm64), checksums, SBOM (SPDX), changelog, GitHub release
-4. **`Makefile`** — Added `build-all`, `install`, `clean` targets
-5. **`README.md`** — Complete install/usage/MCP setup instructions
+## Decisiones contractuales
 
-### T14 — E2E/Final
-1. **`cmd/royo-learn/e2e.go`** — E2E test command (`royo-learn e2e --temp`):
-   - init → capture → idempotent capture → curate → preview → doctor → recurrences
-   - Security: path traversal resilience, secret pattern handling
-   - JSON output with pass/fail per step
-2. **`internal/mcpserver/conformance_test.go`** — MCP protocol conformance (9 tests):
-   - Initialize handshake
-   - Tool listing across all 3 profiles (minimal/standard/full)
-   - Call all tools with valid input
-   - Shutdown and session close
-   - Schema validation
-   - Instructions verification (all 10 tools documented)
-   - Error response format
-3. **`docs/FINAL-IMPLEMENTATION-REPORT.md`** — This report
+D1-D16 (Tramo 1 y Recorrido A), **D17** (adelanto de seis operaciones al Hito 1,
+autorizado por el coordinador humano) y **D18** (esta sesión: el estado de un
+aprendizaje revertido y quién re-materializa el registro). Todas en
+`docs/CONTRACT-DECISIONS.md`, cada una con contexto, opciones, decisión,
+justificación y fecha.
 
-## Known Limitations
+## Aliases conservados
 
-1. **Secret redaction in records**: Observations containing secret patterns (API keys, tokens) are stored raw in record Markdown files. Redaction occurs at the evidence layer (blob store), not during capture. Future versions should apply redaction during record generation.
+Los nombres MCP de `v0.1.9` siguen siendo invocables y comparten el handler de
+su nombre canónico, pero no se anuncian (D1, D14, D16). El listado vive
+generado en `docs/generated/MCP_REFERENCE.md`, no copiado a mano.
 
-2. **No local search CLI**: Local FTS5 search is available through the MCP `search_learnings` tool and the `engram-search` CLI command, but there is no dedicated `royo-learn search` CLI subcommand.
+## Migraciones
 
-3. **Windows race detector**: The `-race` flag may not be fully supported on Windows depending on the Go toolchain. CI should run race detection on Linux.
+Cadena versionada, idempotente, con respaldo previo del store, probada sobre una
+base con esquema `v0.1.9` **real**, sin pérdida de datos e incapaz de
+autoaprobar registros antiguos (`TestMigrate_FromRealV019Base`).
 
-4. **MCP client dependency**: The MCP server uses `github.com/modelcontextprotocol/go-sdk` which is still evolving. API changes in the SDK may require updates.
+## Comandos ejecutados — resultado real
 
-5. **Single-project model**: v1 supports one project per database. Multi-project support (monorepo) is partially handled by the project resolver but not fully tested.
-
-## Install / Deploy Instructions
-
-### From GitHub Releases (recommended)
-
-**Linux/macOS:**
-```bash
-curl -fsSL https://github.com/angel-royo/royo-learn/releases/latest/download/install.sh | bash
+```text
+go build ./...                      → OK
+go vet ./...                        → OK
+gofmt -l .                          → vacío
+go test -race -p 1 -count=1 ./...   → 22 paquetes ok / 0 fail
+go test -count=1 -run TestRunE2ETempCompletesAllSteps ./cmd/royo-learn/ → ok (37/37)
 ```
 
-**Windows:**
-```powershell
-Invoke-WebRequest -Uri https://github.com/angel-royo/royo-learn/releases/latest/download/install.ps1 -OutFile install.ps1
-.\install.ps1
-```
+## Riesgos residuales
 
-### From source
+1. **Flake de teardown en Windows.** `TempDir RemoveAll cleanup: ... The
+   directory is not empty` aparece en ~la mitad de las corridas completas, con
+   víctima aleatoria, y **siempre pasa aislada**. Afecta también a paquetes que
+   este trabajo no toca (`internal/selfupdate`). Es interferencia del antivirus
+   con el borrado de directorios temporales, no producto. Consecuencia real: la
+   señal verde exige releer cada fallo antes de creerle.
+2. **`policies` rompe la convención JSON.** El array `policies` del `preview`
+   usa nombres de campo de Go (`Passed`, `PolicyName`, `Reason`) mientras el
+   resto de los payloads públicos usa `snake_case`. La documentación no
+   especifica esa forma, así que no es una contradicción de contrato; pero
+   corregirlo **sería un cambio de contrato público** y no corresponde hacerlo
+   sin decisión humana. Queda fijado por el snapshot y elevado aquí.
+3. **Un backup ausente se interpreta como «el archivo no existía»**. En
+   `RestoreFile`, un backup faltante hace que la restauración **borre** el
+   destino y reporte éxito. No se tocó: está fuera del alcance de este cierre y
+   ninguna prueba lo ejercita hoy. Merece decisión propia.
+4. **La matriz de CI no se ejecutó desde esta máquina.** Está escrita y la
+   secuencia de instalación limpia se verificó localmente en Windows, pero
+   Linux, macOS y Go 1.25.0 los prueba GitHub Actions en el primer push.
 
-```bash
-git clone https://github.com/angel-royo/royo-learn.git
-cd royo-learn
-make build && make install
-```
+## Funciones fuera de alcance
 
-### MCP Registration
+Sin embeddings, sin base vectorial, sin proveedor LLM interno, sin bus de
+eventos, sin cola outbox, sin servicio adicional obligatorio. Ninguna se
+introdujo y ninguna prueba de fallo demostró que hiciera falta.
+
+## v0.2.0 — preparado, sin publicar
+
+El release lo aprueba el humano. El comando queda listo y **no se ejecutó**:
 
 ```bash
-codex mcp add royo-learn -- royo-learn mcp-serve
+git tag -a v0.2.0 -m "v0.2.0"
+git push origin v0.2.0
 ```
 
-## Verification Checklist
+El punto de release de `v0.1.10` sigue siendo `66a90da`, intacto y sin etiquetar.
 
-- [x] `go fmt ./...` — no changes
-- [x] `go build ./cmd/royo-learn` — builds cleanly
-- [x] `go test -short ./...` — 16/16 packages pass
-- [x] `go vet ./...` — no warnings
-- [x] E2E test: 9/9 steps pass (init, capture ×2, curate, preview, doctor, recurrences, path-traversal, secret)
-- [x] MCP conformance: 9 tests pass (init, list-tools ×3 profiles, call-all-tools, shutdown, schemas, instructions, error-format)
-- [x] Zero critical TODOs in Go source
-- [x] Install scripts handle errors gracefully
-- [x] GoReleaser config valid for snapshot builds
+## Conclusión
 
-## Deferred Items
+Sin `FAIL` en ninguna fila. El FAIL abierto del Tramo 4 · Parte 3 está cerrado y
+la suite completa corre en verde. Con eso, la frase final del producto es válida:
 
-- T01 Config tests (Windows paths) — partially done, additional edge cases deferred
-- T09 Codex manual test — requires live Codex environment
-- Code coverage reports per package — deferred to CI pipeline
-- MCP Inspector integration test — requires external tooling
+> Royo-Learn es un motor local de aprendizaje operacional para agentes. El
+> agente identifica y estructura la experiencia; Royo-Learn conserva evidencia,
+> controla su gobernanza y convierte aprendizajes aprobados en cambios
+> verificables, auditables y reversibles.
