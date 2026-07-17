@@ -1328,3 +1328,86 @@ esa matriz está configurada pero **NOT_RUN** hasta que un humano autorice push.
 **CANDIDATO PREPARADO, RELEASE BLOQUEADO POR CI NO EJECUTADA.** No se creó tag,
 no se hizo push, no se abrió PR y no se ejecutó GoReleaser. El informe final
 vigente es `docs/FINAL-IMPLEMENTATION-REPORT.md`.
+
+---
+
+## 2026-07-16 — Corrección de la revisión congelada `v0110-release-safety-v1`
+
+La revisión congelada evaluó `9767e25198afc4f789c50d8a1a00b4c4e4ea2da2`
+(`git-tree:c3997b860af2243d772023f03c5f27b93c97f8e3`). Sus recibos no se
+modificaron. Esta corrección parte de ese commit y atiende los 33 hallazgos
+BLOCKER/CRITICAL; los WARNING/SUGGESTION permanecen fuera de esta puerta salvo
+cuando una corrección severa los hizo desaparecer incidentalmente.
+
+### Unidades TDD y operativas
+
+| Unidad | RED / contrato | GREEN / cierre |
+|--------|----------------|----------------|
+| Preview y aprobación ligados al plan persistido | `e82d38e` | `167ac8f` |
+| Rutas, CAS, modos y materialización confinada | `7b5ae08` | `4a7f15b` |
+| Recuperación, lock, reconciliación y auditoría | `4bc4e83`, `8aeadca` | `2698394`, `1dc250f` |
+| Compatibilidad de errores CLI/MCP/self-update | `78b6916` | `8343d6b` |
+| Release, instaladores y cobertura obligatoria | `4472e69` | `66dcec5`, `0823b39`, `e9a0ddf`, `24126c3`, `e6d846f` |
+
+### Trazabilidad de los 33 hallazgos severos
+
+| ID | Cierre | Commit(s) | Evidencia ejecutable principal |
+|----|--------|-----------|-------------------------------|
+| `READABILITY-001` | El artefacto exige y verifica backup; no inventa bytes de borrado | `2698394` | `TestMissingBackupDoesNotCreateDeletionArtifact`, `TestRecoveryArtifactWriteFailureIsSurfaced` |
+| `RELIABILITY-001` | Preview ligado al learning y a todos los destinos | `167ac8f` | `plan_enforcement_test.go`, `plan_hash_test.go` |
+| `RELIABILITY-002` | Fallback CLI de rollback usa `rollback_failed` | `8343d6b` | `cmd/royo-learn/errors_test.go` |
+| `RELIABILITY-003` | Reemplazo existente usa rename atómico sin destino ausente | `4a7f15b` | `filesystem_safety_test.go`, `filesystem_hardening_test.go` |
+| `RELIABILITY-004` | Lock de proyecto compartido por publish/rollback | `2698394` | `TestConcurrentPublishIsRejectedByProjectLock`, `TestPublicationLockReportsExistingOwner` |
+| `RELIABILITY-005` | Identidad CAS y rollback incluyen modo | `4a7f15b` | `TestRestoreCASIncludesPublishedAndOriginalModes` |
+| `RELIABILITY-006` | Backup ausente/corrupto falla cerrado sin patch engañoso | `2698394` | `TestMissingBackupDoesNotCreateDeletionArtifact` |
+| `RELIABILITY-007` | Artefactos se regeneran y sus fallos se propagan | `2698394` | `TestRecoveryArtifactIsRegeneratedFromCurrentState`, `TestRecoveryArtifactWriteFailureIsSurfaced` |
+| `RELIABILITY-008` | Rollback exitoso audita actor en la transacción de estado | `2698394` | `TestSuccessfulRollbackAuditsActorInStateTransaction` |
+| `RELIABILITY-009` | Segundo rollback limpio devuelve conflicto canónico | `2698394` | `TestRollbackRetryReconcilesThenSecondRollbackConflicts` |
+| `RELIABILITY-010` | MCP conserva campos top-level heredados y detalles anidados | `8343d6b` | `TestMCPErrorModelRetainsLegacyTopLevelFields` |
+| `RELIABILITY-011` | Todo error de self-update sale con código 1 | `8343d6b` | pruebas de `internal/selfupdate` y `cmd/royo-learn` |
+| `RELIABILITY-012` | CI impone domain/storage/publish `80/80/90` | `66dcec5`, `0823b39`, `e9a0ddf` | comando exacto CI: `95.5%`, `81.9%`, `90.1%` |
+| `RELIABILITY-013` | Ancestros se validan antes de crear directorios | `4a7f15b` | `TestWriterDoesNotCreateThroughSymlinkedAncestor`, `TestRecordMaterializerDoesNotCreateThroughSymlinkedAncestor` |
+| `RESILIENCE-001` | Publicaciones concurrentes no pueden compensarse entre sí | `2698394` | pruebas de lock y concurrencia |
+| `RESILIENCE-002` | Reemplazo atómico elimina ventana de cuarentena/hard-link | `4a7f15b` | `TestWriterCASPreservesFinalBoundaryReplacement` |
+| `RESILIENCE-003` | Apply usa bytes y conjunto exactos persistidos en preview | `167ac8f` | `TestPublishAppliesPreviewedBytesAfterLearningDrift` |
+| `RESILIENCE-004` | Estado post-commit tiene reconciliación ejecutable | `2698394` | `reconciliation_contract_test.go`, `materialization_safety_test.go` |
+| `RESILIENCE-005` | Journal es legible y CLI lista intentos recuperables | `2698394`, `1dc250f` | `recovery_safety_test.go`, pruebas `rollback --list --json` |
+| `RESILIENCE-006` | Patch de conflicto usa estado actual y backup verificado | `2698394` | pruebas de artefacto faltante, regenerado y fallido |
+| `RESILIENCE-007` | Errores conservan causa de journal y auditoría con actor | `2698394` | `TestSuccessfulRollbackAuditsActorInStateTransaction`, `TestRecoveryArtifactWriteFailureIsSurfaced` |
+| `RESILIENCE-008` | Release exige CI exitoso del SHA etiquetado | `66dcec5` | `TestReleaseWorkflowRequiresSuccessfulCIForTaggedSHA` |
+| `RESILIENCE-009` | Umbrales obligatorios medidos en CI | `66dcec5`, `0823b39`, `e9a0ddf` | perfiles de cobertura finales `95.5/81.9/90.1` |
+| `RESILIENCE-010` | Instaladores fallan cerrados y restauran binario previo | `66dcec5`, `24126c3` | `scripts/test-install.sh`, `scripts/test-install.ps1` |
+| `RISK-001` | Hash/plan validan el learning solicitado | `167ac8f` | `TestPublishRejectsPreviewOwnedByAnotherLearning` |
+| `RISK-002` | No hay recomposición durante apply | `167ac8f` | `TestPublishAppliesPreviewedBytesAfterLearningDrift` |
+| `RISK-003` | Aprobación deriva del impacto resuelto, no del boolean persistido | `167ac8f` | `plan_enforcement_test.go`, `safety_edges_test.go` |
+| `RISK-004` | Snapshot de preview rechaza target y padre symlink | `4a7f15b`, `e6d846f` | `TestSymlinkSafetyBranchesWhenSupported` |
+| `RISK-005` | Operaciones destructivas ocurren dentro de `os.Root` | `4a7f15b` | `filesystem_safety_test.go`, `filesystem_hardening_test.go` |
+| `RISK-006` | Materializador de records usa operaciones rooted/no-follow | `4a7f15b` | `TestRecordMaterializerDoesNotCreateThroughSymlinkedAncestor` |
+| `RISK-007` | Rollback compara hash y modo publicados | `4a7f15b` | `TestRestoreCASIncludesPublishedAndOriginalModes` |
+| `RISK-008` | Rollback antiguo no pisa destino de publicación nueva | `2698394` | `TestRollbackRejectsOlderOverlappingPublication` |
+| `RISK-009` | Lock real serializa publish, rollback y compensación | `2698394` | `TestConcurrentPublishIsRejectedByProjectLock` |
+
+### Verificación final local
+
+```text
+go fmt ./...                                      PASS
+go test -race ./...                              PASS
+go test -race -count=1 ./internal/publish        PASS en e6d846f
+go vet ./...                                     PASS
+go mod verify                                    PASS
+coverage CI exacta domain/storage/publish        95.5% / 81.9% / 90.1%
+6 cross-builds CGO_ENABLED=0                     PASS
+install/update/mismatch/rollback/uninstall       PASS en PowerShell y WSL
+candidato v0.1.10 doctor --json                  ok=true (6 degradaciones explícitas)
+candidato v0.1.10 e2e --temp                     37/37 PASS, incluido MCP stdio real
+```
+
+Una corrida sin race y sin cache encontró el flake ambiental ya documentado:
+Windows negó la ejecución temporal de `internal/buildinfo.test.exe` y demoró el
+cleanup de un `TempDir` de evidence. El mismo test de buildinfo compilado con
+`go test -c` y ejecutado desde ruta estable pasó 3/3; la suite completa con race
+pasó después. No hubo fallo de aserción.
+
+GitHub Actions continúa **NOT_RUN** porque no hubo push. No se creó tag, PR,
+issue ni release, no se ejecutó GoReleaser y no se alteró la línea de revisión
+congelada.
