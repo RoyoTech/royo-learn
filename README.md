@@ -370,11 +370,16 @@ royo-learn metrics --learning-id <learning-id> --json
 
 ## El ciclo completo, de principio a fin
 
-El inicio rápido lista los comandos. Esta sección los encadena en un caso
-real para mostrar **qué garantiza el binario en cada paso**. Los nombres de
-campo y los valores de retorno son los que devuelve el código (verificados
-contra `cmd/royo-learn/main.go` y `internal/mcpserver/profiles.go`). Donde
-una salida pueda variar entre ejecuciones, se marca con `<…>`.
+Esta sección recorre un caso real, de punta a punta, **usando Royo-Learn
+desde un agente** — el caso de uso para el que el sistema fue diseñado. El
+ejemplo primario está escrito para **OpenCode**; los bloques siguientes
+indican las diferencias concretas (cuando las hay) para **Claude Code**,
+**Codex CLI** y **Pi**.
+
+Donde un campo o valor de retorno pueda variar entre ejecuciones, se
+marca con `<…>`. Cada herramienta, nombre de campo y estado del JSON que
+aparece abajo está verificado contra `internal/mcpserver/tools.go`,
+`internal/mcpserver/profiles.go` e `internal/domain/types.go`.
 
 ### Escenario
 
@@ -389,10 +394,33 @@ Royo-Learn existe para que una corrección explicada una vez se convierta
 en un cambio **verificable, auditable y reversible** del comportamiento
 del proyecto.
 
+### Compatibilidad entre agentes
+
+Royo-Learn expone un único servidor MCP por `stdio` con herramientas
+estables y JSON Schema estricto. **OpenCode, Claude Code, Codex CLI y
+Pi** lo consumen de la misma forma: registran el binario como servidor
+MCP, descubren las herramientas al iniciar, y las invocan con los
+mismos argumentos. La diferencia entre clientes es solo el lugar donde
+se declara el servidor:
+
+```text
+OpenCode      ~/.config/opencode/opencode.json   "mcp": { "royo-learn": { ... } }
+Claude Code   ~/.claude/mcp.json                 "mcpServers": { ... }
+Codex CLI     codex mcp add royo-learn -- royo-learn mcp-serve
+Pi            ~/.pi/agent/mcp.json               "mcpServers": { ... }
+```
+
+Una vez registrado, las herramientas y sus respuestas son idénticas. El
+ejemplo de abajo está narrado en OpenCode porque es el cliente que
+mantiene este repo; en cualquier otro cliente, lo único que cambia es la
+configuración inicial, no los tool calls.
+
 ### Acto 1 — Inicialización (una vez por raíz)
 
 El sistema no existe hasta que el proyecto decide crearlo. Cada raíz de
-proyecto tiene su propio `.royo-learn/` con DB, records y backups.
+proyecto tiene su propio `.royo-learn/` con DB, records y backups. En el
+flujo MCP, esto se hace desde la terminal **una sola vez por proyecto**;
+después, todos los agentes del usuario lo encuentran automáticamente.
 
 ```bash
 $ royo-learn init --project-root ~/code/mi-app --json
@@ -403,187 +431,305 @@ $ royo-learn init --project-root ~/code/mi-app --json
   "config": "~/code/mi-app/.royo-learn/config.yaml",
   "next_action": "run \"royo-learn doctor --project-root ~/code/mi-app --json\""
 }
+```
 
-$ royo-learn doctor --project-root ~/code/mi-app --json
+Después, en **OpenCode**, Maria abre la carpeta del proyecto. La Skill
+`royo-learn-onboarding` (distribuida por `setup install`) detecta que
+falta el `.royo-learn/` y le pregunta si quiere inicializar. Ella acepta,
+OpenCode corre `init` por ella y, a partir de acá, todas las tools MCP
+tienen un proyecto válido al cual resolver. La primera llamada útil que
+hace el agente para confirmar el estado es `learning_doctor`:
+
+> **Maria:** *"¿Está todo sano en este proyecto?"*
+
+OpenCode invoca:
+
+```json
 {
-  "status": "ok",
-  "components": {
-    "database":          { "ok": true,  "migrations": "v3" },
-    "git":               { "ok": true },
-    "engram":            { "ok": false, "available": false, "degraded": true, "reason": "connection_refused" },
-    "skill_registry":    { "ok": false, "available": false }
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "learning_doctor",
+    "arguments": {}
   }
 }
 ```
 
-> Nota: `engram.available = false` no es un fallo. El sistema reporta
-> degradación explícita y sigue operativo.
-
-### Acto 2 — Captura (la LLM redacta, el binario valida)
-
-Maria le dice a su agente: *"Guardá esto: nunca aplicar una migración sin
-verificar primero su estado real en la base"*. El agente redacta el
-candidato, llama al binario, y el binario valida, redacta secretos, hashea,
-busca en FTS5 y persiste. **Una sola llamada, una sola garantía.**
-
-```bash
-$ royo-learn capture \
-    --project-root ~/code/mi-app \
-    --title "Migrations must be idempotent and state-checked" \
-    --context "Production incident: migration 0047 re-ran on a half-applied DB" \
-    --observation "ORM idempotency check failed mid-transaction; user_prefs table left inconsistent; manual rollback took half a day." \
-    --lesson "Always query schema_migrations before running make migrate; refuse to apply if state diverges from expected." \
-    --type procedure \
-    --scope project \
-    --destination agents_rule \
-    --idempotency-key "maria-2026-07-17-migration-state" \
-    --json
+```json
 {
-  "learning_id": "<ULID>",
-  "status": "needs_evidence",
-  "fingerprint": "<sha256>",
-  "similar": [
-    {
-      "learning_id": "<ULID previo>",
-      "title": "Check migration state before applying",
-      "status": "rejected",
-      "match": "lexical"
-    }
-  ],
-  "next_action": "run \"royo-learn evidence add <learning-id> --summary ...\""
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"ok\":true,\"version\":\"v0.1.10\",\"checks\":[{\"name\":\"database\",\"status\":\"pass\",\"message\":\"database connection ok\"},{\"name\":\"project\",\"status\":\"pass\",\"message\":\"project resolved\"}]}"
+      }
+    ]
+  }
 }
 ```
 
-Cuatro cosas pasaron en esa sola llamada, sin que la LLM tuviera que
-recordarlas:
+El doctor **no** reporta Engram en esta versión (el binario no consulta
+Engram en `learning_doctor`; lo hace en el doctor CLI cuando está
+disponible). Si el `ok` viene `false`, OpenCode aborta y le pide a Maria
+revisar antes de seguir.
 
-1. **Validación de contrato** (campos requeridos, tipos, alcance).
+### Acto 2 — Captura (la LLM redacta, el binario valida)
+
+> **Maria:** *"Guardame este aprendizaje: nunca aplicar una migración sin
+> verificar primero su estado real en la base."*
+
+La Skill `capture-learning` de OpenCode toma esa frase, la estructura en
+los campos del schema JSON de `learning_capture` y hace la llamada.
+**Maria no ve el JSON** — OpenCode se lo muestra solo si ella lo pide.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+    "name": "learning_capture",
+    "arguments": {
+      "title": "Migrations must be idempotent and state-checked",
+      "type": "procedure",
+      "context": "Production incident: migration 0047 re-ran on a half-applied DB.",
+      "observation": "ORM idempotency check failed mid-transaction; user_prefs table left inconsistent; manual rollback took half a day.",
+      "reusable_lesson": "Always query schema_migrations before running make migrate; refuse to apply if state diverges from expected.",
+      "scope_guess": "project",
+      "confidence": "high",
+      "evidence_level": "moderate",
+      "proposed_destination": "agents_rule",
+      "recommended_procedure": [
+        "psql -c 'SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 5'",
+        "if divergence: abort and request human review"
+      ],
+      "retrieval_terms": ["migration", "schema_migrations", "idempotent", "make migrate"],
+      "idempotency_key": "maria-2026-07-17-migration-state",
+      "actor": { "kind": "human", "name": "maria" }
+    }
+  }
+}
+```
+
+Respuesta del servidor MCP (el texto que OpenCode muestra a Maria):
+
+```json
+{
+  "learning_id": "<ULID>",
+  "status": "needs_evidence",
+  "new": true,
+  "evidence_count": 0,
+  "evidence_ids": [],
+  "redacted": false
+}
+```
+
+Cuatro garantías que el binario aplicó en esa sola llamada, sin que la
+LLM tuviera que pedirlas:
+
+1. **Validación de contrato** según el JSON Schema (campos requeridos,
+   enums de `type`, `scope_guess`, `confidence`, `evidence_level`,
+   `proposed_destination`).
 2. **Redacción de secretos** — si Maria hubiera pegado una contraseña en
-   `--context`, se reemplaza por `[REDACTED]` **antes** de tocar SQLite,
-   el blob store, el Markdown, el audit log y esta misma respuesta.
-3. **Hash normalizado** + búsqueda en FTS5 — encontró un candidato
-   rechazado previamente. No se duplica.
-4. **Estado inicial**: `needs_evidence`, porque la regla propuesta
+   `context`, se reemplaza por `[REDACTED]` **antes** de tocar SQLite,
+   el blob store, el Markdown, el audit log y esta misma respuesta. El
+   flag `redacted: true` lo indicaría.
+3. **Hash normalizado + búsqueda en FTS5** — si ya existía un candidato
+   con el mismo fingerprint, devuelve el existente y `new: false`.
+4. **Estado inicial**: `needs_evidence`, porque el destino propuesto
    (`agents_rule`) exige evidencia antes de poder aprobarse.
 
 ### Acto 3 — Evidencia
 
-Maria adjunta el diff del fallo, el log del ORM y el fix manual. El
-estado **se mantiene** en `needs_evidence` hasta que la curación decida
-que es suficiente.
+Maria tiene el diff del fallo en `incident-0047.diff`. Se la pasa al
+agente y OpenCode llama a `learning_add_evidence` con un array `evidence`
+(mínimo uno; aquí adjuntamos dos).
 
-```bash
-$ royo-learn evidence add <learning-id> \
-    --summary "Failed migration run + manual fix diff" \
-    --content "$(cat incident-0047.diff)" \
-    --json
+```json
 {
-  "learning_id": "<ULID>",
-  "evidence_id": "<ULID>",
-  "evidence_count": 1,
-  "status": "needs_evidence",
-  "next_action": "run \"royo-learn evidence add <learning-id> --summary ...\" or run \"royo-learn curate --learning-id <learning-id> --action approve\""
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "tools/call",
+  "params": {
+    "name": "learning_add_evidence",
+    "arguments": {
+      "learning_id": "<ULID>",
+      "evidence": [
+        {
+          "kind": "file",
+          "source": "incident-0047.diff",
+          "summary": "Failed migration run + ORM error log + manual fix diff",
+          "content": "<contenido del diff>"
+        },
+        {
+          "kind": "git_commit",
+          "source": "abc1234",
+          "summary": "Manual revert commit that recovered production"
+        }
+      ],
+      "evidence_level": "strong",
+      "actor": { "kind": "human", "name": "maria" }
+    }
+  }
 }
 ```
+
+```json
+{
+  "learning_id": "<ULID>",
+  "evidence_count": 2,
+  "evidence_ids": ["<ULID>", "<ULID>"],
+  "evidence_level": "strong",
+  "redacted": false
+}
+```
+
+El **estado se mantiene** en `needs_evidence`. La promoción a `approved`
+no la hace el adjuntar evidencia — la hace la curación.
 
 ### Acto 4 — Curación
 
 Maria revisa el candidato, ve que la evidencia alcanza, y aprueba con
-fundamento. Recién acá el estado pasa a `approved`.
+fundamento. La tool MCP usa el campo `decision` (no `action` como la CLI)
+y exige los tres campos `decision`, `rationale`, `actor`:
 
-```bash
-$ royo-learn curate \
-    --learning-id <learning-id> \
-    --action approve \
-    --rationale "Validated against incident-0047; same pattern would prevent the next half-applied migration." \
-    --json
+```json
 {
-  "learning_id": "<ULID>",
-  "status": "approved",
-  "previous_status": "needs_evidence",
-  "actor": { "kind": "human", "name": "cli-user" },
-  "next_action": "run \"royo-learn preview --learning-id <learning-id>\""
+  "jsonrpc": "2.0",
+  "id": 4,
+  "method": "tools/call",
+  "params": {
+    "name": "learning_curate",
+    "arguments": {
+      "learning_id": "<ULID>",
+      "decision": "approve",
+      "rationale": "Validated against incident-0047; same pattern would prevent the next half-applied migration.",
+      "actor": { "kind": "human", "name": "maria" }
+    }
+  }
 }
 ```
 
-`--action` también acepta `reject`, `needs_evidence` (volver a pedir más),
-`relate` (vincular con otro existente), `merge` (fusionar con duplicado) y
-`approve_new_skill` / `approve_skill_update` para destinos de Skill.
+```json
+{
+  "curation_id": "<ULID>",
+  "learning_id": "<ULID>",
+  "new_status": "approved"
+}
+```
+
+`decision` también acepta `reject`, `needs_evidence`, `relate`, `merge`,
+`supersede` y `archive`. Solo una promoción a `approved` habilita la
+publicación.
 
 ### Acto 5 — Preview de publicación
 
 **El sistema nunca escribe sin preview.** Antes de tocar un archivo del
-proyecto, muestra exactamente qué va a cambiar, dónde, y qué verificaciones
-correrá después. El preview lleva un hash SHA-256: cualquier cambio
-invalida aprobaciones previas.
+proyecto, persiste el preview y devuelve su hash. La tool MCP devuelve
+**menos campos que la CLI** (no incluye `targets`, `verification_commands`
+ni `rollback_plan` — esos viven en el `preview` del CLI; en MCP el
+agente los deduce del `diff`):
 
-```bash
-$ royo-learn preview --learning-id <learning-id> --json
+```json
 {
-  "learning_id": "<ULID>",
-  "destination": "agents_rule",
-  "targets": [
-    {
-      "path": "AGENTS.md",
-      "operation": "append_section",
-      "preview_sha256": "<sha256 del diff>",
-      "diff_excerpt": "+## Migrations\n+- Always query schema_migrations before running make migrate.\n+- Refuse to apply if state diverges from expected.\n"
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "tools/call",
+  "params": {
+    "name": "learning_publication_preview",
+    "arguments": {
+      "learning_id": "<ULID>",
+      "actor": { "kind": "human", "name": "maria" }
     }
-  ],
-  "requires_approval": true,
-  "verification_commands": [
-    "git diff -- AGENTS.md",
-    "git status --porcelain"
-  ],
-  "rollback_plan": {
-    "strategy": "restore_backup",
-    "backup_path": ".royo-learn/backups/<id>.bak"
-  },
-  "next_action": "run \"royo-learn approve --learning-id <learning-id> --preview-hash <hash> --approved-by maria\""
+  }
 }
 ```
 
-`requires_approval: true` aparece porque el destino `agents_rule` (escribir
-una regla en `AGENTS.md` compartido) está marcado como sensible. Maria no
-puede saltarse este paso.
+```json
+{
+  "preview_id": "<ULID>",
+  "preview_hash": "<sha256>",
+  "risk": "low",
+  "requires_approval": true,
+  "diff": "@@ AGENTS.md\n+## Migrations\n+\n+- Always query schema_migrations before running make migrate.\n+- Refuse to apply if state diverges from expected.\n"
+}
+```
+
+`requires_approval: true` aparece porque el destino `agents_rule`
+(escribir una regla en `AGENTS.md` compartido) está marcado como
+sensible. Sin aprobación humana ligada a este `preview_hash`, `publish`
+rechaza la llamada.
 
 ### Acto 6 — Aprobación humana
 
-La aprobación está **ligada al hash exacto del preview**. Si Maria
-recalcula el preview mañana porque cambió una palabra, el hash cambia y
-la aprobación vieja queda inválida.
+> **Maria:** *"Apruebo este preview, con mi identidad."*
 
-```bash
-$ royo-learn approve \
-    --learning-id <learning-id> \
-    --preview-hash <preview_sha256> \
-    --approved-by maria \
-    --reason "Reviewed the incident diff and the proposed rule; ship it." \
-    --json
+OpenCode llama a `learning_approve`. **La tool MCP exige cuatro campos
+no opcionales**: `preview_hash`, `approved_by`, `reason` y
+`approval_evidence` (referencia al consentimiento — un link, un ID de
+mensaje, un ticket).
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 6,
+  "method": "tools/call",
+  "params": {
+    "name": "learning_approve",
+    "arguments": {
+      "learning_id": "<ULID>",
+      "preview_hash": "<sha256>",
+      "approved_by": "maria",
+      "reason": "Reviewed the incident diff and the proposed rule; ship it.",
+      "approval_evidence": "https://github.com/RoyoTech/mi-app/issues/142#issuecomment-1",
+      "actor": { "kind": "human", "name": "maria" }
+    }
+  }
+}
+```
+
+```json
 {
   "approval_id": "<ULID>",
   "learning_id": "<ULID>",
   "preview_hash": "<sha256>",
-  "approved_by": "maria",
-  "approved_at": "<RFC3339 UTC>",
-  "next_action": "run \"royo-learn publish --learning-id <learning-id> --preview-hash <hash> --approval-id <id> --apply\""
+  "approved_by": "maria"
 }
 ```
 
+La aprobación está **ligada al hash exacto del preview**. Si alguien
+recalcula el preview mañana porque cambió una palabra, el hash cambia y
+la aprobación vieja queda inválida.
+
 ### Acto 7 — Publicación atómica
 
-**Dry-run por defecto.** Sin `--apply`, el binario solo reporta el plan.
-Con `--apply`: backup → escritura atómica → verificación → `published`.
-Si la verificación falla, revierte el contenido previo byte por byte y el
-estado NO queda como `published`.
+> **Maria:** *"Dale, publicá."*
 
-```bash
-$ royo-learn publish \
-    --learning-id <learning-id> \
-    --preview-hash <preview_sha256> \
-    --approval-id <approval_id> \
-    --apply \
-    --json
+OpenCode llama a `learning_publish` con `apply: true` (sin esto, es un
+dry-run que solo reporta el plan):
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "method": "tools/call",
+  "params": {
+    "name": "learning_publish",
+    "arguments": {
+      "learning_id": "<ULID>",
+      "preview_hash": "<sha256>",
+      "approval_id": "<ULID>",
+      "apply": true,
+      "actor": { "kind": "human", "name": "maria" }
+    }
+  }
+}
+```
+
+```json
 {
   "publication_id": "<ULID>",
   "learning_id": "<ULID>",
@@ -592,16 +738,37 @@ $ royo-learn publish \
 }
 ```
 
+**Qué pasó en el servidor, sin que Maria lo viera:**
+
+1. Backup de `AGENTS.md` a `.royo-learn/backups/<journal>.bak`.
+2. Validación de que el preview hash sigue siendo el mismo.
+3. Validación de que la aprobación no está vencida.
+4. Escritura atómica (temp file + rename).
+5. Verificación post-aplicación.
+6. Si la verificación falla → restaura desde backup, marca
+   `rollback_failed`, devuelve el path del artefacto de recuperación.
+7. Si todo va bien → estado `published`.
+
 `journal_id` es la llave para revertir. Si Maria descubre dentro de un
 mes que la regla estaba mal redactada:
 
-```bash
-royo-learn rollback --journal-id <journal_id> --json
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 8,
+  "method": "tools/call",
+  "params": {
+    "name": "learning_rollback",
+    "arguments": {
+      "publication_id": "<ULID>",
+      "actor": { "kind": "human", "name": "maria" }
+    }
+  }
+}
 ```
 
-El binario restaura el contenido anterior desde el backup, marca la
-publicación como `superseded`, y deja el aprendizaje en `approved` (no en
-`published`). Listo para corregir y volver a publicar.
+(`learning_rollback` vive en el perfil `admin`, no en `agent` — es la
+única tool destructiva del sistema.)
 
 ### Acto 8 — La regla vive
 
@@ -615,38 +782,78 @@ publicación como `superseded`, y deja el aprendizaje en `approved` (no en
 - Refuse to apply if state diverges from expected.
 ```
 
-La próxima vez que cualquier agente de cualquier sesión lea
-`AGENTS.md` antes de empezar a trabajar (que es la convención del
-proyecto), va a leer esta regla.
+La próxima vez que cualquier agente — de cualquier sesión, de cualquier
+cliente MCP — abra el proyecto, leerá `AGENTS.md` antes de empezar a
+trabajar (esa es la convención del proyecto) y se topará con la regla.
 
 ### Acto 9 — Tres semanas después: la reincidencia
 
-Un agente nuevo arranca una tarea sobre el mismo proyecto. Lee
-`AGENTS.md`, ve la regla, y antes de correr `make migrate` ejecuta la
-verificación. Detecta que el estado del ORM no coincide con la migración
-esperada y **aborta con un mensaje claro** en vez de avanzar y romper la
-base. Maria registra el incidente como reincidencia **prevenida**.
+Un agente nuevo (otra sesión, otro usuario, otro día) arranca una tarea
+sobre el mismo proyecto. Lee `AGENTS.md`, ve la regla y, antes de correr
+`make migrate`, ejecuta la verificación. Detecta que el estado del ORM no
+coincide con la migración esperada y **aborta con un mensaje claro** en
+vez de avanzar y romper la base.
 
-```bash
-$ royo-learn occurrence \
-    --learning-id <learning-id> \
-    --outcome prevented \
-    --json
+Maria registra el incidente como reincidencia **prevenida**:
+
+```json
 {
-  "learning_id": "<ULID>",
-  "occurrence_id": "<ULID>",
-  "outcome": "prevented",
-  "rule_retrieved": true,
-  "next_action": "run \"royo-learn metrics --learning-id <learning-id>\""
+  "jsonrpc": "2.0",
+  "id": 9,
+  "method": "tools/call",
+  "params": {
+    "name": "learning_report_occurrence",
+    "arguments": {
+      "learning_id": "<ULID>",
+      "summary": "Same half-applied migration pattern, but the new agent read AGENTS.md and aborted before running make migrate.",
+      "outcome": "prevented",
+      "retrieved": true,
+      "skill_activated": false,
+      "evidence": "session-2026-08-04.log#L42",
+      "idempotency_key": "session-2026-08-04-prevented-1",
+      "actor": { "kind": "agent", "name": "opencode", "model": "MiniMax-M3", "session_id": "sess-2026-08-04" }
+    }
+  }
 }
+```
 
-$ royo-learn metrics --learning-id <learning-id> --json
+```json
 {
+  "recurrence_id": "<ULID>",
   "learning_id": "<ULID>",
-  "occurrences": 1,
-  "prevented": 1,
-  "recurred": 0,
-  "retrieval_rate": 1.0
+  "fingerprint": "<sha256>",
+  "occurred_at": "2026-08-04T15:22:11Z",
+  "outcome": "prevented",
+  "retrieved": true,
+  "skill_activated": false,
+  "new": true
+}
+```
+
+Y mide:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 10,
+  "method": "tools/call",
+  "params": {
+    "name": "learning_compute_metrics",
+    "arguments": { "learning_id": "<ULID>" }
+  }
+}
+```
+
+```json
+{
+  "fingerprint": "<sha256>",
+  "count": 1,
+  "first_seen": "2026-08-04T15:22:11Z",
+  "last_seen": "2026-08-04T15:22:11Z",
+  "avg_interval": "0s",
+  "trend": "stable",
+  "needs_review": false,
+  "review_reason": ""
 }
 ```
 
@@ -654,24 +861,31 @@ $ royo-learn metrics --learning-id <learning-id> --json
 cambio verificable del comportamiento, con auditoría completa y métrica
 que demuestra que la regla sirvió.
 
-### El mismo ciclo, vía MCP
+### Por qué el ejemplo es el mismo en todos los clientes
 
-Todos los pasos anteriores están disponibles como tools MCP con el perfil
-`agent` (default) o `admin` (suma `learning_rollback`):
+Las herramientas, los nombres de campos, los valores de retorno, los
+códigos de error (`code`, `recoverable`, `details`, `next_action`) y los
+perfiles (`read`, `agent`, `admin`) son **propiedad del binario**, no del
+cliente. OpenCode, Claude Code, Codex y Pi llaman a las mismas tools con
+los mismos argumentos. Cambiar de cliente no rompe el ciclo ni la
+auditoría.
 
-```text
-learning_capture                  learning_publication_preview
-learning_add_evidence             learning_approve
-learning_curate                   learning_publish
-learning_search                   learning_report_occurrence
-learning_get                      learning_compute_metrics
-learning_list                     learning_list_recurrences
-learning_status                   learning_doctor
-```
+Las únicas diferencias reales entre clientes son:
 
-Mismas garantías, mismo formato de respuesta JSON, mismo contrato de
-errores (`code`, `recoverable`, `details`, `next_action`). El servidor
-corre por `stdio` con `royo-learn mcp-serve`.
+- **Configuración del servidor** (ya mostrada arriba).
+- **Cómo se renderiza el JSON al usuario** (OpenCode lo muestra
+  opcionalmente con `/tools`, Claude Code lo oculta por defecto, Codex
+  CLI lo muestra en su panel de tools).
+- **Qué triggers naturales reconoce la Skill** (las tres Skills del
+  proyecto — `capture-learning`, `curate-learning`, `publish-learning`
+  — son las mismas; cada cliente las invoca con su propio routing de
+  intención).
+
+### El mismo ciclo, vía CLI
+
+Toda la secuencia anterior también está disponible como comandos CLI con
+la misma semántica y los mismos nombres de campo, para integraciones
+shell, scripts de CI o depuración. Ver `docs/04-CLI-SPEC.md`.
 
 ## Integración opcional con Engram
 
