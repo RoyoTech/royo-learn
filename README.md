@@ -160,7 +160,7 @@ curl -fsSL https://github.com/RoyoTech/royo-learn/releases/latest/download/insta
 Or manually:
 
 ```bash
-./install.sh --version v0.1.1     # install specific version
+./install.sh --version v0.1.10    # install specific version
 ./install.sh --uninstall           # remove
 ```
 
@@ -177,7 +177,7 @@ Invoke-WebRequest -Uri https://github.com/RoyoTech/royo-learn/releases/latest/do
 Or with a version:
 
 ```powershell
-.\install.ps1 -Version v0.1.1     # install specific version
+.\install.ps1 -Version v0.1.10    # install specific version
 .\install.ps1 -Uninstall           # remove
 ```
 
@@ -189,7 +189,7 @@ To update an existing installation, run:
 royo-learn self-update              # upgrade to latest
 royo-learn self-update --check      # check for updates without downloading
 royo-learn self-update --check --json
-royo-learn self-update --version v0.1.9  # install a specific version
+royo-learn self-update --version v0.1.10 # install a specific version
 ```
 
 `--check` cannot be combined with `--version`: check first, then install the
