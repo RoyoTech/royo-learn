@@ -1,349 +1,202 @@
 # Agent Royo Learn
 
-[![English](https://img.shields.io/badge/lang-en-blue.svg)](README.md)
-[![Español](https://img.shields.io/badge/lang-es-yellow.svg)](docs/README.es.md)
-[![Français](https://img.shields.io/badge/lang-fr-purple.svg)](docs/README.fr.md)
-[![Deutsch](https://img.shields.io/badge/lang-de-red.svg)](docs/README.de.md)
-[![中文](https://img.shields.io/badge/lang-zh-green.svg)](docs/README.zh.md)
-[![हिन्दी](https://img.shields.io/badge/lang-hi-orange.svg)](docs/README.hi.md)
-[![Português](https://img.shields.io/badge/lang-pt-lightgrey.svg)](docs/README.pt.md)
+> **Royo-Learn es un motor local de aprendizaje operacional para agentes.** El
+> agente identifica y estructura la experiencia; Royo-Learn conserva evidencia,
+> controla su gobernanza y convierte aprendizajes aprobados en cambios
+> verificables, auditables y reversibles.
+>
+> — Frase final del producto (`docs/PLAN-recuperacion-contrato.md`).
 
-**Agent Royo Learn** is a local institutional learning engine for AI agents.
+Binario único: `royo-learn` (`royo-learn.exe` en Windows). Servidor MCP
+principal por `stdio`. Sin proveedor LLM embebido. Sin base vectorial. Sin red
+obligatoria. Local-first, multiplataforma.
 
-It does not replace Gentle-AI or Engram:
+## Qué problema resuelve
 
-- **Gentle-AI** configures agents, Skills, workflows, and MCP.
-- **Engram** preserves persistent memory of sessions, decisions, discoveries, and errors.
-- **Agent Royo Learn** transforms verified experiences into reusable behavior changes: knowledge, Skills, rules, tests, and recurrence alerts.
+Los agentes resuelven problemas en sesiones cortas y luego olvidan. El usuario
+corrige el mismo comportamiento tres veces. Una solución queda enterrada en una
+conversación que ya nadie lee. `AGENTS.md` se satura porque no hay
+clasificación. Una memoria puntual se aplica después como si fuera una regla
+universal, sin que nadie la aprobara.
 
----
+Royo-Learn parte de una idea simple: **recordar no basta**. Para que una
+experiencia cambie el comportamiento futuro tiene que pasar por un ciclo
+auditable —capturar, evidenciar, aprobar, publicar, verificar, revertir— y
+quedar registrada en un lugar al que el agente pueda volver con contexto.
 
-## In plain words
+No reemplaza a Gentle-AI ni a Engram:
 
-If you are not a developer, here is what royo-learn does — without jargon.
-
-**The problem.** AI assistants that help on a project start from zero in every
-conversation. An assistant can solve a problem brilliantly today, but tomorrow,
-in a new session, it remembers nothing. If the same problem comes back, it may
-repeat the same mistake. It is like a very capable employee who arrives every
-morning with no memory of the day before.
-
-Writing notes helps, but it is not enough. A note that says "this went wrong"
-does not, by itself, change how the AI works. For it to matter, the lesson has
-to reach the instructions the AI reads before it starts working.
-
-**What royo-learn does.** It works like a living project manual that stays up to
-date. Whenever something important is learned — a mistake not to repeat, a good
-practice, a project rule — it is recorded and turned into a concrete instruction
-the AI reads next time. So the next time, it already knows what to do and what to
-avoid.
-
-In one line: **royo-learn keeps a project from tripping over the same stone
-twice.**
-
-**Why it is valuable.** Remembering something does not change how you work. A
-lesson only prevents a repeat mistake if it reaches the instructions the AI
-actually uses — and if a person reviewed and approved it first. That double step
-(turn a memory into an instruction, and have a human approve it) is what
-separates royo-learn from a simple notepad, and what makes it trustworthy: not
-every idea becomes a rule, only what was verified and approved.
-
-**How it fits with the other pieces.**
-
-| Piece | What it is | Analogy |
+| Sistema | Qué hace | Qué **no** hace |
 |---|---|---|
-| **Gentle-AI** | The environment that sets up the AI: its tools, skills, and workflows | The office, with its rules and team |
-| **Engram** | The memory of what happened in earlier sessions | The diary where events are noted |
-| **royo-learn** | Turns approved lessons into rules the AI must follow | The manual of good practices |
+| **Gentle-AI** | Configura agentes, Skills, workflows, MCP. | No persiste memoria de sesiones; no audita publicaciones. |
+| **Engram** | Memoria persistente de sesiones, decisiones, descubrimientos, errores. | No valida contratos; no aplica cambios al sistema del usuario. |
+| **Royo-Learn** | Convierte experiencias verificadas en cambios auditables del comportamiento (conocimiento, Skills, reglas, tests, alertas de recurrencia). | No entiende conversaciones por sí solo; no decide por su cuenta que una observación es una regla; no aprueba en nombre del usuario. |
 
-In short: **Engram remembers; royo-learn turns that memory into a change in how
-work is done; and Gentle-AI is the environment where it all happens.** royo-learn
-also works on its own — if Engram or Gentle-AI are present it uses them, and if
-not, it still does its job.
+Royo-Learn funciona aunque Gentle-AI o Engram estén ausentes: la integración
+con ambos es opcional y degradable de forma observable (`degraded: true` en el
+`doctor`).
 
-**How you use it.** You do not need to type commands or know how to code. You
-talk to the AI in plain language. It happens in three moments:
+## Qué hace cada parte
 
-1. **Capture** — When something worth remembering happens, you tell the AI:
-   *"Learn this: …"*, *"Save this for next time: …"*, or *"I don't want this to
-   happen again: …"*. Behind the scenes the AI organizes your sentence and stores
-   it.
-2. **Review** — A captured lesson is not a rule yet. A person reviews it and
-   decides: approve, reject, or ask for more evidence. This filter keeps noise
-   out.
-3. **Publish** — Once approved, the lesson becomes a real instruction inside the
-   project. From then on the AI reads and applies it — and if something goes
-   wrong, the change can be undone.
+### El LLM y la Skill (el lado semántico)
 
-For technical users, the same three steps are available on the command line
-(`royo-learn capture`, `curate`, `publish`).
+La responsabilidad del modelo y de la Skill es **proponer**, no decidir:
 
----
+- interpretar la experiencia;
+- identificar el patrón reusable;
+- estructurar el candidato (título, contexto, observación, lección reusable,
+  procedimiento, límites, evidencia, alcance, destino propuesto, término de
+  búsqueda);
+- proponer relaciones semánticas con aprendizajes existentes
+  (`duplicate_of`, `extends`, `supersedes`, `contradicts`, `narrows`,
+  `related`);
+- redactar el contenido completo o el parche de una Skill;
+- proponer criterios de verificación.
 
-### How it works — a real example
+El LLM **no aprueba** y **no publica**. Solo propone.
 
-**The situation**: we released v0.1.0 and updated the English README. But the Spanish
-translation still said `v1.0.0` and used `--version` in PowerShell blocks. The user
-ran `install.ps1 --version v1.0.0` and it failed. After several iterations we fixed
-the translations and the installer script.
+### Royo-Learn (el lado operacional)
 
-**Step 1 — Ask the model for a learning phrase:**
+El binario **valida, persiste y gobierna**:
 
-> *"Give me the learning phrase that summarizes what just happened: the multi-language
-> README version mismatch, why it failed, and how we fixed it."*
+- valida el contrato del payload (esquemas, tipos, alcance);
+- redacta secretos **antes** de cualquier persistencia (DB, blob store,
+  Markdown, audit log, respuesta CLI/MCP);
+- normaliza y hashea para deduplicación;
+- busca lexicalmente en FTS5;
+- recolecta evidencia permitida (archivo, commit, diff Git, comando y
+  resultado, prueba, Engram observation ID, issue/PR, texto breve);
+- persiste de forma transaccional en SQLite;
+- materializa un record Markdown auditable en
+  `.royo-learn/records/<learning-id>.md`;
+- garantiza la máquina de estados (`captured → needs_evidence → approved →
+  published`, etc., sin saltos);
+- exige aprobación humana cuando el destino lo requiere;
+- aplica publicaciones de forma atómica con backup y rollback;
+- ejecuta verificaciones post-aplicación;
+- audita cada acción relevante en log append-only;
+- mide reincidencias.
 
-The model responds with a complete, well-structured phrase:
+### Royo-Learn — qué NO hace
 
-> *"Capture this as a learning: when a project has multi-language READMEs with
-> translation badges, after every release all translations must be synced to the
-> canonical English source. The bug: Spanish README referenced v1.0.0 and used
-> `--version` in PowerShell, but the actual release was v0.1.0 and PowerShell
-> requires `-Version` with a single dash. The fix: grep all docs/README.*.md after
-> each release to verify version consistency, and make install.ps1 accept both
-> `-Version` and `--version`. Bash keeps `--version`, PowerShell uses `-Version`."*
+- No comprende conversaciones por sí solo.
+- No decide automáticamente que una observación es una regla.
+- No aprueba en nombre del usuario.
+- No sustituye a Engram (es un complemento opcional).
+- No necesita un proveedor LLM interno.
+- No usa embeddings ni base vectorial en v1.
+- No garantiza funciones no demostradas (la frase final del producto es la
+  verdad verificable; el resto del README apunta a pruebas que la sostienen).
 
-**Step 2 — Copy the phrase and trigger capture:**
-
-> *"Capture this learning."* ← paste the phrase
-
-**Step 3 — The model runs `capture_learning` via royo-learn MCP.** The learning is
-persisted in the project database with title, context, observation, and lesson.
-In future sessions the model retrieves it and applies it — not just stored as
-memory, but structured so the model can reason about it.
-
-**Trigger phrases:**
-- *"Give me the learning phrase for…"*
-- *"Aprendete esto: …"*
-- *"Capture this learning"*
-- *"I don't want this to happen again"*
-
----
-
-### Engram + Royo-Learn: Knowledge + Understanding
-
-There is a useful distinction between two concepts:
-
-- **Knowledge**: raw data, facts, answers — easily accessible. Today, tools like AI give us instant access to "knowledge" with zero effort.
-- **Understanding**: the deep cognitive process of processing, reasoning, and integrating that information. When we delegate everything, we stop burning neurons and lose the ability to truly understand.
-
-This same distinction maps to the two systems:
-
-| | Engram | Royo-Learn |
-|---|---|---|
-| **Role** | Persistent memory | Learning engine |
-| **What it does** | Stores what happened | Processes, reasons, integrates |
-| **Analogy** | Knowledge (the notebook) | Understanding (the act of studying) |
-
-**Processing**: Royo-Learn does not accept raw data and store it. The capture flow ([Architecture §4](docs/02-ARCHITECTURE.md)) validates the payload, normalizes and hashes it, checks idempotency, searches lexically (FTS5), collects deterministic evidence, and only then persists the record.
-
-**Reasoning**: The deduplication system ([RF-004](docs/01-PRD.md#rf-004-deduplicación)) defines semantic relationships between learnings: `duplicate_of`, `extends`, `supersedes`, `contradicts`, `narrows`, `related`. The state machine ([RF-005](docs/01-PRD.md#rf-005-estado)) forces decisions: is this rejected, does it need evidence, should it be merged or approved? It is not neutral storage — it evaluates the validity and coherence of knowledge.
-
-**Integrating**: A learning does not stay in a database row. It becomes a Skill or a rule, gets recovered in another session, and *prevents or detects a recurrence* ([PRD §8](docs/01-PRD.md)). The publication flow ([Architecture §5](docs/02-ARCHITECTURE.md)) — approved → preview → approve → publish → verify → rollback — turns understanding into operational behavior change.
-
-Royo-Learn does not understand *for* the model. It is the scaffolding that makes understanding matter. Without it, an LLM can understand something in one session, but that understanding evaporates. With it, that understanding becomes persistent, verifiable, relational, and actionable.
-
-The repository produces a single cross-platform binary:
+## Ciclo de un aprendizaje
 
 ```text
-royo-learn        # Linux/macOS
-royo-learn.exe    # Windows
+experiencia
+    ↓
+learning_capture        (Skill redacta candidato idempotente)
+    ↓
+búsqueda previa + FTS5
+    ↓
+learning_add_evidence   (si el sistema lo requiere)
+    ↓
+learning_curate         (approve | reject | needs_evidence | merge)
+    ↓
+learning_publication_preview   (diff + hash + riesgos + verificación)
+    ↓
+learning_approve        (humano, ligado al preview hash)
+    ↓
+learning_publish        (backup → write atómico → verificación → published)
+    ↓
+learning_report_occurrence     (cuando el patrón reaparece)
+    ↓
+learning_compute_metrics       (tasa de recuperación, reincidencias)
 ```
 
-## Installation
+Estados válidos (`docs/03-DOMAIN-MODEL.md`, `docs/01-PRD.md` RF-005):
 
-### Linux / macOS / WSL
+```text
+captured → needs_evidence → approved → published → superseded | archived
+                    │           │
+                    ↓           ↓
+                 rejected   superseded
+                    │
+                    ↓
+                 merged
+```
+
+Fuera de esta máquina, no hay transición.
+
+Destinos posibles de publicación (`RF-008`):
+
+- conocimiento de proyecto;
+- conocimiento compartido;
+- Skill nueva o actualización de Skill;
+- regla administrada en `AGENTS.md` (exige aprobación humana);
+- archivo de prueba o regresión;
+- ninguno (candidato informativo sin publicación).
+
+## Comandos CLI
+
+Todos los comandos aceptan `--json` con salida estable. Códigos de salida
+documentados en `docs/04-CLI-SPEC.md`:
+
+| Código | Significado |
+|---|---|
+| `0` | éxito |
+| `1` | fallo de dominio |
+| `2` | argumentos inválidos |
+| `4` | proyecto no encontrado |
+| `5` | proyecto ambiguo |
+
+Comandos disponibles hoy (verificados contra `cmd/royo-learn/main.go`):
+
+```text
+version           imprime versión
+init              inicializa un proyecto (.royo-learn/)
+doctor            diagnóstico de salud (DB, Git, Engram, rutas, registros)
+capture           captura un aprendizaje (idempotente)
+evidence add      adjunta evidencia a un aprendizaje
+curate            aprobar / rechazar / pedir evidencia / fusionar
+get               obtiene un aprendizaje por ID
+search            búsqueda léxica (FTS5)
+occurrence        registra una reincidencia
+recurrences       lista reincidencias
+metrics           métricas de un aprendizaje
+preview           previsualiza una publicación (diff + hash + plan)
+approve           aprueba un preview (humano)
+publish           publica (dry-run por defecto, --apply para escribir)
+rollback          revierte una publicación
+mcp-serve         arranca el servidor MCP por stdio (--tools read|agent|admin)
+engram-health     comprueba el estado de Engram
+engram-search     busca en Engram (degradación observable si no está)
+setup             install | uninstall | status | upgrade-skills
+self-update       actualiza el binario (--check | --version vX.Y.Z)
+e2e               ejecuta el escenario end-to-end (--temp)
+```
+
+Perfiles MCP (`--tools read|agent|admin`, default `agent`):
+
+- `read` — solo lectura: `learning_search`, `learning_get`, `learning_list`,
+  `learning_status`, `learning_doctor`.
+- `agent` (default) — ciclo completo: añade `learning_capture`,
+  `learning_add_evidence`, `learning_curate`,
+  `learning_publication_preview`, `learning_approve`, `learning_publish`,
+  `learning_report_occurrence`, `learning_list_recurrences`,
+  `learning_compute_metrics`.
+- `admin` — añade `learning_rollback` (destructivo).
+
+Los nombres `--profile minimal|standard|full` de v0.1.9 siguen funcionando
+como alias deprecated; se eliminan en v0.2.0.
+
+## Servidor MCP
+
+Una vez inicializado el proyecto, el binario expone el servidor por `stdio`:
 
 ```bash
-curl -fsSL https://github.com/RoyoTech/royo-learn/releases/latest/download/install.sh | bash
-```
-
-Or manually:
-
-```bash
-./install.sh --version v0.1.10    # install specific version
-./install.sh --uninstall           # remove
-```
-
-The binary is installed to `~/.local/bin/royo-learn`.
-
-### Windows (PowerShell)
-
-```powershell
-cd ~/Downloads
-Invoke-WebRequest -Uri https://github.com/RoyoTech/royo-learn/releases/latest/download/install.ps1 -OutFile install.ps1
-.\install.ps1
-```
-
-Or with a version:
-
-```powershell
-.\install.ps1 -Version v0.1.10    # install specific version
-.\install.ps1 -Uninstall           # remove
-```
-
-The binary is installed to `%LOCALAPPDATA%\royo-learn\bin\royo-learn.exe`.
-
-To update an existing installation, run:
-
-```bash
-royo-learn self-update              # upgrade to latest
-royo-learn self-update --check      # check for updates without downloading
-royo-learn self-update --check --json
-royo-learn self-update --version v0.1.10 # install a specific version
-```
-
-`--check` cannot be combined with `--version`: check first, then install the
-release you want. When `GITHUB_TOKEN` is set, self-update sends it as a
-Bearer token to avoid GitHub API rate limits.
-
-> **Note**: the PowerShell script requires **PowerShell**, not Git Bash or WSL bash.
-> On WSL, use the Linux instructions above.
-
-### Build from source
-
-```bash
-# Prerequisites: Go 1.25+
-git clone https://github.com/RoyoTech/royo-learn.git
-cd royo-learn
-make build       # Build for current platform
-make build-all   # Cross-compile all platforms
-make install     # Install to $GOPATH/bin
-make clean       # Remove build artifacts
-make quality     # Run fmt, test, vet, build
-```
-
-## Quick Start
-
-```bash
-# Check version
-royo-learn version --json
-
-# Update to the latest release
-royo-learn self-update
-
-# Initialize a project
-royo-learn init --project-root /path/to/your/project
-
-# Run health check
-royo-learn doctor --project-root /path/to/your/project --json
-
-# Capture a learning
-royo-learn capture \
-  --project-root /path/to/your/project \
-  --title "PostgreSQL connection pooling" \
-  --context "production deployment" \
-  --observation "connection pool exhausted at 100 concurrent" \
-  --lesson "set max_connections based on available memory" \
-  --type "procedure" \
-  --scope "project" \
-  --json
-
-# Retrieve or search learnings
-royo-learn get "<learning-id>" --json
-royo-learn search "connection pool" --json
-
-# Attach evidence to a captured learning (required to clear the approval threshold)
-royo-learn evidence add "<learning-id>" \
-  --summary "load test reproduces the fix" \
-  --content "..." \
-  --json
-
-# Curate (approve/reject) a learning
-royo-learn curate \
-  --project-root /path/to/your/project \
-  --learning-id "<learning-id>" \
-  --action "approve" \
-  --rationale "validated with load testing" \
-  --json
-
-# Preview before publishing (reports the preview hash and whether approval is required)
-royo-learn preview \
-  --project-root /path/to/your/project \
-  --learning-id "<learning-id>" \
-  --json
-
-# Approve the preview (required when the preview reports requires_approval=true,
-# e.g. shared knowledge or AGENTS.md destinations)
-royo-learn approve "<learning-id>" \
-  --preview-hash "<preview-hash>" \
-  --approved-by "<identity>" \
-  --reason "reviewed and validated" \
-  --approval-evidence "<link-or-ticket>" \
-  --json
-
-# Publish. Dry-run by default: --apply is required to write files, and
-# --approval-id is required when the preview reported requires_approval=true.
-royo-learn publish \
-  --project-root /path/to/your/project \
-  --learning-id "<learning-id>" \
-  --preview-hash "<preview-hash>" \
-  --approval-id "<approval-id>" \
-  --apply \
-  --json
-
-# Rollback a publication (restores the previous file contents byte for byte)
-royo-learn rollback \
-  --project-root /path/to/your/project \
-  --journal-id "<publication-id>" \
-  --json
-
-# Record a recurrence and inspect metrics
-royo-learn occurrence --learning-id "<learning-id>" --outcome "prevented" --json
-royo-learn recurrences --learning-id "<learning-id>" --json
-royo-learn metrics --learning-id "<learning-id>" --json
-
-# Run end-to-end smoke test
-royo-learn e2e --temp
-```
-
-Initialization is mandatory once per independent project root. Commands run in
-subdirectories discover `<root>/.royo-learn/config.yaml` by walking upward, so
-do not initialize each subdirectory. Confirm the store with
-`royo-learn doctor --project-root /path/to/your/project --json`. If MCP returns
-`project_not_found`, run the same `royo-learn init --project-root <root>` command
-for the intended root, then run doctor again.
-
-## MCP Server Setup
-
-After mandatory initialization, the optional `setup install` command registers
-royo-learn as an MCP server and installs the project's Skills across Claude Code,
-Codex CLI, and OpenCode. It never creates the project store:
-
-```bash
-# See current status
-royo-learn setup status
-
-# Install in all three agents
-royo-learn setup install --agent all
-
-# Install in a specific agent (skills only, skip MCP)
-royo-learn setup install --agent claude-code --skip-mcp
-
-# Dry-run first
-royo-learn setup install --agent all --dry-run --json
-
-# Safely upgrade already-installed Skills (dry-run by default; --apply to write).
-# Intact managed Skills are backed up and updated; user-modified Skills are never
-# overwritten — a candidate version and a conflict record are written instead.
-royo-learn setup upgrade-skills --agent all
-royo-learn setup upgrade-skills --agent all --apply
-
-# Uninstall
-royo-learn setup uninstall --agent all
-```
-
-### Manual registration
-
-If you prefer to register manually:
-
-**Codex**:
-```bash
+# Codex CLI
 codex mcp add royo-learn -- royo-learn mcp-serve
-```
 
-**Claude Code / OpenCode** — add to your MCP config file:
-
-```json
+# Claude Code / OpenCode — agregar a la config MCP del cliente
 {
   "mcpServers": {
     "royo-learn": {
@@ -355,157 +208,260 @@ codex mcp add royo-learn -- royo-learn mcp-serve
 }
 ```
 
-**OpenCode** uses the `"mcp"` key (not `"mcpServers"`) with `"command"` as an array — use `setup install --agent opencode` for correct formatting.
+Convenciones:
 
-**Tool profiles** (`--tools read|agent|admin`, default `agent`):
+- `stdout` queda reservado para mensajes MCP; los logs van a `stderr`.
+- Las herramientas de escritura (`learning_publish`, `learning_rollback`)
+  están marcadas como `write`/`destructive`.
+- Cada respuesta conserva `code`, `recoverable`, `details`, `next_action` y
+  la ruta del artefacto de recuperación cuando aplica.
+- Sin telemetría. Sin red obligatoria.
 
-- `read` — read-only tools: `learning_search`, `learning_get`, `learning_list`,
-  `learning_status`, `learning_doctor`.
-- `agent` (default) — the full capture-to-publish cycle: adds `learning_capture`,
-  `learning_add_evidence`, `learning_curate`, `learning_publication_preview`,
-  `learning_approve`, `learning_publish`, `learning_report_occurrence`,
-  `learning_list_recurrences`, `learning_compute_metrics`.
-- `admin` — adds the destructive `learning_rollback`.
+Las Skills que coordinan el ciclo viven en `skills/` y se distribuyen
+opcionalmente con `royo-learn setup install --agent <claude-code|codex|opencode|all>`.
 
-The `v0.1.9` names (`--profile` with `minimal`/`standard`/`full`, and the tool
-aliases such as `capture_learning`) still work as deprecated aliases and warn on
-use; they are removed in `v0.2.0`.
+## Instalación
+
+### Requisitos
+
+- Windows, Linux o macOS (incluye WSL).
+- Sin dependencias externas en runtime: el binario es estático, sin CGO.
+- Acceso a `https://github.com/RoyoTech/royo-learn/releases` para descargar.
+
+### Windows (PowerShell 5.1+)
+
+```powershell
+irm https://raw.githubusercontent.com/RoyoTech/royo-learn/main/install.ps1 | iex
+```
+
+El binario queda en `%LOCALAPPDATA%\royo-learn\bin\royo-learn.exe` y se
+agrega al `PATH` de usuario.
+
+Versión específica o desinstalación:
+
+```powershell
+.\install.ps1 -Version v0.1.10
+.\install.ps1 -Uninstall
+```
+
+### Linux, macOS, WSL (bash)
 
 ```bash
-royo-learn mcp-serve --tools admin
+curl -fsSL https://raw.githubusercontent.com/RoyoTech/royo-learn/main/install.sh | bash
 ```
 
-## Architecture
+El binario queda en `~/.local/bin/royo-learn`. Para sistemas donde
+`~/.local/bin` no esté en el `PATH`, agregarlo manualmente.
 
-```
-LLM + Skill → semantic proposal
-royo-learn  → operational guarantee
-```
-
-`royo-learn-onboarding` is the operational Skill for initialization, doctor, and
-optional agent setup. After a healthy project is confirmed, it hands control to
-`capture-learning`. It is distinct from the three semantic lifecycle Skills that
-define what an experience means:
-
-1. `capture-learning`
-2. `curate-learning`
-3. `publish-learning`
-
-### How to capture a learning
-
-When royo-learn MCP is active, tell the model in natural language:
-
-> **"Capture this as a learning: every time we do a release, after updating the English README we need to check all translations in docs/README.*.md. Today the Spanish README still had v1.0.0 and --version when the actual release is v0.1.0 and PowerShell uses -Version with a single dash. The user ran install.ps1 --version v1.0.0 and it failed. The lesson is: bash uses --version, PowerShell uses -Version. After every release, run grep -r 'v[0-9]' docs/README.*.md to verify all translations match the correct version."**
-
-The model extracts title, context, observation, and lesson automatically
-and persists them in the project database. Other trigger phrases include:
-
-- *"Aprendete esto: …"*
-- *"I don't want this to happen again: …"*
-- *"Save this for next time: …"*
-
-The binary guarantees:
-
-- persistence
-- valid states
-- idempotency
-- traceability
-- lexical deduplication
-- optional Engram integration
-- Git evidence and tests
-- secure publication
-- human approval
-- rollback
-- recurrence detection
-- MCP over stdio
-
-## Problem It Solves
-
-Storing a memory doesn't ensure the next agent works better. The project adds an explicit cycle:
-
-```
-experience
-    ↓
-structured capture
-    ↓
-duplicate and antecedent search
-    ↓
-curation with evidence
-    ↓
-approval
-    ↓
-controlled publication
-    ↓
-verification
-    ↓
-recurrence detection
-```
-
-## Version 1 Scope
-
-Version 1 is local, without cloud service or embedded LLM provider. Semantic reasoning is performed by the agent calling the MCP server.
-
-The application works even if Gentle-AI or Engram are not installed. Their integrations are optional and degradable.
-
-## Codex Onboarding
-
-Codex must read, in this order:
-
-1. `AGENTS.md`
-2. `CODEX_START_HERE.md`
-3. `docs/01-PRD.md`
-4. `docs/02-ARCHITECTURE.md`
-5. `TASKS.md`
-
-Do not start implementing from this README.
-
-## Development
+Versión específica o desinstalación:
 
 ```bash
-make fmt        # Format code
-make test       # Run tests
-make vet        # Run vet
-make build      # Build for current platform
-make build-all  # Cross-compile all platforms
-make quality    # Full quality check (fmt + test + vet + build)
+./install.sh --version v0.1.10
+./install.sh --uninstall
 ```
 
-## Project Structure
+> **Importante:** el script de PowerShell **no** corre en Git Bash, MSYS ni
+> Cygwin. En WSL usá la versión bash. El script de bash detecta esos entornos
+> y aborta con instrucciones para PowerShell.
+
+### Auto-actualización
+
+Una vez instalado:
+
+```bash
+royo-learn self-update --check           # consulta sin descargar
+royo-learn self-update                   # actualiza al último release
+royo-learn self-update --version vX.Y.Z  # actualiza a una versión específica
+```
+
+`--check` y `--version` son mutuamente excluyentes. Si `GITHUB_TOKEN` está
+definido, `self-update` lo envía como Bearer para evitar el rate limit de la
+API.
+
+### Compilar desde el código
+
+Requisitos: Go 1.25+.
+
+```bash
+git clone https://github.com/RoyoTech/royo-learn.git
+cd royo-learn
+make build         # binario local
+make build-all     # cross-compile windows/linux/darwin × amd64/arm64
+make quality       # fmt + vet + test -race + build
+make test          # go test -race ./...
+```
+
+El target `build-all` produce en `dist/`:
+
+```text
+royo-learn-windows-amd64.exe
+royo-learn-linux-amd64
+royo-learn-linux-arm64
+royo-learn-darwin-amd64
+royo-learn-darwin-arm64
+```
+
+## Inicio rápido
+
+```bash
+# 1. Inicializar el proyecto (una vez por raíz)
+royo-learn init --project-root /ruta/al/proyecto
+
+# 2. Diagnóstico
+royo-learn doctor --project-root /ruta/al/proyecto --json
+
+# 3. Capturar un aprendizaje
+royo-learn capture \
+  --project-root /ruta/al/proyecto \
+  --title "Connection pool exhaustion" \
+  --context "production deploy" \
+  --observation "pool exhausted at 100 concurrent" \
+  --lesson "set max_connections based on memory budget" \
+  --type procedure \
+  --scope project \
+  --json
+
+# 4. Adjuntar evidencia si el sistema lo requiere
+royo-learn evidence add <learning-id> \
+  --summary "load test reproduces the fix" \
+  --content "..." \
+  --json
+
+# 5. Buscar antes de repetir
+royo-learn search "connection pool" --json
+
+# 6. Curar
+royo-learn curate \
+  --learning-id <learning-id> \
+  --action approve \
+  --rationale "validated with load testing" \
+  --json
+
+# 7. Preview (devuelve hash y si requiere aprobación humana)
+royo-learn preview \
+  --learning-id <learning-id> \
+  --json
+
+# 8. Aprobar (humano, ligado al hash del preview)
+royo-learn approve <learning-id> \
+  --preview-hash <preview-hash> \
+  --approved-by "<identidad>" \
+  --reason "revisado y validado" \
+  --json
+
+# 9. Publicar (dry-run por defecto; --apply para escribir)
+royo-learn publish \
+  --learning-id <learning-id> \
+  --preview-hash <preview-hash> \
+  --approval-id <approval-id> \
+  --apply \
+  --json
+
+# 10. Revertir si algo salió mal
+royo-learn rollback \
+  --journal-id <id-de-publicacion> \
+  --json
+
+# 11. Registrar reincidencia y medir
+royo-learn occurrence --learning-id <learning-id> --outcome prevented --json
+royo-learn recurrences --learning-id <learning-id> --json
+royo-learn metrics --learning-id <learning-id> --json
+```
+
+## Integración opcional con Engram
+
+Si Engram está corriendo en `http://127.0.0.1:7437`, Royo-Learn lo usa para:
+
+- consultar contexto previo de sesiones (`GET /context`, `GET /search`);
+- opcionalmente guardar una referencia breve al candidato (`POST /observations`).
+
+Royo-Learn **nunca** accede directamente a `~/.engram/engram.db`. Si Engram
+no está disponible, sigue funcionando: el `doctor` reporta
+`engram.available: false, degraded: true, reason: <motivo>` y el resto del
+ciclo no se interrumpe.
+
+## Lo que Royo-Learn no hace en v1
+
+Tomado literal de `docs/01-PRD.md` §3 (no-objetivos):
+
+- entrenar modelos o modificar pesos;
+- evolución automática estilo GEA;
+- almacenar conversaciones completas;
+- sustituir Engram o sustituir Gentle-AI;
+- sincronización cloud propia;
+- base vectorial o embeddings;
+- panel web;
+- proveedor LLM embebido;
+- auto-edición irrestricta del sistema del usuario.
+
+Cualquier función listada arriba está fuera del alcance y no debe presentarse
+como disponible.
+
+## Estructura del proyecto
 
 ```text
 agent-royo-learn/
-├── cmd/royo-learn/        # CLI entry point + e2e
+├── cmd/royo-learn/        # entry point CLI/MCP, comandos y e2e
 ├── internal/
-│   ├── buildinfo/         # Version metadata
-│   ├── capture/           # Learning capture service
-│   ├── config/            # Project/user configuration
-│   ├── curate/            # Curation service
-│   ├── doctor/            # Health checks
-│   ├── domain/            # Domain types and transitions
-│   ├── engram/            # Engram integration
-│   ├── evidence/          # Evidence collection (redaction, path security, git)
-│   ├── logging/           # Structured logging
-│   ├── mcpserver/         # MCP server implementation
-│   ├── project/           # Project resolution
-│   ├── publish/           # Publication engine
-│   ├── recurrence/        # Recurrence detection
-│   ├── setup/             # Setup helpers (skills, MCP registration, backup)
-│   └── storage/           # SQLite database (migrations, repos, FTS5)
-├── migrations/            # SQL migration files
+│   ├── buildinfo/         # metadatos de versión (inyectados vía ldflags)
+│   ├── capture/           # captura idempotente y relaciones candidatas
+│   ├── config/            # configuración global y de proyecto
+│   ├── curate/            # máquina de estados y acciones de curación
+│   ├── doctor/            # diagnóstico de salud
+│   ├── domain/            # entidades, enums, errores tipados
+│   ├── engram/            # cliente HTTP local opcional (nunca la DB)
+│   ├── evidence/          # recolección, hashing, redacción de secretos
+│   ├── integration/       # glue de composición
+│   ├── logging/           # logging estructurado a stderr
+│   ├── mcpserver/         # tools, schemas, middleware, stdio
+│   ├── project/           # resolución segura de raíz y project key
+│   ├── publish/           # planning, patch, atomic write, verify, rollback
+│   ├── record/            # materialización Markdown auditable
+│   ├── recurrence/        # fingerprint y métricas
+│   ├── selfupdate/        # auto-actualización del binario
+│   ├── setup/             # registro MCP, distribución de Skills, backup
+│   ├── storage/           # SQLite, migraciones, repositorios, FTS5, WAL
+│   └── testutil/          # utilidades de test
+├── migrations/            # SQL versionado
 ├── schemas/               # JSON schemas
-├── skills/                # Project Skills
-├── docs/                  # Documentation
-├── examples/              # Example inputs
-├── AGENTS.md              # Agent instructions
-├── TASKS.md               # Implementation tasks
-├── Makefile               # Build targets
-├── .goreleaser.yml        # Release configuration
-├── install.sh             # Linux/macOS installer
-├── install.ps1            # Windows installer
-├── go.mod
-└── go.sum
+├── skills/                # Skills del proyecto
+├── docs/                  # PRD, arquitectura, contratos, reports
+├── examples/              # entradas de ejemplo
+├── install.sh             # instalador Linux/macOS/WSL
+├── install.ps1            # instalador Windows (PowerShell)
+├── Makefile               # fmt, vet, test -race, build, build-all, quality
+├── .goreleaser.yml        # pipeline de release
+├── AGENTS.md              # instrucciones del agente ejecutor
+├── CODEX_START_HERE.md    # orden de lectura para Codex
+├── PROMPT_FOR_CODEX.md    # prompt canónico de Codex
+├── TASKS.md               # plan de implementación por tramos
+└── README.md              # este archivo
 ```
 
-## License
+## Documentación
 
-MIT
+La fuente de verdad, en orden de precedencia:
+
+1. `docs/14-ACCEPTANCE-CRITERIA.md` — criterios de aceptación.
+2. `docs/01-PRD.md` — producto.
+3. `docs/02-ARCHITECTURE.md` — arquitectura.
+4. `docs/04-CLI-SPEC.md`, `docs/05-MCP-SPEC.md`, `docs/06-DATABASE-SCHEMA.md`,
+   `docs/09-PUBLISHING-ENGINE.md`, `docs/10-SECURITY.md`,
+   `docs/11-INSTALLATION.md`, `docs/12-TEST-PLAN.md`,
+   `docs/15-OPERATIONS.md`, `docs/17-ERROR-CODES.md`,
+   `docs/18-REFERENCES.md`.
+5. `TASKS.md` — tareas por tramos.
+6. `AGENTS.md` — reglas no negociables.
+7. `README.md` (este archivo) — entrada al proyecto.
+
+`docs/FINAL-IMPLEMENTATION-REPORT.md` resume el cierre del proyecto con la
+tabla `Requisito | Estado | Prueba | Evidencia` (estados válidos: `PASS`,
+`FAIL`, `NOT_APPLICABLE`). Un `FAIL` impide declarar terminado.
+
+`docs/generated/CLI_REFERENCE.md`, `MCP_REFERENCE.md`, `ERROR_REFERENCE.md` y
+`PROFILES.md` se generan automáticamente a partir del código; **no** se
+copian a mano para evitar que el README contradiga al binario.
+
+## Licencia
+
+MIT.
