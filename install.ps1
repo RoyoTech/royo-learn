@@ -59,6 +59,32 @@ function Get-BinaryVersion {
     return [string]$parsed.version
 }
 
+function Remove-StaleArtifacts {
+    # Tolerate locked or otherwise un-removable files (antivirus, indexing, open handles).
+    # We never abort the install because of cleanup hygiene; we only warn.
+    param([Parameter(Mandatory)][string]$Dir)
+    if (-not (Test-Path -LiteralPath $Dir)) { return }
+    $patterns = @("*.bak", "*.previous", "*.rollback.*", "*.new.*")
+    foreach ($pat in $patterns) {
+        Get-ChildItem -LiteralPath $Dir -Filter $pat -Force -ErrorAction SilentlyContinue | ForEach-Object {
+            $path = $_.FullName
+            try {
+                Remove-Item -LiteralPath $path -Force -ErrorAction Stop
+            } catch {
+                # Some installers historically produced trailing-dot names that Win32
+                # accepts but cannot remove through the normal path. Use the
+                # \\?\ extended path to bypass normalization.
+                $extended = "\\?\" + $path
+                try {
+                    Remove-Item -LiteralPath $extended -Force -ErrorAction Stop
+                } catch {
+                    Write-Info "warning: could not remove stale artifact: $path ($($_.Exception.Message))"
+                }
+            }
+        }
+    }
+}
+
 function Restore-PreviousBinary {
     param(
         [Parameter(Mandatory)][string]$Target,
@@ -188,9 +214,16 @@ function Install-RoyoLearn {
 
         # Stage on the destination filesystem and atomically replace with rollback.
         New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
+
+        # Best-effort cleanup of artifacts from previous runs that may have aborted.
+        # Doing this BEFORE the replace avoids lock conflicts against $target/backup.
+        Remove-StaleArtifacts -Dir $BinDir
+
         $target = Join-Path $BinDir $BinaryName
-        $staged = Join-Path $BinDir "$BinaryName.new.$([guid]::NewGuid().ToString('N'))"
-        $backup = Join-Path $BinDir "$BinaryName.rollback.$([guid]::NewGuid().ToString('N'))"
+        # NB: do NOT append a trailing dot to $backup. Win32 accepts it but NTFS cannot
+        # normalize it, which makes later Remove-Item calls fail with PermissionDenied.
+        $staged = Join-Path $BinDir "$BinaryName.new-$([guid]::NewGuid().ToString('N'))"
+        $backup = Join-Path $BinDir "$BinaryName.rollback-$([guid]::NewGuid().ToString('N'))"
         $hadExisting = Test-Path -LiteralPath $target
         Copy-Item -LiteralPath $extractedBinary -Destination $staged
         try {
@@ -210,7 +243,14 @@ function Install-RoyoLearn {
             Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
         }
         if (Test-Path -LiteralPath $backup) {
-            Remove-Item -LiteralPath $backup -Force
+            try {
+                Remove-Item -LiteralPath $backup -Force -ErrorAction Stop
+            } catch {
+                # Backup may be held by antivirus/indexer. Warn but do NOT fail the install;
+                # the new binary is already in place and verified. Remove-StaleArtifacts
+                # will sweep it on the next run.
+                Write-Info "warning: backup not removed (will be cleaned on next install): $backup ($($_.Exception.Message))"
+            }
         }
         Write-Info "installed to $target"
         Write-Info "verified version: $installedVersion"
