@@ -30,12 +30,48 @@ if ($Version -match '^-') {
 
 $ErrorActionPreference = "Stop"
 $Repo = "RoyoTech/royo-learn"
-$InstallRoot = "$env:LOCALAPPDATA\royo-learn"
+$InstallRoot = if ($env:ROYO_LEARN_INSTALL_ROOT) { $env:ROYO_LEARN_INSTALL_ROOT } else { "$env:LOCALAPPDATA\royo-learn" }
 $BinDir = "$InstallRoot\bin"
 $BinaryName = "royo-learn.exe"
 
 function Write-Info { Write-Host "[royo-learn] $args" -ForegroundColor Cyan }
 function Write-Error-Custom { Write-Host "[royo-learn] ERROR: $args" -ForegroundColor Red; exit 1 }
+
+function Receive-File {
+    param([Parameter(Mandatory)][string]$Uri, [Parameter(Mandatory)][string]$OutFile)
+    if ($Uri.StartsWith('file:', [System.StringComparison]::OrdinalIgnoreCase)) {
+        Copy-Item -LiteralPath ([uri]$Uri).LocalPath -Destination $OutFile
+        return
+    }
+    Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing -ErrorAction Stop
+}
+
+function Get-BinaryVersion {
+    param([Parameter(Mandatory)][string]$Path)
+    $raw = & $Path version --json
+    if ($LASTEXITCODE -ne 0 -or -not $raw) {
+        throw "version verification failed for $Path"
+    }
+    $parsed = $raw | ConvertFrom-Json
+    if (-not $parsed.version) {
+        throw "version output from $Path does not contain version"
+    }
+    return [string]$parsed.version
+}
+
+function Restore-PreviousBinary {
+    param(
+        [Parameter(Mandatory)][string]$Target,
+        [Parameter(Mandatory)][string]$Backup,
+        [Parameter(Mandatory)][bool]$HadExisting
+    )
+    if ($HadExisting -and (Test-Path -LiteralPath $Backup)) {
+        [System.IO.File]::Move($Backup, $Target, $true)
+        Write-Info "rollback restored the previous binary"
+    } elseif (Test-Path -LiteralPath $Target) {
+        Remove-Item -LiteralPath $Target -Force
+    }
+}
 
 # Auto-detect architecture.
 function Get-Arch {
@@ -93,7 +129,7 @@ function Install-RoyoLearn {
     $arch = Get-Arch
     $archiveName = "royo-learn-windows-${arch}.zip"
 
-    $baseUrl = "https://github.com/$Repo/releases"
+    $baseUrl = if ($env:ROYO_LEARN_RELEASES_URL) { $env:ROYO_LEARN_RELEASES_URL.TrimEnd('/') } else { "https://github.com/$Repo/releases" }
     if ($Ver -eq "latest") {
         $downloadUrl = "$baseUrl/latest/download/$archiveName"
         $checksumUrl = "$baseUrl/latest/download/checksums.txt"
@@ -111,34 +147,24 @@ function Install-RoyoLearn {
         # Download archive.
         Write-Info "downloading $downloadUrl..."
         $archivePath = Join-Path $tmpDir $archiveName
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $archivePath -UseBasicParsing
+        Receive-File -Uri $downloadUrl -OutFile $archivePath
 
-        # Download checksums and verify.
-        try {
-            $checksumPath = Join-Path $tmpDir "checksums.txt"
-            Invoke-WebRequest -Uri $checksumUrl -OutFile $checksumPath -UseBasicParsing -ErrorAction Stop
-            Write-Info "verifying checksum..."
-            $checksumLines = Get-Content $checksumPath
-            $expected = $null
-            foreach ($line in $checksumLines) {
-                if ($line -match [regex]::Escape($archiveName)) {
-                    $expected = ($line -split '\s+')[0]
-                    break
-                }
+        # Download checksums and verify. Every missing or mismatched input fails closed.
+        $checksumPath = Join-Path $tmpDir "checksums.txt"
+        Receive-File -Uri $checksumUrl -OutFile $checksumPath
+        Write-Info "verifying checksum..."
+        $expected = $null
+        foreach ($line in (Get-Content -LiteralPath $checksumPath)) {
+            $parts = $line -split '\s+', 2
+            if ($parts.Count -eq 2 -and $parts[1].TrimStart('*') -eq $archiveName) {
+                $expected = $parts[0].ToLowerInvariant()
+                break
             }
-            if ($expected) {
-                $actual = (Get-FileHash -Path $archivePath -Algorithm SHA256).Hash.ToLower()
-                if ($expected -eq $actual) {
-                    Write-Info "checksum OK"
-                } else {
-                    Write-Info "checksum mismatch (expected $expected, got $actual)"
-                }
-            } else {
-                Write-Info "checksum entry not found for $archiveName"
-            }
-        } catch {
-            Write-Info "checksum download failed, skipping verification"
         }
+        if (-not $expected) { throw "checksum entry not found for $archiveName" }
+        $actual = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($expected -ne $actual) { throw "checksum mismatch (expected $expected, got $actual)" }
+        Write-Info "checksum OK"
 
         # Extract.
         Write-Info "extracting..."
@@ -150,24 +176,50 @@ function Install-RoyoLearn {
             Write-Error-Custom "$BinaryName not found inside archive"
         }
 
-        # Install.
-        New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
-        Copy-Item $extractedBinary -Destination (Join-Path $BinDir $BinaryName) -Force
-        Write-Info "installed to $BinDir\$BinaryName"
+        $actualVersion = Get-BinaryVersion -Path $extractedBinary
+        if ($Ver -eq "latest") {
+            if ($actualVersion -eq "dev") { throw "version mismatch: latest release resolved to a development build" }
+        } else {
+            $expectedVersion = $Ver.TrimStart('v')
+            if ($actualVersion -ne $expectedVersion) {
+                throw "version mismatch (expected $expectedVersion, got $actualVersion)"
+            }
+        }
 
-        # Verify the installed binary works.
+        # Stage on the destination filesystem and atomically replace with rollback.
+        New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
+        $target = Join-Path $BinDir $BinaryName
+        $staged = Join-Path $BinDir "$BinaryName.new.$([guid]::NewGuid().ToString('N'))"
+        $backup = Join-Path $BinDir "$BinaryName.rollback.$([guid]::NewGuid().ToString('N'))"
+        $hadExisting = Test-Path -LiteralPath $target
+        Copy-Item -LiteralPath $extractedBinary -Destination $staged
         try {
-            $versionOutput = & (Join-Path $BinDir $BinaryName) version --json 2>$null
-            if ($versionOutput) {
-                Write-Info "verified: $versionOutput"
+            if ($hadExisting) {
+                [System.IO.File]::Replace($staged, $target, $backup, $true)
+            } else {
+                [System.IO.File]::Move($staged, $target)
+            }
+            $installedVersion = Get-BinaryVersion -Path $target
+            if ($installedVersion -ne $actualVersion) {
+                throw "installed binary version mismatch (expected $actualVersion, got $installedVersion)"
             }
         } catch {
-            Write-Info "version check skipped"
+            Restore-PreviousBinary -Target $target -Backup $backup -HadExisting $hadExisting
+            throw
+        } finally {
+            Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
         }
+        if (Test-Path -LiteralPath $backup) {
+            Remove-Item -LiteralPath $backup -Force
+        }
+        Write-Info "installed to $target"
+        Write-Info "verified version: $installedVersion"
 
         # Ensure BinDir is on the user PATH. Uses [Environment]::SetEnvironmentVariable
         # (not setx, which truncates PATH at 1024 chars and expands %VAR% references).
-        Add-ToUserPath $BinDir
+        if ($env:ROYO_LEARN_SKIP_PATH_UPDATE -ne '1') {
+            Add-ToUserPath $BinDir
+        }
 
         Write-Info "install complete!"
     } finally {

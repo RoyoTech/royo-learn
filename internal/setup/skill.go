@@ -18,7 +18,9 @@ type SkillInstallResult struct {
 // InstallSkills copies project skills from the source directory to the
 // target agent skills directory. Each subdirectory under srcDir containing
 // a SKILL.md is treated as a skill. Existing skills are skipped (never
-// overwritten).
+// overwritten); use UpgradeSkills to safely update already-installed skills.
+// A per-skill manifest is recorded for every freshly installed skill so a
+// later binary can decide whether the installed copy may be upgraded.
 func InstallSkills(srcDir, dstDir string) (*SkillInstallResult, error) {
 	result := &SkillInstallResult{}
 
@@ -57,6 +59,31 @@ func InstallSkills(srcDir, dstDir string) (*SkillInstallResult, error) {
 		if err := copyDir(skillDir, dstSkillDir); err != nil {
 			result.Errors = append(result.Errors,
 				fmt.Sprintf("failed to install %q: %v", skillName, err))
+			continue
+		}
+
+		// Record a manifest so future upgrades can be performed safely.
+		srcHash, herr := HashSkillDir(skillDir)
+		instHash, ierr := HashSkillDir(dstSkillDir)
+		if herr != nil || ierr != nil {
+			err := herr
+			if err == nil {
+				err = ierr
+			}
+			result.Errors = append(result.Errors,
+				fmt.Sprintf("failed to hash %q for manifest: %v", skillName, err))
+			continue
+		}
+		manifest := SkillManifest{
+			Name:            skillName,
+			Version:         SkillVersion(skillDir),
+			SourceSHA256:    srcHash,
+			InstalledSHA256: instHash,
+			ManagedBy:       ManagedByRoyoLearn,
+		}
+		if merr := WriteSkillManifest(dstDir, manifest); merr != nil {
+			result.Errors = append(result.Errors,
+				fmt.Sprintf("failed to record manifest for %q: %v", skillName, merr))
 			continue
 		}
 		result.Installed++

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"agent-royo-learn/internal/buildinfo"
@@ -19,6 +20,7 @@ import (
 	"agent-royo-learn/internal/doctor"
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/engram"
+	"agent-royo-learn/internal/evidence"
 	"agent-royo-learn/internal/logging"
 	"agent-royo-learn/internal/project"
 	"agent-royo-learn/internal/publish"
@@ -64,8 +66,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runCapture(args[1:], stdout, stderr)
 	case "curate":
 		return runCurate(args[1:], stdout, stderr)
+	case "get":
+		return runGet(args[1:], stdout, stderr)
+	case "search":
+		return runSearch(args[1:], stdout, stderr)
+	case "occurrence":
+		return runOccurrence(args[1:], stdout, stderr)
+	case "evidence":
+		return runEvidence(args[1:], stdout, stderr)
 	case "preview":
 		return runPreview(args[1:], stdout, stderr)
+	case "approve":
+		return runApprove(args[1:], stdout, stderr)
 	case "publish":
 		return runPublish(args[1:], stdout, stderr)
 	case "rollback":
@@ -102,7 +114,10 @@ Commands:
   mcp-serve      Start the MCP server over stdio
   capture        Capture a new learning
   curate         Curate an existing learning
+  get            Retrieve a single learning by ID
+  occurrence     Record a recurrence of a learning's pattern
   preview        Preview publication of a learning
+  approve        Approve a publication preview (human authorization)
   publish        Publish a curated learning
   rollback       Rollback a published learning
   doctor         Run system diagnostics
@@ -315,7 +330,7 @@ func writeInitError(stderr io.Writer, code, format string, args ...interface{}) 
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn init --project-root <dir>"`,
 	})
-	return exitFailure
+	return domain.ErrorCode(code).ExitCode()
 }
 
 // ---------------------------------------------------------------------------
@@ -449,7 +464,7 @@ func writeDoctorError(stderr io.Writer, code, format string, args ...interface{}
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn doctor"`,
 	})
-	return exitFailure
+	return domain.ErrorCode(code).ExitCode()
 }
 
 // ---------------------------------------------------------------------------
@@ -464,8 +479,24 @@ func runCapture(args []string, stdout, stderr io.Writer) int {
 	lesson := fs.String("lesson", "", "reusable lesson (required)")
 	learningType := fs.String("type", "procedure", "learning type")
 	pScope := fs.String("scope", "project", "scope guess")
+	destination := fs.String("destination", "project", "proposed destination: none, project, shared, skill, agents_rule")
+	evidenceLevel := fs.String("evidence-level", "insufficient", "declared evidence level: strong, moderate, weak, insufficient")
+	confidence := fs.String("confidence", "medium", "confidence: low, medium, high")
+	idempotencyKey := fs.String("idempotency-key", "", "the same key on a retry returns the existing learning without duplicating its evidence (D5)")
 	projectRoot := fs.String("project-root", "", "project root directory")
 	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
+
+	// Evidence flags. Collectors are limited to supplied evidence, git status,
+	// git diff, and an explicitly allowed command — not an open taxonomy.
+	evidenceFile := fs.String("evidence-file", "", "path to a JSON array of evidence records {kind,summary,source,content}")
+	evidenceSummary := fs.String("evidence-summary", "", "summary of a single inline evidence record")
+	evidenceContent := fs.String("evidence-content", "", "literal content of a single inline evidence record")
+	evidenceSource := fs.String("evidence-source", "", "origin of a single inline evidence record")
+	evidenceKind := fs.String("evidence-kind", "text", "kind of a single inline evidence record")
+	file := fs.String("file", "", "attach the contents of this file as an evidence record")
+	stdinFlag := fs.Bool("stdin", false, "attach the content read from stdin as an evidence record")
+	collectGitStatus := fs.Bool("collect-git-status", false, "attach `git status --porcelain` as evidence")
+	collectGitDiff := fs.Bool("collect-git-diff", false, "attach the working-tree `git diff` as evidence")
 
 	if err := fs.Parse(args); err != nil {
 		return writeCaptureError(stderr, "invalid_argument", "capture: %v", err)
@@ -540,15 +571,39 @@ func runCapture(args []string, stdout, stderr io.Writer) int {
 	}
 
 	recordsDir := filepath.Join(root, ".royo-learn", "records")
-	svc := capture.NewService(db, recordsDir)
+	evidenceSvc, err := evidence.NewService(root, nil)
+	if err != nil {
+		return writeCaptureError(stderr, "invalid_argument", "capture: init evidence: %v", err)
+	}
+	svc := capture.NewServiceWithEvidence(db, recordsDir, evidenceSvc)
+
+	items, err := collectCaptureEvidence(ctx, evidenceSvc, root, captureEvidenceFlags{
+		evidenceFile:     *evidenceFile,
+		evidenceSummary:  *evidenceSummary,
+		evidenceContent:  *evidenceContent,
+		evidenceSource:   *evidenceSource,
+		evidenceKind:     *evidenceKind,
+		file:             *file,
+		stdin:            *stdinFlag,
+		collectGitStatus: *collectGitStatus,
+		collectGitDiff:   *collectGitDiff,
+	})
+	if err != nil {
+		return writeCaptureError(stderr, "invalid_argument", "capture: %v", err)
+	}
 
 	input := &capture.CaptureInput{
-		Title:       *title,
-		Context:     *contextStr,
-		Observation: *observation,
-		Lesson:      *lesson,
-		Type:        domain.LearningType(*learningType),
-		Scope:       domain.Scope(*pScope),
+		Title:          *title,
+		Context:        *contextStr,
+		Observation:    *observation,
+		Lesson:         *lesson,
+		Type:           domain.LearningType(*learningType),
+		Scope:          domain.Scope(*pScope),
+		Destination:    domain.DestinationType(*destination),
+		Confidence:     domain.Confidence(*confidence),
+		EvidenceLevel:  domain.EvidenceLevel(*evidenceLevel),
+		IdempotencyKey: *idempotencyKey,
+		Evidence:       items,
 		Actor: domain.Actor{
 			Kind:      "human",
 			Name:      "cli-user",
@@ -559,14 +614,17 @@ func runCapture(args []string, stdout, stderr io.Writer) int {
 
 	result, err := svc.Capture(ctx, projectID, input)
 	if err != nil {
-		return writeCaptureError(stderr, "invalid_argument", "capture: %v", err)
+		return writeDomainError(stderr, err, "invalid_argument", `run "royo-learn capture --help"`, "capture: ")
 	}
 
 	if *jsonFlag {
 		data, _ := json.MarshalIndent(map[string]interface{}{
-			"learning_id": result.LearningID,
-			"status":      result.Status,
-			"new":         result.New,
+			"learning_id":    result.LearningID,
+			"status":         result.Status,
+			"new":            result.New,
+			"evidence_count": len(result.EvidenceIDs),
+			"evidence_ids":   evidenceIDStrings(result.EvidenceIDs),
+			"redacted":       result.Redacted,
 		}, "", "  ")
 		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
 	} else {
@@ -574,10 +632,144 @@ func runCapture(args []string, stdout, stderr io.Writer) int {
 		if !result.New {
 			statusLabel = "deduplicated (existing)"
 		}
-		_, _ = fmt.Fprintf(stdout, "captured %s learning %s (status: %s)\n", statusLabel, result.LearningID, result.Status)
+		_, _ = fmt.Fprintf(stdout, "captured %s learning %s (status: %s, evidence: %d)\n",
+			statusLabel, result.LearningID, result.Status, len(result.EvidenceIDs))
 	}
 
 	return exitSuccess
+}
+
+// captureEvidenceFlags carries the evidence-related capture flags.
+type captureEvidenceFlags struct {
+	evidenceFile     string
+	evidenceSummary  string
+	evidenceContent  string
+	evidenceSource   string
+	evidenceKind     string
+	file             string
+	stdin            bool
+	collectGitStatus bool
+	collectGitDiff   bool
+}
+
+// collectCaptureEvidence assembles evidence items from the supplied flags. The
+// only sources are: an evidence JSON file, a single inline record, a file, stdin,
+// `git status` and `git diff`. Redaction happens later, inside the evidence
+// service, before any write.
+func collectCaptureEvidence(ctx context.Context, svc *evidence.Service, root string, f captureEvidenceFlags) ([]evidence.Item, error) {
+	var items []evidence.Item
+
+	if f.evidenceFile != "" {
+		fileItems, err := readEvidenceFile(f.evidenceFile)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, fileItems...)
+	}
+
+	if f.evidenceSummary != "" || f.evidenceContent != "" {
+		if f.evidenceSummary == "" {
+			return nil, fmt.Errorf("--evidence-summary is required when --evidence-content is set")
+		}
+		items = append(items, evidence.Item{
+			Kind:    domain.EvidenceKind(f.evidenceKind),
+			Summary: f.evidenceSummary,
+			Source:  f.evidenceSource,
+			Content: f.evidenceContent,
+		})
+	}
+
+	if f.file != "" {
+		data, err := os.ReadFile(f.file)
+		if err != nil {
+			return nil, fmt.Errorf("read --file: %w", err)
+		}
+		items = append(items, evidence.Item{
+			Kind:    domain.KindFile,
+			Summary: fmt.Sprintf("contents of %s", filepath.Base(f.file)),
+			Source:  f.file,
+			Content: string(data),
+		})
+	}
+
+	if f.stdin {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return nil, fmt.Errorf("read --stdin: %w", err)
+		}
+		items = append(items, evidence.Item{
+			Kind:    domain.KindText,
+			Summary: "content read from stdin",
+			Content: string(data),
+		})
+	}
+
+	if f.collectGitStatus {
+		item, err := svc.CollectGitStatus(ctx, root)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+
+	if f.collectGitDiff {
+		item, err := svc.CollectGitDiff(ctx, root)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+
+	return items, nil
+}
+
+// evidenceFileRecord is the wire form of one record in an --evidence-file array.
+type evidenceFileRecord struct {
+	Kind    string `json:"kind"`
+	Type    string `json:"type"`
+	Summary string `json:"summary"`
+	Source  string `json:"source"`
+	Content string `json:"content"`
+}
+
+func readEvidenceFile(path string) ([]evidence.Item, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read --evidence-file: %w", err)
+	}
+	var records []evidenceFileRecord
+	if err := json.Unmarshal(data, &records); err != nil {
+		return nil, fmt.Errorf("parse --evidence-file: %w", err)
+	}
+	items := make([]evidence.Item, 0, len(records))
+	for i, r := range records {
+		kind := r.Kind
+		if kind == "" {
+			kind = r.Type
+		}
+		if kind == "" {
+			kind = string(domain.KindText)
+		}
+		if r.Summary == "" {
+			return nil, fmt.Errorf("--evidence-file[%d]: summary is required", i)
+		}
+		items = append(items, evidence.Item{
+			Kind:    domain.EvidenceKind(kind),
+			Summary: r.Summary,
+			Source:  r.Source,
+			Content: r.Content,
+		})
+	}
+	return items, nil
+}
+
+// evidenceIDStrings converts evidence IDs to their string form for JSON output.
+func evidenceIDStrings(ids []domain.EvidenceID) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, string(id))
+	}
+	return out
 }
 
 func writeCaptureError(stderr io.Writer, code, format string, args ...interface{}) int {
@@ -589,7 +781,7 @@ func writeCaptureError(stderr io.Writer, code, format string, args ...interface{
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn capture --help"`,
 	})
-	return exitFailure
+	return domain.ErrorCode(code).ExitCode()
 }
 
 // ---------------------------------------------------------------------------
@@ -732,7 +924,7 @@ func runCurate(args []string, stdout, stderr io.Writer) int {
 
 	result, curErr := svc.Curate(ctx, projectID, curateInput)
 	if curErr != nil {
-		return writeCurateError(stderr, "invalid_argument", "curate: %v", curErr)
+		return writeDomainError(stderr, curErr, "invalid_argument", `run "royo-learn curate --help"`, "curate: ")
 	}
 
 	if *jsonFlag {
@@ -750,22 +942,16 @@ func runCurate(args []string, stdout, stderr io.Writer) int {
 	return exitSuccess
 }
 
-// parseCurateAction maps a CLI action string to a CurationDecision.
+// parseCurateAction maps a CLI action string to a CurationDecision. Every value
+// is validated against the single canonical allowlist in internal/domain
+// (D11 §11.2), so the CLI and the MCP server accept exactly the same decisions.
+// The historical shortcut "approve" is kept as a deprecated alias of
+// approve_project_knowledge; "relate" is handled by the caller before this point.
 func parseCurateAction(action string) (domain.CurationDecision, error) {
-	switch action {
-	case "approve":
+	if action == "approve" {
 		return domain.CurationApproveProjectKnowledge, nil
-	case "approve_new_skill":
-		return domain.CurationApproveNewSkill, nil
-	case "approve_skill_update":
-		return domain.CurationApproveSkillUpdate, nil
-	case "reject":
-		return domain.CurationReject, nil
-	case "needs_evidence":
-		return domain.CurationNeedsEvidence, nil
-	default:
-		return "", fmt.Errorf("unknown action %q: must be one of approve, approve_new_skill, approve_skill_update, reject, needs_evidence, relate", action)
 	}
+	return domain.ParseCurationDecision(action)
 }
 
 func writeCurateError(stderr io.Writer, code, format string, args ...interface{}) int {
@@ -777,7 +963,197 @@ func writeCurateError(stderr io.Writer, code, format string, args ...interface{}
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn curate --help"`,
 	})
-	return exitFailure
+	return domain.ErrorCode(code).ExitCode()
+}
+
+// ---------------------------------------------------------------------------
+// evidence (add / list)
+// ---------------------------------------------------------------------------
+
+func runEvidence(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		return writeEvidenceError(stderr, "invalid_argument", "evidence: a subcommand is required: add, list")
+	}
+	switch args[0] {
+	case "add":
+		return runEvidenceAdd(args[1:], stdout, stderr)
+	case "list":
+		return runEvidenceList(args[1:], stdout, stderr)
+	default:
+		return writeEvidenceError(stderr, "invalid_argument", "evidence: unknown subcommand %q: must be add or list", args[0])
+	}
+}
+
+// runEvidenceAdd attaches evidence to an existing learning through the public
+// capture service. The learning ID is the first positional argument.
+func runEvidenceAdd(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return writeEvidenceError(stderr, "invalid_argument", "evidence add: a learning id is required as the first argument")
+	}
+	learningID := args[0]
+
+	fs := flag.NewFlagSet("evidence add", flag.ContinueOnError)
+	kind := fs.String("kind", "text", "evidence kind")
+	summary := fs.String("summary", "", "human-readable summary (required)")
+	source := fs.String("source", "", "origin: a path, a command or a URL")
+	content := fs.String("content", "", "literal content; stored in the blob store after redaction")
+	evidenceFile := fs.String("evidence-file", "", "path to a JSON array of evidence records")
+	evidenceLevel := fs.String("evidence-level", "", "optionally raise the declared evidence level")
+	projectRoot := fs.String("project-root", "", "project root directory")
+	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
+
+	if err := fs.Parse(args[1:]); err != nil {
+		return writeEvidenceError(stderr, "invalid_argument", "evidence add: %v", err)
+	}
+
+	var items []evidence.Item
+	if *evidenceFile != "" {
+		fileItems, err := readEvidenceFile(*evidenceFile)
+		if err != nil {
+			return writeEvidenceError(stderr, "invalid_argument", "evidence add: %v", err)
+		}
+		items = append(items, fileItems...)
+	}
+	if *summary != "" || *content != "" {
+		if *summary == "" {
+			return writeEvidenceError(stderr, "invalid_argument", "evidence add: --summary is required")
+		}
+		items = append(items, evidence.Item{
+			Kind:    domain.EvidenceKind(*kind),
+			Summary: *summary,
+			Source:  *source,
+			Content: *content,
+		})
+	}
+	if len(items) == 0 {
+		return writeEvidenceError(stderr, "invalid_argument", "evidence add: at least one evidence record is required")
+	}
+
+	root, db, projectID, exitCode := resolvePublishContext(*projectRoot, stderr)
+	if exitCode != exitSuccess {
+		return exitCode
+	}
+	defer db.Close()
+
+	ctx := context.Background()
+	svc, err := newEvidenceCaptureSvc(root, db)
+	if err != nil {
+		return writeDomainError(stderr, err, "invalid_argument", `run "royo-learn evidence add --help"`, "evidence add: ")
+	}
+
+	result, err := svc.AddEvidence(ctx, projectID, &capture.AddEvidenceInput{
+		LearningID:    domain.LearningID(learningID),
+		Items:         items,
+		EvidenceLevel: domain.EvidenceLevel(*evidenceLevel),
+		Actor:         domain.Actor{Kind: "human", Name: "cli-user"},
+	})
+	if err != nil {
+		return writeDomainError(stderr, err, "invalid_argument", `run "royo-learn evidence add --help"`, "evidence add: ")
+	}
+
+	if *jsonFlag {
+		data, _ := json.MarshalIndent(map[string]interface{}{
+			"learning_id":    string(result.LearningID),
+			"evidence_count": result.Count,
+			"evidence_ids":   evidenceIDStrings(result.EvidenceIDs),
+			"evidence_level": string(result.EvidenceLevel),
+			"redacted":       result.Redacted,
+		}, "", "  ")
+		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+	} else {
+		_, _ = fmt.Fprintf(stdout, "attached %d evidence record(s) to learning %s\n", result.Count, result.LearningID)
+	}
+
+	return exitSuccess
+}
+
+// runEvidenceList lists the evidence attached to a learning. Every field it
+// prints was redacted before it was persisted.
+func runEvidenceList(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return writeEvidenceError(stderr, "invalid_argument", "evidence list: a learning id is required as the first argument")
+	}
+	learningID := args[0]
+
+	fs := flag.NewFlagSet("evidence list", flag.ContinueOnError)
+	projectRoot := fs.String("project-root", "", "project root directory")
+	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
+
+	if err := fs.Parse(args[1:]); err != nil {
+		return writeEvidenceError(stderr, "invalid_argument", "evidence list: %v", err)
+	}
+
+	root, db, _, exitCode := resolvePublishContext(*projectRoot, stderr)
+	if exitCode != exitSuccess {
+		return exitCode
+	}
+	defer db.Close()
+
+	ctx := context.Background()
+	svc, err := newEvidenceCaptureSvc(root, db)
+	if err != nil {
+		return writeEvidenceError(stderr, "invalid_argument", "evidence list: %v", err)
+	}
+
+	records, err := svc.ListEvidence(ctx, domain.LearningID(learningID))
+	if err != nil {
+		return writeEvidenceError(stderr, "invalid_argument", "evidence list: %v", err)
+	}
+
+	if *jsonFlag {
+		items := make([]map[string]any, 0, len(records))
+		for _, r := range records {
+			items = append(items, map[string]any{
+				"id":           string(r.ID),
+				"learning_id":  string(r.LearningID),
+				"kind":         string(r.Kind),
+				"summary":      r.Summary,
+				"source":       r.URI,
+				"sha256":       r.SHA256,
+				"redacted":     r.Redacted,
+				"size_bytes":   r.SizeBytes,
+				"collected_at": r.CollectedAt.Format(time.RFC3339),
+			})
+		}
+		data, _ := json.MarshalIndent(map[string]interface{}{
+			"learning_id":    learningID,
+			"evidence_count": len(records),
+			"evidence":       items,
+		}, "", "  ")
+		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+	} else {
+		_, _ = fmt.Fprintf(stdout, "Evidence for learning %s (%d record(s)):\n", learningID, len(records))
+		for _, r := range records {
+			_, _ = fmt.Fprintf(stdout, "  [%s] %s\n", r.Kind, r.Summary)
+		}
+		if len(records) == 0 {
+			_, _ = fmt.Fprintf(stdout, "  (none)\n")
+		}
+	}
+
+	return exitSuccess
+}
+
+// newEvidenceCaptureSvc builds a capture service wired to the evidence layer.
+func newEvidenceCaptureSvc(root string, db *storage.DB) (*capture.Service, error) {
+	evidenceSvc, err := evidence.NewService(root, nil)
+	if err != nil {
+		return nil, fmt.Errorf("init evidence: %w", err)
+	}
+	recordsDir := filepath.Join(root, ".royo-learn", "records")
+	return capture.NewServiceWithEvidence(db, recordsDir, evidenceSvc), nil
+}
+
+func writeEvidenceError(stderr io.Writer, code, format string, args ...interface{}) int {
+	msg := fmt.Sprintf(format, args...)
+	_ = logging.WriteError(stderr, logging.ErrorEnvelope{
+		Code:        code,
+		Message:     msg,
+		Recoverable: true,
+		Details:     map[string]any{},
+		NextAction:  `run "royo-learn evidence add <learning-id> --summary <text>"`,
+	})
+	return domain.ErrorCode(code).ExitCode()
 }
 
 // ---------------------------------------------------------------------------
@@ -806,7 +1182,8 @@ func runPreview(args []string, stdout, stderr io.Writer) int {
 
 	svc := publish.NewService(db, root,
 		filepath.Join(root, ".royo-learn", "backups"),
-		filepath.Join(root, ".royo-learn"))
+		filepath.Join(root, ".royo-learn"),
+		filepath.Join(root, ".royo-learn", "records"))
 
 	ctx := context.Background()
 	result, err := svc.Preview(ctx, projectID, &publish.PreviewInput{
@@ -816,7 +1193,7 @@ func runPreview(args []string, stdout, stderr io.Writer) int {
 		},
 	})
 	if err != nil {
-		return writePublishError(stderr, "invalid_argument", "preview: %v", err)
+		return writeDomainError(stderr, err, "invalid_argument", `run "royo-learn preview --help"`, "preview: ")
 	}
 
 	if *jsonFlag {
@@ -843,6 +1220,99 @@ func runPreview(args []string, stdout, stderr io.Writer) int {
 }
 
 // ---------------------------------------------------------------------------
+// approve
+// ---------------------------------------------------------------------------
+
+// runApprove records explicit human approval bound to a publication preview.
+// The learning id is the first positional argument. In --json mode there are no
+// interactive prompts and every field is required; the response carries the
+// approval_id (D11 §11.1).
+func runApprove(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return writePublishError(stderr, "invalid_argument", "approve: a learning id is required as the first argument")
+	}
+	learningID := args[0]
+
+	fs := flag.NewFlagSet("approve", flag.ContinueOnError)
+	previewHash := fs.String("preview-hash", "", "hash of the exact preview being authorized (required)")
+	approvedBy := fs.String("approved-by", "", "identity of the human granting approval (required)")
+	reason := fs.String("reason", "", "why the publication is authorized (required)")
+	approvalEvidence := fs.String("approval-evidence", "", "reference to the consent record: link, message id or ticket (required)")
+	expiresAt := fs.String("expires-at", "", "optional RFC3339 instant after which the approval is rejected")
+	projectRoot := fs.String("project-root", "", "project root directory")
+	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
+
+	if err := fs.Parse(args[1:]); err != nil {
+		return writePublishError(stderr, "invalid_argument", "approve: %v", err)
+	}
+
+	if *previewHash == "" {
+		return writePublishError(stderr, "invalid_argument", "approve: --preview-hash is required")
+	}
+	if *approvedBy == "" {
+		return writePublishError(stderr, "invalid_argument", "approve: --approved-by is required")
+	}
+	if *reason == "" {
+		return writePublishError(stderr, "invalid_argument", "approve: --reason is required")
+	}
+	if *approvalEvidence == "" {
+		return writePublishError(stderr, "invalid_argument", "approve: --approval-evidence is required")
+	}
+
+	apprIn := &publish.ApproveInput{
+		LearningID:       domain.LearningID(learningID),
+		PreviewHash:      *previewHash,
+		ApprovedBy:       *approvedBy,
+		Reason:           *reason,
+		ApprovalEvidence: *approvalEvidence,
+		Actor:            domain.Actor{Kind: "human", Name: "cli-user"},
+	}
+	if *expiresAt != "" {
+		t, err := time.Parse(time.RFC3339, *expiresAt)
+		if err != nil {
+			return writePublishError(stderr, "invalid_argument", "approve: --expires-at must be RFC3339: %v", err)
+		}
+		apprIn.ExpiresAt = &t
+	}
+
+	root, db, projectID, exitCode := resolvePublishContext(*projectRoot, stderr)
+	if exitCode != exitSuccess {
+		return exitCode
+	}
+	defer db.Close()
+
+	svc := publish.NewService(db, root,
+		filepath.Join(root, ".royo-learn", "backups"),
+		filepath.Join(root, ".royo-learn"),
+		filepath.Join(root, ".royo-learn", "records"))
+
+	ctx := context.Background()
+	approval, err := svc.Approve(ctx, projectID, apprIn)
+	if err != nil {
+		return writeDomainError(stderr, err, "invalid_argument", `run "royo-learn approve --help"`, "approve: ")
+	}
+
+	if *jsonFlag {
+		out := map[string]interface{}{
+			"approval_id":  string(approval.ID),
+			"learning_id":  string(approval.LearningID),
+			"preview_hash": approval.PreviewHash,
+			"approved_by":  approval.ApprovedBy,
+		}
+		if approval.ExpiresAt != nil {
+			out["expires_at"] = approval.ExpiresAt.Format(time.RFC3339)
+		}
+		data, _ := json.MarshalIndent(out, "", "  ")
+		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+	} else {
+		_, _ = fmt.Fprintf(stdout, "Approved preview %s for learning %s (approval: %s)\n",
+			approval.PreviewHash, approval.LearningID, approval.ID)
+	}
+
+	return exitSuccess
+}
+
+// ---------------------------------------------------------------------------
 // publish
 // ---------------------------------------------------------------------------
 
@@ -850,6 +1320,9 @@ func runPublish(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("publish", flag.ContinueOnError)
 	learningID := fs.String("learning-id", "", "learning ID to publish (required)")
 	previewHash := fs.String("preview-hash", "", "preview hash to confirm (required)")
+	approvalID := fs.String("approval-id", "", "approval ID (required when the preview reports requires_approval=true)")
+	apply := fs.Bool("apply", false, "actually write the files; without it publish is a dry run (D7)")
+	dryRun := fs.Bool("dry-run", true, "when false, equivalent to --apply; the default is a dry run")
 	force := fs.Bool("force", false, "bypass dirty worktree check")
 	projectRoot := fs.String("project-root", "", "project root directory")
 	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
@@ -865,6 +1338,9 @@ func runPublish(args []string, stdout, stderr io.Writer) int {
 		return writePublishError(stderr, "invalid_argument", "publish: --preview-hash is required")
 	}
 
+	// --apply and --dry-run=false are equivalent; either one enables the write.
+	writeRequested := *apply || !*dryRun
+
 	root, db, projectID, exitCode := resolvePublishContext(*projectRoot, stderr)
 	if exitCode != exitSuccess {
 		return exitCode
@@ -873,19 +1349,45 @@ func runPublish(args []string, stdout, stderr io.Writer) int {
 
 	svc := publish.NewService(db, root,
 		filepath.Join(root, ".royo-learn", "backups"),
-		filepath.Join(root, ".royo-learn"))
+		filepath.Join(root, ".royo-learn"),
+		filepath.Join(root, ".royo-learn", "records"))
 
-	ctx := context.Background()
-	result, err := svc.Publish(ctx, projectID, &publish.PublishInput{
+	pubIn := &publish.PublishInput{
 		LearningID:  domain.LearningID(*learningID),
 		PreviewHash: *previewHash,
+		Apply:       writeRequested,
 		Force:       *force,
 		Actor: domain.Actor{
 			Kind: "human", Name: "cli-user", Model: "", SessionID: "",
 		},
-	})
+	}
+	if *approvalID != "" {
+		id := domain.ApprovalID(*approvalID)
+		pubIn.ApprovalID = &id
+	}
+
+	ctx := context.Background()
+	result, err := svc.Publish(ctx, projectID, pubIn)
 	if err != nil {
-		return writePublishError(stderr, "invalid_argument", "publish: %v", err)
+		return writeDomainError(stderr, err, "invalid_argument", `run "royo-learn publish --help"`, "publish: ")
+	}
+
+	// Dry run: report the plan without any write (D7).
+	if result.DryRun {
+		if *jsonFlag {
+			data, _ := json.MarshalIndent(map[string]interface{}{
+				"dry_run":      true,
+				"learning_id":  *learningID,
+				"preview_hash": *previewHash,
+				"targets":      result.Targets,
+				"next_action":  "re-run with --apply to write the files",
+			}, "", "  ")
+			_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+		} else {
+			_, _ = fmt.Fprintf(stdout, "Dry run: %d target(s) would change. Re-run with --apply to write.\n",
+				len(result.Targets))
+		}
+		return exitSuccess
 	}
 
 	if *jsonFlag {
@@ -911,6 +1413,7 @@ func runPublish(args []string, stdout, stderr io.Writer) int {
 func runRollback(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("rollback", flag.ContinueOnError)
 	journalID := fs.String("journal-id", "", "publication ID to rollback (required)")
+	listRecoverable := fs.Bool("list", false, "list interrupted publications that require recovery")
 	projectRoot := fs.String("project-root", "", "project root directory")
 	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
 
@@ -918,7 +1421,10 @@ func runRollback(args []string, stdout, stderr io.Writer) int {
 		return writePublishError(stderr, "invalid_argument", "rollback: %v", err)
 	}
 
-	if *journalID == "" {
+	if *listRecoverable && *journalID != "" {
+		return writePublishError(stderr, "invalid_argument", "rollback: --list cannot be combined with --journal-id")
+	}
+	if !*listRecoverable && *journalID == "" {
 		return writePublishError(stderr, "invalid_argument", "rollback: --journal-id is required")
 	}
 
@@ -930,9 +1436,27 @@ func runRollback(args []string, stdout, stderr io.Writer) int {
 
 	svc := publish.NewService(db, root,
 		filepath.Join(root, ".royo-learn", "backups"),
-		filepath.Join(root, ".royo-learn"))
+		filepath.Join(root, ".royo-learn"),
+		filepath.Join(root, ".royo-learn", "records"))
 
 	ctx := context.Background()
+	if *listRecoverable {
+		candidates, err := svc.RecoverablePublications(ctx)
+		if err != nil {
+			return writeDomainError(stderr, err, "rollback_failed", `run "royo-learn doctor --json"`, "rollback: ")
+		}
+		if *jsonFlag {
+			data, _ := json.MarshalIndent(candidates, "", "  ")
+			_, _ = fmt.Fprintf(stdout, "%s\n", data)
+		} else if len(candidates) == 0 {
+			_, _ = fmt.Fprintln(stdout, "No interrupted publications require recovery.")
+		} else {
+			for _, candidate := range candidates {
+				_, _ = fmt.Fprintf(stdout, "%s\t%s\t%s\n", candidate.PublicationID, candidate.Status, candidate.JournalStatus)
+			}
+		}
+		return exitSuccess
+	}
 	err := svc.Rollback(ctx, projectID, &publish.RollbackPublicationInput{
 		PublicationID: domain.PublicationID(*journalID),
 		Actor: domain.Actor{
@@ -940,7 +1464,7 @@ func runRollback(args []string, stdout, stderr io.Writer) int {
 		},
 	})
 	if err != nil {
-		return writePublishError(stderr, "invalid_argument", "rollback: %v", err)
+		return writeDomainError(stderr, err, "rollback_failed", `run "royo-learn rollback --help"`, "rollback: ")
 	}
 
 	if *jsonFlag {
@@ -1043,7 +1567,7 @@ func writePublishError(stderr io.Writer, code, format string, args ...interface{
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn preview --help"`,
 	})
-	return exitFailure
+	return domain.ErrorCode(code).ExitCode()
 }
 
 // ---------------------------------------------------------------------------
@@ -1184,7 +1708,7 @@ func writeEngramError(stderr io.Writer, code, format string, args ...interface{}
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn engram-health"`,
 	})
-	return exitFailure
+	return domain.ErrorCode(code).ExitCode()
 }
 
 // ---------------------------------------------------------------------------
@@ -1360,7 +1884,7 @@ func writeRecurrenceError(stderr io.Writer, code, format string, args ...interfa
 		Details:     map[string]any{},
 		NextAction:  `run "royo-learn recurrences --learning-id <id>"`,
 	})
-	return exitFailure
+	return domain.ErrorCode(code).ExitCode()
 }
 
 // ---------------------------------------------------------------------------

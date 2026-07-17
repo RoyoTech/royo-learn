@@ -238,6 +238,16 @@ royo-learn capture \
   --scope "project" \
   --json
 
+# Retrieve or search learnings
+royo-learn get "<learning-id>" --json
+royo-learn search "connection pool" --json
+
+# Attach evidence to a captured learning (required to clear the approval threshold)
+royo-learn evidence add "<learning-id>" \
+  --summary "load test reproduces the fix" \
+  --content "..." \
+  --json
+
 # Curate (approve/reject) a learning
 royo-learn curate \
   --project-root /path/to/your/project \
@@ -246,26 +256,39 @@ royo-learn curate \
   --rationale "validated with load testing" \
   --json
 
-# Preview before publishing
+# Preview before publishing (reports the preview hash and whether approval is required)
 royo-learn preview \
   --project-root /path/to/your/project \
   --learning-id "<learning-id>" \
   --json
 
-# Publish (requires preview hash)
+# Approve the preview (required when the preview reports requires_approval=true,
+# e.g. shared knowledge or AGENTS.md destinations)
+royo-learn approve "<learning-id>" \
+  --preview-hash "<preview-hash>" \
+  --approved-by "<identity>" \
+  --reason "reviewed and validated" \
+  --approval-evidence "<link-or-ticket>" \
+  --json
+
+# Publish. Dry-run by default: --apply is required to write files, and
+# --approval-id is required when the preview reported requires_approval=true.
 royo-learn publish \
   --project-root /path/to/your/project \
   --learning-id "<learning-id>" \
   --preview-hash "<preview-hash>" \
+  --approval-id "<approval-id>" \
+  --apply \
   --json
 
-# Rollback a publication
+# Rollback a publication (restores the previous file contents byte for byte)
 royo-learn rollback \
   --project-root /path/to/your/project \
   --journal-id "<publication-id>" \
   --json
 
-# Check recurrences
+# Record a recurrence and inspect metrics
+royo-learn occurrence --learning-id "<learning-id>" --outcome "prevented" --json
 royo-learn recurrences --learning-id "<learning-id>" --json
 royo-learn metrics --learning-id "<learning-id>" --json
 
@@ -299,6 +322,12 @@ royo-learn setup install --agent claude-code --skip-mcp
 # Dry-run first
 royo-learn setup install --agent all --dry-run --json
 
+# Safely upgrade already-installed Skills (dry-run by default; --apply to write).
+# Intact managed Skills are backed up and updated; user-modified Skills are never
+# overwritten — a candidate version and a conflict record are written instead.
+royo-learn setup upgrade-skills --agent all
+royo-learn setup upgrade-skills --agent all --apply
+
 # Uninstall
 royo-learn setup uninstall --agent all
 ```
@@ -328,10 +357,22 @@ codex mcp add royo-learn -- royo-learn mcp-serve
 
 **OpenCode** uses the `"mcp"` key (not `"mcpServers"`) with `"command"` as an array — use `setup install --agent opencode` for correct formatting.
 
-**Profiles**: `minimal` (capture, search, doctor), `standard` (default; includes curate, preview, list, get), `full` (all tools including publish).
+**Tool profiles** (`--tools read|agent|admin`, default `agent`):
+
+- `read` — read-only tools: `learning_search`, `learning_get`, `learning_list`,
+  `learning_status`, `learning_doctor`.
+- `agent` (default) — the full capture-to-publish cycle: adds `learning_capture`,
+  `learning_add_evidence`, `learning_curate`, `learning_publication_preview`,
+  `learning_approve`, `learning_publish`, `learning_report_occurrence`,
+  `learning_list_recurrences`, `learning_compute_metrics`.
+- `admin` — adds the destructive `learning_rollback`.
+
+The `v0.1.9` names (`--profile` with `minimal`/`standard`/`full`, and the tool
+aliases such as `capture_learning`) still work as deprecated aliases and warn on
+use; they are removed in `v0.2.0`.
 
 ```bash
-royo-learn mcp-serve --profile full
+royo-learn mcp-serve --tools admin
 ```
 
 ## Architecture

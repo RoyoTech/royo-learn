@@ -135,6 +135,16 @@ func isValidEvidenceLevel(el EvidenceLevel) bool {
 	return false
 }
 
+// IsValidEvidenceLevel reports whether el is a known evidence level. Public
+// interfaces validate their input against this rather than defining their own
+// list.
+func IsValidEvidenceLevel(el EvidenceLevel) bool { return isValidEvidenceLevel(el) }
+
+// IsValidEvidenceKind reports whether k is a known evidence kind. Public
+// interfaces validate their input against this rather than defining their own
+// list.
+func IsValidEvidenceKind(k EvidenceKind) bool { return isValidEvidenceKind(k) }
+
 func isValidDestination(d DestinationType) bool {
 	switch d {
 	case DestNone, DestProject, DestShared, DestSkill, DestAgentsRule:

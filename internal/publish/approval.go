@@ -47,9 +47,14 @@ func (s *Service) Approve(ctx context.Context, projectID domain.ProjectID, input
 
 	now := utcNowPublish()
 
-	// Calculate expiry if requested.
+	// Calculate expiry. An absolute ExpiresAt wins over the relative ExpiresIn;
+	// a past instant produces an immediately-expired approval on purpose.
 	var expiresAt *time.Time
-	if input.ExpiresIn > 0 {
+	switch {
+	case input.ExpiresAt != nil:
+		t := input.ExpiresAt.UTC()
+		expiresAt = &t
+	case input.ExpiresIn > 0:
 		t := now.Add(time.Duration(input.ExpiresIn) * time.Second)
 		expiresAt = &t
 	}
@@ -89,21 +94,10 @@ func (s *Service) CheckApproval(ctx context.Context, previewHash string) (*domai
 		return nil, domain.NewValidationError(domain.ErrApprovalRequired,
 			"no valid approval found for this preview hash — approval is required before publishing")
 	}
-	if approval == nil {
-		return nil, domain.NewValidationError(domain.ErrApprovalRequired,
-			"no approval found for preview")
-	}
-
 	// Check expiry.
 	if approval.ExpiresAt != nil && approval.ExpiresAt.Before(utcNowPublish()) {
 		return nil, domain.NewValidationError(domain.ErrApprovalExpired,
 			fmt.Sprintf("approval expired at %s", approval.ExpiresAt.Format(time.RFC3339)))
-	}
-
-	// Check revocation.
-	if approval.RevokedAt != nil {
-		return nil, domain.NewValidationError(domain.ErrApprovalInvalid,
-			"approval has been revoked")
 	}
 
 	return approval, nil

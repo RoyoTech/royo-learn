@@ -170,6 +170,16 @@ const (
 	PubStatusRolledback PublicationStatus = "rolled_back"
 )
 
+// RecoveryState records durable per-target publication/rollback progress.
+type RecoveryState string
+
+const (
+	RecoveryPending   RecoveryState = "pending"
+	RecoveryPublished RecoveryState = "published"
+	RecoveryRestored  RecoveryState = "restored"
+	RecoveryConflict  RecoveryState = "conflict"
+)
+
 // OccurrenceOutcome represents the outcome of an occurrence check.
 type OccurrenceOutcome string
 
@@ -341,16 +351,37 @@ type PreviewID string
 
 // PublicationPlan describes the planned publication operation.
 type PublicationPlan struct {
-	LearningID       LearningID           `json:"learning_id"`
-	TargetRoot       string               `json:"target_root"`
-	TargetPath       string               `json:"target_path"`
-	Operation        PublicationOperation `json:"operation"`
-	Content          string               `json:"content"`
-	Patch            string               `json:"patch"`
-	ManagedBlockID   string               `json:"managed_block_id"`
-	Verification     []CommandSpec        `json:"verification"`
-	RequiresApproval bool                 `json:"requires_approval"`
-	Risk             RiskLevel            `json:"risk"`
+	LearningID       LearningID              `json:"learning_id"`
+	TargetRoot       string                  `json:"target_root"`
+	TargetPath       string                  `json:"target_path"`
+	Operation        PublicationOperation    `json:"operation"`
+	Content          string                  `json:"content"`
+	Patch            string                  `json:"patch"`
+	ManagedBlockID   string                  `json:"managed_block_id"`
+	Verification     []CommandSpec           `json:"verification"`
+	RequiresApproval bool                    `json:"requires_approval"`
+	Risk             RiskLevel               `json:"risk"`
+	PolicySignature  string                  `json:"policy_signature"`
+	Targets          []PublicationPlanTarget `json:"targets,omitempty"`
+}
+
+// PublicationPlanTarget records one destination of a publication plan together
+// with the prior and posterior content hashes captured when the preview was
+// generated. The prior hash lets publish refuse a destination that changed on
+// disk after the preview was taken; the whole set feeds the preview hash so an
+// approval binds the exact plan it authorized (Recorrido D).
+type PublicationPlanTarget struct {
+	Root      string               `json:"root"`
+	Path      string               `json:"path"`
+	Operation PublicationOperation `json:"operation"`
+	// PriorHash is the SHA-256 of the destination file at preview time. Empty
+	// when the destination did not exist yet.
+	PriorHash string `json:"prior_hash"`
+	// PosteriorHash is the SHA-256 of the content the plan would write.
+	PosteriorHash string `json:"posterior_hash"`
+	// Content is the exact posterior byte sequence authorized by the preview.
+	// Publish applies these bytes rather than recomposing mutable source state.
+	Content string `json:"content"`
 }
 
 // CommandSpec describes a verification command.
@@ -398,9 +429,18 @@ type TargetEntry struct {
 
 // RollbackEntry describes a rollback step.
 type RollbackEntry struct {
-	Path    string `json:"path"`
-	Backup  string `json:"backup"`
-	Success bool   `json:"success"`
+	Path                  string        `json:"path"`
+	Backup                string        `json:"backup,omitempty"`
+	Success               bool          `json:"success"`
+	OriginalExisted       *bool         `json:"original_existed"`
+	OriginalSHA256        string        `json:"original_sha256,omitempty"`
+	BackupSHA256          string        `json:"backup_sha256,omitempty"`
+	OriginalMode          *uint32       `json:"original_mode,omitempty"`
+	ExpectedPublishedHash string        `json:"expected_published_hash"`
+	ExpectedPublishedMode *uint32       `json:"expected_published_mode"`
+	RecoveryState         RecoveryState `json:"recovery_state"`
+	FailureReason         string        `json:"failure_reason,omitempty"`
+	RecoveryArtifact      string        `json:"recovery_artifact,omitempty"`
 }
 
 // Occurrence records an occurrence (or non-occurrence) of a learning's pattern.
@@ -428,6 +468,18 @@ type RecurrenceRecord struct {
 	ProjectID             ProjectID
 	Summary               string
 	OccurredAt            time.Time
+
+	// Occurrence detail (plan 4.4), populated by an explicit occurrence report.
+	// Older recurrence rows leave these at their zero values.
+	Outcome        string
+	Retrieved      bool
+	SkillActivated bool
+	Evidence       string
+	ActorKind      string
+	ActorName      string
+	// IdempotencyKey guards technical retries of a report (D5). Nil means the
+	// record was not created through an idempotent report.
+	IdempotencyKey *string
 }
 
 // RecurrenceMetrics computes frequency, interval, and trend for a recurrence pattern.

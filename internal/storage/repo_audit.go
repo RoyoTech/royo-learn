@@ -12,6 +12,19 @@ import (
 // RecordEvent inserts an append-only audit event. Audit events are never
 // updated or deleted by application code.
 func RecordEvent(ctx context.Context, db *sql.DB, evt *domain.AuditEvent) error {
+	return recordEvent(ctx, db, evt)
+}
+
+// RecordEventTx inserts an audit event in the caller's state transaction.
+func RecordEventTx(ctx context.Context, tx *sql.Tx, evt *domain.AuditEvent) error {
+	return recordEvent(ctx, tx, evt)
+}
+
+type auditExecer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func recordEvent(ctx context.Context, exec auditExecer, evt *domain.AuditEvent) error {
 	prevJSON := "{}"
 	if evt.PreviousState != nil {
 		prevJSON = *evt.PreviousState
@@ -22,7 +35,7 @@ func RecordEvent(ctx context.Context, db *sql.DB, evt *domain.AuditEvent) error 
 	}
 	detailsJSON := marshalAny(evt.Details)
 
-	_, err := db.ExecContext(ctx, `
+	_, err := exec.ExecContext(ctx, `
 		INSERT INTO audit_events (id, occurred_at, actor_json, operation, entity_type, entity_id, previous_state, new_state, payload_sha256, result, error_code, details_json)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,

@@ -11,6 +11,7 @@ import (
 	"agent-royo-learn/internal/capture"
 	"agent-royo-learn/internal/curate"
 	"agent-royo-learn/internal/domain"
+	"agent-royo-learn/internal/evidence"
 	"agent-royo-learn/internal/publish"
 	"agent-royo-learn/internal/storage"
 	"agent-royo-learn/internal/storage/storagetest"
@@ -39,7 +40,11 @@ func TestCaptureCuratePublishFlow(t *testing.T) {
 	}
 
 	actor := domain.Actor{Kind: "agent", Name: "integration-test"}
-	captureService := capture.NewService(db, filepath.Join(projectRoot, ".royo-learn", "records"))
+	evidenceSvc, err := evidence.NewService(projectRoot, nil)
+	if err != nil {
+		t.Fatalf("evidence service: %v", err)
+	}
+	captureService := capture.NewServiceWithEvidence(db, filepath.Join(projectRoot, ".royo-learn", "records"), evidenceSvc)
 	captured, err := captureService.Capture(ctx, project.ID, &capture.CaptureInput{
 		Title:         "Capture Curate Publish",
 		Context:       "Integration testing",
@@ -57,19 +62,18 @@ func TestCaptureCuratePublishFlow(t *testing.T) {
 		t.Fatalf("capture: %v", err)
 	}
 
-	evidence := &domain.Evidence{
-		ID:          domain.EvidenceID(uuid.Must(uuid.NewV7()).String()),
-		LearningID:  captured.LearningID,
-		Kind:        domain.KindTest,
-		URI:         "test://capture-curate-publish",
-		Summary:     "The integration test reproduces the complete flow",
-		SHA256:      "capture-curate-publish",
-		CollectedAt: now,
-	}
-	if err := storage.WithTx(ctx, db, func(tx *sql.Tx) error {
-		return storage.SaveEvidence(ctx, tx, evidence)
+	// Attach evidence through the public capture path, not by writing SQL.
+	if _, err := captureService.AddEvidence(ctx, project.ID, &capture.AddEvidenceInput{
+		LearningID: captured.LearningID,
+		Items: []evidence.Item{{
+			Kind:    domain.KindTest,
+			Summary: "The integration test reproduces the complete flow",
+			Source:  "test://capture-curate-publish",
+			Content: "--- PASS: TestCaptureCuratePublishFlow",
+		}},
+		Actor: actor,
 	}); err != nil {
-		t.Fatalf("save evidence: %v", err)
+		t.Fatalf("add evidence: %v", err)
 	}
 
 	curateService := curate.NewService(db, filepath.Join(projectRoot, ".royo-learn", "records"))
@@ -113,13 +117,22 @@ func TestCaptureCuratePublishFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("preview: %v", err)
 	}
-	if preview.Preview.RequiresApproval {
-		t.Fatal("new project skill unexpectedly requires human approval")
+	if !preview.Preview.RequiresApproval {
+		t.Fatal("multi-target project skill must require human approval")
+	}
+	approval, err := publishService.Approve(ctx, project.ID, &publish.ApproveInput{
+		LearningID: captured.LearningID, PreviewHash: preview.Preview.PreviewHash,
+		ApprovedBy: "integration-test", Reason: "authorize multi-target fixture", ApprovalEvidence: "test", Actor: actor,
+	})
+	if err != nil {
+		t.Fatalf("approve: %v", err)
 	}
 
 	published, err := publishService.Publish(ctx, project.ID, &publish.PublishInput{
+		Apply:       true,
 		LearningID:  captured.LearningID,
 		PreviewHash: preview.Preview.PreviewHash,
+		ApprovalID:  &approval.ID,
 		Force:       true,
 		Actor:       actor,
 	})

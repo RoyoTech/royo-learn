@@ -51,13 +51,13 @@ func TestMCPConformance_ListToolsAllProfiles(t *testing.T) {
 				"search_learnings",
 				"curate_learning",
 				"preview_publication",
+				"publish_learning",
 				"list_learnings",
 				"get_learning",
 				"doctor",
 				"list_recurrences",
 				"compute_metrics",
 			},
-			forbidden: []string{"publish_learning"},
 		},
 		{
 			name:         "full",
@@ -77,22 +77,86 @@ func TestMCPConformance_ListToolsAllProfiles(t *testing.T) {
 			},
 		},
 		{
-			name:         "minimal",
+			// D2 narrows this profile deliberately. In v0.1.9 "minimal" served
+			// capture_learning — a WRITE — and withheld get and list, which are
+			// reads. docs/04-CLI-SPEC.md defines read as "search and get", so the
+			// read profile now serves reads only. The deprecated name keeps
+			// working and maps onto read; its tool set is what changes.
+			name:         "minimal maps to read and is read-only",
 			profile:      "minimal",
-			minToolCount: 3,
+			minToolCount: 4,
 			requiredTools: []string{
-				"capture_learning",
+				"learning_search",
+				"learning_get",
+				"learning_list",
+				"learning_doctor",
+				// v0.1.9 aliases remain callable.
 				"search_learnings",
+				"get_learning",
+				"list_learnings",
 				"doctor",
 			},
 			forbidden: []string{
+				// Writes have no place in a read profile.
+				"learning_capture",
+				"capture_learning",
+				"learning_curate",
 				"curate_learning",
+				"learning_publication_preview",
 				"preview_publication",
+				"learning_publish",
 				"publish_learning",
-				"list_learnings",
-				"get_learning",
-				"list_recurrences",
-				"compute_metrics",
+			},
+		},
+		{
+			name:         "canonical read profile",
+			profile:      "read",
+			minToolCount: 4,
+			requiredTools: []string{
+				"learning_search",
+				"learning_get",
+				"learning_list",
+				"learning_doctor",
+			},
+			forbidden: []string{"learning_capture", "learning_curate", "learning_publish"},
+		},
+		{
+			name:         "canonical agent profile",
+			profile:      "agent",
+			minToolCount: 9,
+			requiredTools: []string{
+				"learning_capture",
+				"learning_search",
+				"learning_get",
+				"learning_list",
+				"learning_curate",
+				"learning_publication_preview",
+				// D2: learning_publish moves into agent now that Recorrido C's
+				// approval gate protects sensitive publications, together with
+				// the human-approval tool that authorizes them.
+				"learning_approve",
+				"learning_publish",
+				"learning_doctor",
+				"learning_list_recurrences",
+				"learning_compute_metrics",
+			},
+		},
+		{
+			name:         "canonical admin profile",
+			profile:      "admin",
+			minToolCount: 10,
+			requiredTools: []string{
+				"learning_capture",
+				"learning_search",
+				"learning_get",
+				"learning_list",
+				"learning_curate",
+				"learning_publication_preview",
+				"learning_approve",
+				"learning_publish",
+				"learning_doctor",
+				"learning_list_recurrences",
+				"learning_compute_metrics",
 			},
 		},
 	}
@@ -427,39 +491,27 @@ func TestMCPConformance_SchemasHaveDescriptions(t *testing.T) {
 	}
 }
 
-// TestMCPConformance_ServerInstructionsContainsProfile verifies instructions exist.
+// TestMCPConformance_ServerInstructionsContainsProfile verifies the instructions
+// describe the ACTIVE profile.
+//
+// This test previously asserted a literal list of 10 tool names, which enshrined
+// the defect named by D14: the instructions promised all 10 tools in every
+// profile while minimal registered 3 and standard 9. Asserting the literal list
+// made the lie a requirement. The agreement between the instructions and the
+// real registry is now asserted, per profile, by
+// TestContract_InstructionsAgreeWithToolsList in contract_test.go.
 func TestMCPConformance_ServerInstructionsContainsProfile(t *testing.T) {
 	t.Parallel()
-	ts := newTestServer(t, "full")
+	ts := newTestServer(t, "admin")
 
 	instructions := ts.server.Instructions()
 	if instructions == "" {
 		t.Fatal("expected non-empty server instructions")
 	}
 
-	requiredPhrases := []string{"royo-learn", "full", "capture_learning", "publish_learning"}
-	for _, phrase := range requiredPhrases {
+	for _, phrase := range []string{"royo-learn", "Profile: admin"} {
 		if !contains(instructions, phrase) {
 			t.Errorf("instructions missing phrase %q", phrase)
-		}
-	}
-
-	// Verify all 10 tools are mentioned.
-	toolNames := []string{
-		"capture_learning",
-		"search_learnings",
-		"curate_learning",
-		"preview_publication",
-		"publish_learning",
-		"list_learnings",
-		"get_learning",
-		"doctor",
-		"list_recurrences",
-		"compute_metrics",
-	}
-	for _, name := range toolNames {
-		if !contains(instructions, name) {
-			t.Errorf("instructions missing tool name %q", name)
 		}
 	}
 }
@@ -512,12 +564,16 @@ func TestMCPConformance_ErrorResponseFormat(t *testing.T) {
 	if err := json.Unmarshal([]byte(txt.Text), &errData); err != nil {
 		t.Fatalf("error content not valid JSON: %v\n%s", err, txt.Text)
 	}
-	code, hasCode := errData["code"].(string)
-	if !hasCode || code == "" {
-		t.Errorf("error response missing 'code' field: %v", errData)
+	inner, nested := errData["error"].(map[string]any)
+	if !nested {
+		t.Fatalf("error response is not nested under error: %v", errData)
 	}
-	msg, hasMsg := errData["message"].(string)
+	code, hasCode := inner["code"].(string)
+	if !hasCode || code == "" {
+		t.Errorf("error response missing 'code' field: %v", inner)
+	}
+	msg, hasMsg := inner["message"].(string)
 	if !hasMsg || msg == "" {
-		t.Errorf("error response missing 'message' field: %v", errData)
+		t.Errorf("error response missing 'message' field: %v", inner)
 	}
 }

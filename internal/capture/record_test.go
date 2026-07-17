@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"agent-royo-learn/internal/record"
 	"agent-royo-learn/internal/testutil"
 )
 
@@ -17,7 +18,7 @@ func TestWriteRecord(t *testing.T) {
 	l.NormalizedHash = "abc123def456"
 
 	recordsDir := filepath.Join(dir, "records")
-	if err := WriteRecord(recordsDir, l); err != nil {
+	if err := record.WriteRecord(recordsDir, l); err != nil {
 		t.Fatalf("WriteRecord: %v", err)
 	}
 
@@ -63,7 +64,7 @@ func TestWriteRecordCreatesDir(t *testing.T) {
 	l := newTestCaptureLearning()
 	recordsDir := filepath.Join(dir, "new-records")
 
-	if err := WriteRecord(recordsDir, l); err != nil {
+	if err := record.WriteRecord(recordsDir, l); err != nil {
 		t.Fatalf("WriteRecord: %v", err)
 	}
 
@@ -76,7 +77,7 @@ func TestWriteRecordNilLearning(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	err := WriteRecord(dir, nil)
+	err := record.WriteRecord(dir, nil)
 	if err == nil {
 		t.Fatal("WriteRecord(nil): expected error")
 	}

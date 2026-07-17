@@ -41,18 +41,31 @@
 
 ## E. Ciclo de aprendizaje
 
-- [ ] capture idempotente.
+- [ ] capture idempotente: la misma `idempotency_key` no crea un segundo aprendizaje ni duplica evidencia.
+- [ ] capture acepta evidencia embebida (`evidence[]`) por CLI y por MCP.
+- [ ] `learning_add_evidence` (MCP) y `royo-learn evidence add` (CLI) adjuntan evidencia después de la captura.
 - [ ] búsqueda previa.
 - [ ] curación con estados válidos.
 - [ ] needs_evidence.
+- [ ] un aprendizaje en `needs_evidence` puede volver a `approved` tras adjuntar evidencia, **sin tocar SQLite a mano**.
 - [ ] merge.
 - [ ] reject.
 - [ ] approve.
+- [ ] **`captured → needs_evidence → evidence_attached → approved` recorrido íntegramente por interfaces públicas.** Ninguna prueba puede llamar a `storage.SaveEvidence` directamente.
 - [ ] preview.
 - [ ] approval ligada a hash.
 - [ ] publish.
 - [ ] verify.
 - [ ] rollback.
+- [ ] tras `publish`, SQLite y el registro Markdown reflejan `published`.
+- [ ] tras un rollback exitoso, el aprendizaje vuelve a `approved` y el registro
+      Markdown refleja ese estado; un rollback fallido no lo cambia (D18).
+- [ ] antes de la primera escritura existe una publicación `in_progress` con
+      metadatos suficientes para recuperar todos los destinos (D20).
+- [ ] un destino modificado fuera del proceso nunca se sobrescribe durante
+      publicación o rollback; se devuelve un patch de reversión accionable (D20).
+- [ ] CLI y MCP conservan `code`, `recoverable`, `details`, `next_action` y la
+      ruta del artefacto de recuperación de un error de rollback.
 - [ ] occurrence.
 - [ ] métricas.
 
@@ -62,6 +75,8 @@
 - [ ] symlink escape bloqueado.
 - [ ] comandos sin shell.
 - [ ] secrets redacted.
+- [ ] la redacción ocurre **antes** de cualquier persistencia, no a la salida: un secreto entregado en un registro de evidencia no aparece en SQLite, ni en el blob store, ni en el Markdown, ni en el audit log, ni en la respuesta JSON de CLI o MCP.
+- [ ] `internal/evidence` está invocado desde una ruta de producción: `evidence.Redact` se ejecuta en la captura real, no solo en sus propias pruebas.
 - [ ] changed target bloquea apply.
 - [ ] shared/AGENTS requiere humano.
 - [ ] archivos sucios bloqueados por defecto.

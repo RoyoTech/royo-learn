@@ -48,6 +48,65 @@ func TestMCPServe_UninitializedProjectRequiresInit(t *testing.T) {
 	}
 }
 
+// TestMCPServe_ToolsFlagResolvesCanonicalProfiles covers D2: --tools is the
+// canonical flag with the values read|agent|admin; --profile and the values
+// minimal|standard|full keep working as deprecated, and deprecation is never
+// silent (D8).
+func TestMCPServe_ToolsFlagResolvesCanonicalProfiles(t *testing.T) {
+	tests := []struct {
+		name           string
+		args           []string
+		wantProfile    string
+		wantDeprecated bool
+		wantErr        bool
+	}{
+		{name: "default is agent", args: nil, wantProfile: "agent"},
+		{name: "canonical read", args: []string{"--tools", "read"}, wantProfile: "read"},
+		{name: "canonical agent", args: []string{"--tools", "agent"}, wantProfile: "agent"},
+		{name: "canonical admin", args: []string{"--tools", "admin"}, wantProfile: "admin"},
+
+		{name: "deprecated value minimal", args: []string{"--tools", "minimal"}, wantProfile: "read", wantDeprecated: true},
+		{name: "deprecated value standard", args: []string{"--tools", "standard"}, wantProfile: "agent", wantDeprecated: true},
+		{name: "deprecated value full", args: []string{"--tools", "full"}, wantProfile: "admin", wantDeprecated: true},
+
+		{name: "deprecated flag profile standard", args: []string{"--profile", "standard"}, wantProfile: "agent", wantDeprecated: true},
+		{name: "deprecated flag profile full", args: []string{"--profile", "full"}, wantProfile: "admin", wantDeprecated: true},
+		{name: "deprecated flag canonical value", args: []string{"--profile", "admin"}, wantProfile: "admin", wantDeprecated: true},
+
+		{name: "unknown value rejected", args: []string{"--tools", "nonsense"}, wantErr: true},
+		{name: "both flags rejected", args: []string{"--tools", "agent", "--profile", "standard"}, wantErr: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := newMCPFlagSet()
+			if err := fs.parse(tc.args); err != nil {
+				t.Fatalf("parse %v: %v", tc.args, err)
+			}
+
+			profile, warnings, err := fs.resolveProfile()
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("resolveProfile(%v) = %q, want error", tc.args, profile)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveProfile(%v): %v", tc.args, err)
+			}
+			if profile != tc.wantProfile {
+				t.Errorf("profile = %q, want %q", profile, tc.wantProfile)
+			}
+			if tc.wantDeprecated && len(warnings) == 0 {
+				t.Error("deprecated input must produce a deprecation warning, never silence (D8)")
+			}
+			if !tc.wantDeprecated && len(warnings) > 0 {
+				t.Errorf("canonical input must produce no warning; got %v", warnings)
+			}
+		})
+	}
+}
+
 func TestOnboardingSkillInstallsFromRepository(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {

@@ -208,8 +208,11 @@ func TestEvaluatePolicies_ProcedureType_Shared(t *testing.T) {
 
 	policies := EvaluatePolicies(learning, curation)
 
-	if RequiresHumanApproval(policies) {
-		t.Error("procedure type + approved shared knowledge should NOT require human approval")
+	// D4/D11: shared scope always requires human approval, regardless of the
+	// curation decision that derived the destination. The old expectation here
+	// (no approval for approve_shared_knowledge) WAS the governance hole.
+	if !RequiresHumanApproval(policies) {
+		t.Error("procedure type + shared destination must require human approval")
 	}
 }
 
@@ -551,8 +554,11 @@ func TestEvaluatePolicies_AgentsRuleApproved(t *testing.T) {
 	}
 
 	policies := EvaluatePolicies(learning, curation)
-	if RequiresHumanApproval(policies) {
-		t.Error("AGENTS.md with approve_agents_rule decision should NOT require human approval")
+	// D4/D11: AGENTS.md always requires human approval. Deriving the destination
+	// via approve_agents_rule does NOT pre-authorize writing the file that
+	// governs every agent — that pre-authorization was the governance hole.
+	if !RequiresHumanApproval(policies) {
+		t.Error("AGENTS.md destination must always require human approval")
 	}
 }
 
@@ -714,6 +720,9 @@ func TestBackupAndRestore(t *testing.T) {
 	if err := os.WriteFile(srcPath, []byte("modified content v2"), 0o644); err != nil {
 		t.Fatalf("modify source: %v", err)
 	}
+	entry.ExpectedPublishedHash = HashContent([]byte("modified content v2"))
+	publishedMode := fileModeIdentity(0o644)
+	entry.ExpectedPublishedMode = &publishedMode
 
 	// Restore from backup.
 	if err := mgr.RestoreFile(*entry); err != nil {
@@ -758,8 +767,15 @@ func TestRestoreAll_MixedResults(t *testing.T) {
 	entry1, _ := mgr.BackupFile(filepath.Join("src", "real.txt"))
 	entry2, _ := mgr.BackupFile("nonexistent.txt")
 
-	// Delete the real file.
-	os.Remove(srcPath)
+	// Replace the real file with the exact published identity.
+	if err := os.WriteFile(srcPath, []byte("published"), 0o644); err != nil {
+		t.Fatalf("write published target: %v", err)
+	}
+	entry1.ExpectedPublishedHash = HashContent([]byte("published"))
+	entry2.ExpectedPublishedHash = HashContent([]byte("unused published identity"))
+	publishedMode := fileModeIdentity(0o644)
+	entry1.ExpectedPublishedMode = &publishedMode
+	entry2.ExpectedPublishedMode = &publishedMode
 
 	results := mgr.RestoreAll([]BackupEntry{*entry1, *entry2})
 	if len(results) != 2 {
@@ -776,7 +792,7 @@ func TestJournalAppend(t *testing.T) {
 	tmpDir := t.TempDir()
 	journalDir := filepath.Join(tmpDir, "journal")
 
-	j, err := NewJournal(journalDir)
+	j, err := NewJournal(tmpDir, journalDir)
 	if err != nil {
 		t.Fatalf("NewJournal: %v", err)
 	}
@@ -815,7 +831,7 @@ func TestJournalEntryFields(t *testing.T) {
 	tmpDir := t.TempDir()
 	journalDir := filepath.Join(tmpDir, "journal")
 
-	j, _ := NewJournal(journalDir)
+	j, _ := NewJournal(tmpDir, journalDir)
 
 	entry := JournalEntry{
 		PublicationID:  "pub-123",
@@ -1083,8 +1099,13 @@ func TestRollbackAll_Success(t *testing.T) {
 	mgr := NewBackupManager(tmpDir, backupDir)
 	entry, _ := mgr.BackupFile(filepath.Join("src", "file.txt"))
 
-	// Delete original.
-	os.Remove(srcPath)
+	// Replace original with the published identity.
+	if err := os.WriteFile(srcPath, []byte("published"), 0o644); err != nil {
+		t.Fatalf("write published target: %v", err)
+	}
+	entry.ExpectedPublishedHash = HashContent([]byte("published"))
+	publishedMode := fileModeIdentity(0o644)
+	entry.ExpectedPublishedMode = &publishedMode
 
 	err := rollbackAll(mgr, []BackupEntry{*entry})
 	if err != nil {
@@ -1103,11 +1124,14 @@ func TestRollbackAll_NonexistentBackup(t *testing.T) {
 	mgr := NewBackupManager(tmpDir, backupDir)
 
 	// BackupEntry with empty BackupPath (file didn't exist before publish).
+	absent := false
 	entry := BackupEntry{
-		OriginalPath: "nonexistent.txt",
-		BackupPath:   "",
-		Checksum:     "",
+		OriginalPath:          "nonexistent.txt",
+		OriginalExisted:       &absent,
+		ExpectedPublishedHash: HashContent([]byte("unused published identity")),
 	}
+	publishedMode := fileModeIdentity(0o644)
+	entry.ExpectedPublishedMode = &publishedMode
 	err := rollbackAll(mgr, []BackupEntry{entry})
 	if err != nil {
 		t.Fatalf("rollbackAll with empty backup: %v", err)
@@ -1122,9 +1146,11 @@ func TestRollbackAll_AggregatesFailures(t *testing.T) {
 	mgr := NewBackupManager(tmpDir, backupDir)
 
 	// Entries with non-existent backup paths — RestoreFile will fail for each.
+	existed := true
+	mode := uint32(0o644)
 	entries := []BackupEntry{
-		{OriginalPath: "file1.txt", BackupPath: filepath.Join(backupDir, "missing1.bak"), Checksum: "h1"},
-		{OriginalPath: "file2.txt", BackupPath: filepath.Join(backupDir, "missing2.bak"), Checksum: "h2"},
+		{OriginalPath: "file1.txt", BackupPath: filepath.Join(backupDir, "missing1.bak"), Checksum: "h1", OriginalHash: "o1", OriginalMode: &mode, OriginalExisted: &existed, ExpectedPublishedHash: "p1", ExpectedPublishedMode: &mode},
+		{OriginalPath: "file2.txt", BackupPath: filepath.Join(backupDir, "missing2.bak"), Checksum: "h2", OriginalHash: "o2", OriginalMode: &mode, OriginalExisted: &existed, ExpectedPublishedHash: "p2", ExpectedPublishedMode: &mode},
 	}
 	err := rollbackAll(mgr, entries)
 	if err == nil {
@@ -1157,8 +1183,8 @@ func TestPublish_RollbackFailureObserved(t *testing.T) {
 	ctx := context.Background()
 
 	projectRoot := t.TempDir()
-	backupDir := filepath.Join(t.TempDir(), "backups")
-	journalDir := filepath.Join(t.TempDir(), "journal")
+	backupDir := filepath.Join(projectRoot, ".royo-learn", "backups")
+	journalDir := filepath.Join(projectRoot, ".royo-learn")
 
 	// Create a target file that EXISTS so backup gets a real backup.
 	skillDir := filepath.Join(projectRoot, "skills", "rb-skill")
@@ -1207,12 +1233,6 @@ func TestPublish_RollbackFailureObserved(t *testing.T) {
 		},
 		Actor: actor, CreatedAt: now,
 	}
-	preview := &domain.PublicationPreview{
-		ID:         domain.PreviewID(uuid.Must(uuid.NewV7()).String()),
-		LearningID: learningID, PreviewHash: previewHash,
-		RequiresApproval: false, CreatedAt: now,
-	}
-
 	if err := storage.WithTx(ctx, db, func(tx *sql.Tx) error {
 		proj := &domain.Project{
 			ID: projectID, ProjectKey: "rb-test", DisplayName: "RB Test",
@@ -1227,15 +1247,28 @@ func TestPublish_RollbackFailureObserved(t *testing.T) {
 		if err := storage.SaveCuration(ctx, tx, curation); err != nil {
 			return err
 		}
-		return storage.SavePreview(ctx, tx, preview)
+		return nil
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
 	svc := NewService(db, projectRoot, backupDir, journalDir)
+	previewResult, err := svc.Preview(ctx, projectID, &PreviewInput{LearningID: learningID, Actor: actor})
+	if err != nil {
+		t.Fatalf("Preview: %v", err)
+	}
+	previewHash = previewResult.Preview.PreviewHash
+	approval, err := svc.Approve(ctx, projectID, &ApproveInput{
+		LearningID: learningID, PreviewHash: previewHash, ApprovedBy: "test",
+		Reason: "fault fixture", ApprovalEvidence: "test", Actor: actor,
+	})
+	if err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
 	_, pubErr := svc.Publish(ctx, projectID, &PublishInput{
+		Apply:      true,
 		LearningID: learningID, PreviewHash: previewHash,
-		Force: true, Actor: actor,
+		ApprovalID: &approval.ID, Force: true, Actor: actor,
 	})
 
 	if pubErr == nil {
@@ -1261,9 +1294,22 @@ func TestRollbackFromBackup(t *testing.T) {
 
 	// Modify.
 	os.WriteFile(srcPath, []byte("v2"), 0o644)
+	entry.ExpectedPublishedHash = HashContent([]byte("v2"))
+	publishedMode := fileModeIdentity(0o644)
+	entry.ExpectedPublishedMode = &publishedMode
 
 	rollbackEntries := []domain.RollbackEntry{
-		{Path: filepath.Join("src", "file.txt"), Backup: entry.BackupPath},
+		{
+			Path:                  filepath.Join("src", "file.txt"),
+			Backup:                entry.BackupPath,
+			OriginalExisted:       entry.OriginalExisted,
+			OriginalSHA256:        entry.OriginalHash,
+			BackupSHA256:          entry.Checksum,
+			OriginalMode:          entry.OriginalMode,
+			ExpectedPublishedHash: entry.ExpectedPublishedHash,
+			ExpectedPublishedMode: entry.ExpectedPublishedMode,
+			RecoveryState:         domain.RecoveryPublished,
+		},
 	}
 	results := RollbackFromBackup(mgr, rollbackEntries)
 	if len(results) != 1 {
@@ -1455,8 +1501,8 @@ func TestPublish_E2E(t *testing.T) {
 
 	// --- Temp filesystem ---
 	projectRoot := t.TempDir()
-	backupDir := filepath.Join(t.TempDir(), "backups")
-	journalDir := filepath.Join(t.TempDir(), "journal")
+	backupDir := filepath.Join(projectRoot, ".royo-learn", "backups")
+	journalDir := filepath.Join(projectRoot, ".royo-learn")
 	if err := os.MkdirAll(filepath.Join(projectRoot, "skills"), 0o755); err != nil {
 		t.Fatalf("mkdir skills: %v", err)
 	}
@@ -1469,8 +1515,7 @@ func TestPublish_E2E(t *testing.T) {
 	projectID := domain.ProjectID(uuid.Must(uuid.NewV7()).String())
 	learningID := domain.LearningID(uuid.Must(uuid.NewV7()).String())
 	curationID := domain.CurationID(uuid.Must(uuid.NewV7()).String())
-	previewID := domain.PreviewID(uuid.Must(uuid.NewV7()).String())
-	previewHash := HashContent([]byte("e2e-preview-content"))
+	previewHash := ""
 
 	actor := domain.Actor{Kind: "agent", Name: "test"}
 	skillPath := "e2e-skill/SKILL.md"
@@ -1504,15 +1549,6 @@ func TestPublish_E2E(t *testing.T) {
 		CreatedAt: now,
 	}
 
-	preview := &domain.PublicationPreview{
-		ID:               previewID,
-		LearningID:       learningID,
-		PreviewHash:      previewHash,
-		Risk:             domain.RiskMedium,
-		RequiresApproval: false,
-		CreatedAt:        now,
-	}
-
 	if err := storage.WithTx(ctx, db, func(tx *sql.Tx) error {
 		proj := &domain.Project{
 			ID:            projectID,
@@ -1531,9 +1567,6 @@ func TestPublish_E2E(t *testing.T) {
 		if err := storage.SaveCuration(ctx, tx, curation); err != nil {
 			return fmt.Errorf("SaveCuration: %w", err)
 		}
-		if err := storage.SavePreview(ctx, tx, preview); err != nil {
-			return fmt.Errorf("SavePreview: %w", err)
-		}
 		return nil
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -1541,7 +1574,13 @@ func TestPublish_E2E(t *testing.T) {
 
 	// --- Publish ---
 	svc := NewService(db, projectRoot, backupDir, journalDir)
+	previewResult, err := svc.Preview(ctx, projectID, &PreviewInput{LearningID: learningID, Actor: actor})
+	if err != nil {
+		t.Fatalf("Preview: %v", err)
+	}
+	previewHash = previewResult.Preview.PreviewHash
 	result, err := svc.Publish(ctx, projectID, &PublishInput{
+		Apply:       true,
 		LearningID:  learningID,
 		PreviewHash: previewHash,
 		Force:       true,
@@ -1606,6 +1645,7 @@ type publishTestEnv struct {
 	projectID   domain.ProjectID
 	learningID  domain.LearningID
 	previewHash string
+	approvalID  *domain.ApprovalID
 	actor       domain.Actor
 }
 
@@ -1618,8 +1658,8 @@ func seedPublishEnv(t *testing.T, skillPath string, precreateFile bool, initialC
 	ctx := context.Background()
 
 	projectRoot := t.TempDir()
-	backupDir := filepath.Join(t.TempDir(), "backups")
-	journalDir := filepath.Join(t.TempDir(), "journal")
+	backupDir := filepath.Join(projectRoot, ".royo-learn", "backups")
+	journalDir := filepath.Join(projectRoot, ".royo-learn")
 	os.MkdirAll(filepath.Join(projectRoot, "skills"), 0o755)
 
 	if precreateFile {
@@ -1635,7 +1675,6 @@ func seedPublishEnv(t *testing.T, skillPath string, precreateFile bool, initialC
 	now := utcNowPublish()
 	projectID := domain.ProjectID(uuid.Must(uuid.NewV7()).String())
 	learningID := domain.LearningID(uuid.Must(uuid.NewV7()).String())
-	previewHash := HashContent([]byte("test-preview-" + skillPath))
 	actor := domain.Actor{Kind: "agent", Name: "test"}
 
 	decision := domain.CurationApproveNewSkill
@@ -1672,19 +1711,27 @@ func seedPublishEnv(t *testing.T, skillPath string, precreateFile bool, initialC
 		if err := storage.SaveCuration(ctx, tx, curation); err != nil {
 			return err
 		}
-		preview := &domain.PublicationPreview{
-			ID:         domain.PreviewID(uuid.Must(uuid.NewV7()).String()),
-			LearningID: learningID, PreviewHash: previewHash,
-			RequiresApproval: false, CreatedAt: now,
-		}
-		return storage.SavePreview(ctx, tx, preview)
+		return nil
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
+	}
+	svc := NewService(db, projectRoot, backupDir, journalDir)
+	previewResult, err := svc.Preview(ctx, projectID, &PreviewInput{LearningID: learningID, Actor: actor})
+	if err != nil {
+		t.Fatalf("seed preview: %v", err)
+	}
+	approval, err := svc.Approve(ctx, projectID, &ApproveInput{
+		LearningID: learningID, PreviewHash: previewResult.Preview.PreviewHash,
+		ApprovedBy: "test", Reason: "test fixture", ApprovalEvidence: "test", Actor: actor,
+	})
+	if err != nil {
+		t.Fatalf("seed approval: %v", err)
 	}
 
 	return &publishTestEnv{
 		db: db, projectRoot: projectRoot, backupDir: backupDir, journalDir: journalDir,
-		projectID: projectID, learningID: learningID, previewHash: previewHash, actor: actor,
+		projectID: projectID, learningID: learningID, previewHash: previewResult.Preview.PreviewHash,
+		approvalID: &approval.ID, actor: actor,
 	}
 }
 
@@ -1703,8 +1750,10 @@ func TestPublish_BeginTxErrorsChecked(t *testing.T) {
 
 	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
 	_, pubErr := svc.Publish(ctx, env.projectID, &PublishInput{
+		Apply:       true,
 		LearningID:  env.learningID,
 		PreviewHash: env.previewHash,
+		ApprovalID:  env.approvalID,
 		Force:       true,
 		Actor:       env.actor,
 	})
@@ -1727,8 +1776,10 @@ func TestPublish_JournalWrittenBeforeDBCommit(t *testing.T) {
 
 	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
 	result, err := svc.Publish(ctx, env.projectID, &PublishInput{
+		Apply:       true,
 		LearningID:  env.learningID,
 		PreviewHash: env.previewHash,
+		ApprovalID:  env.approvalID,
 		Force:       true,
 		Actor:       env.actor,
 	})
@@ -1777,8 +1828,10 @@ func TestPublish_JournalFailurePreventsDBCommit(t *testing.T) {
 
 	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
 	_, pubErr := svc.Publish(ctx, env.projectID, &PublishInput{
+		Apply:       true,
 		LearningID:  env.learningID,
 		PreviewHash: env.previewHash,
+		ApprovalID:  env.approvalID,
 		Force:       true,
 		Actor:       env.actor,
 	})
@@ -1868,8 +1921,10 @@ func TestPublish_OptimisticLock_NoFalsePositive(t *testing.T) {
 
 	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
 	result, err := svc.Publish(ctx, env.projectID, &PublishInput{
+		Apply:       true,
 		LearningID:  env.learningID,
 		PreviewHash: env.previewHash,
+		ApprovalID:  env.approvalID,
 		Force:       false, // no force → optimistic lock check runs
 		Actor:       env.actor,
 	})
@@ -1898,8 +1953,10 @@ func TestPublish_ForceSkipsOptimisticLock(t *testing.T) {
 
 	svc := NewService(env.db, env.projectRoot, env.backupDir, env.journalDir)
 	result, err := svc.Publish(ctx, env.projectID, &PublishInput{
+		Apply:       true,
 		LearningID:  env.learningID,
 		PreviewHash: env.previewHash,
+		ApprovalID:  env.approvalID,
 		Force:       true, // force → hash check is skipped
 		Actor:       env.actor,
 	})

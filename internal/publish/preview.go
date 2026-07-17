@@ -91,39 +91,57 @@ func (s *Service) Preview(ctx context.Context, projectID domain.ProjectID, input
 		return nil, fmt.Errorf("Preview: resolve target: %w", err)
 	}
 
-	// Generate per-target content.
+	// Generate and persist the exact posterior bytes for every target. Apply must
+	// use this plan, never recompose from mutable learning or curation state.
 	var diffLines []string
-	var targetContents []TargetContent
-
-	for _, target := range targets {
-		var proposedContent string
-		var existingContent []byte
-		targetFullPath := filepath.Join(s.projectRoot, target.Root, target.Path)
-
-		if existing, err := os.ReadFile(targetFullPath); err == nil {
-			existingContent = existing
+	var planTargets []domain.PublicationPlanTarget
+	targetContents := s.buildPublishContents(ctx, targets, learning, curation, targetCtx)
+	manager := NewBackupManager(s.projectRoot, s.backupDir)
+	for i, target := range targets {
+		relative := filepath.Join(target.Root, target.Path)
+		snapshot, snapshotErr := manager.SnapshotFile(relative)
+		if snapshotErr != nil {
+			return nil, fmt.Errorf("Preview: snapshot %s: %w", target.Path, snapshotErr)
+		}
+		posterior, composeErr := s.composeTargetContent(target, targetContents[i].Content, input.LearningID, targetCtx)
+		if composeErr != nil {
+			return nil, fmt.Errorf("Preview: compose %s: %w", target.Path, composeErr)
 		}
 
-		// Build content based on target type.
-		proposedContent = s.buildTargetContent(target, learning, curation, targetCtx)
-
-		targetContents = append(targetContents, TargetContent{
-			Target:  target,
-			Content: proposedContent,
-		})
-
-		diff := GenerateDiff(existingContent, []byte(proposedContent), target.Path, target.Exists)
+		diff := GenerateDiff(snapshot.Content, []byte(posterior), target.Path, snapshot.Exists)
 		diffLines = append(diffLines, diff)
+
+		// Record the prior and posterior content hashes for this destination.
+		// The prior hash is the on-disk content at preview time (empty when the
+		// destination does not exist yet). The posterior hash is the content the
+		// plan would write. Both feed the preview hash and the publish-time
+		// prior-hash check.
+		planTargets = append(planTargets, domain.PublicationPlanTarget{
+			Root:          target.Root,
+			Path:          target.Path,
+			Operation:     target.Operation,
+			PriorHash:     snapshot.Hash,
+			PosteriorHash: HashContent([]byte(posterior)),
+			Content:       posterior,
+		})
 	}
 
 	combinedDiff := strings.Join(diffLines, "\n")
 
 	// Evaluate policies.
 	policies := EvaluatePolicies(learning, curation)
+	policySignature := PolicySignature(policies)
+	requiresApproval := RequiresHumanApproval(policies) || requiresSensitiveApproval(targets)
 
-	// Build preview record.
+	// Build preview record. The preview hash binds the WHOLE plan the approval
+	// authorizes: every destination's root, path, operation, prior file hash and
+	// posterior content hash (PlanSignature) AND the policy outcome
+	// (PolicySignature). A change to any of these yields a different hash, so an
+	// approval bound to the old hash no longer applies (D11 §11.1 invalidation
+	// conditions, Recorrido D). The prior/posterior hashes subsume the combined
+	// diff, so this broadens the binding rather than narrowing it.
 	previewID := domain.PreviewID(uuid.Must(uuid.NewV7()).String())
-	previewHash := HashContent([]byte(combinedDiff))
+	previewHash := previewHash(input.LearningID, planTargets, policySignature)
 
 	preview := &domain.PublicationPreview{
 		ID:         previewID,
@@ -133,14 +151,16 @@ func (s *Service) Preview(ctx context.Context, projectID domain.ProjectID, input
 			TargetRoot:       s.projectRoot,
 			TargetPath:       targets[0].Path,
 			Operation:        targets[0].Operation,
-			Content:          targetContents[0].Content,
+			Content:          planTargets[0].Content,
 			Patch:            combinedDiff,
-			RequiresApproval: RequiresHumanApproval(policies),
+			RequiresApproval: requiresApproval,
 			Risk:             evaluateRisk(learning, curation),
+			PolicySignature:  policySignature,
+			Targets:          planTargets,
 		},
 		PreviewHash:      previewHash,
 		Risk:             evaluateRisk(learning, curation),
-		RequiresApproval: RequiresHumanApproval(policies),
+		RequiresApproval: requiresApproval,
 		CreatedAt:        utcNowPublish(),
 	}
 
@@ -148,7 +168,20 @@ func (s *Service) Preview(ctx context.Context, projectID domain.ProjectID, input
 	if err := storage.WithTx(ctx, s.db, func(tx *sql.Tx) error {
 		return storage.SavePreview(ctx, tx, preview)
 	}); err != nil {
-		return nil, fmt.Errorf("Preview: save preview: %w", err)
+		domainErr, conflict := domain.AsDomainError(err)
+		if !conflict || domainErr.Code != domain.ErrPublicationConflict {
+			return nil, fmt.Errorf("Preview: save preview: %w", err)
+		}
+		readTx, readErr := s.db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if readErr != nil {
+			return nil, fmt.Errorf("Preview: load existing preview: %w", readErr)
+		}
+		existing, readErr := storage.GetPreviewByHash(ctx, readTx, previewHash)
+		readTx.Rollback()
+		if readErr != nil {
+			return nil, fmt.Errorf("Preview: load existing preview: %w", readErr)
+		}
+		preview = existing
 	}
 
 	return &PreviewResult{
@@ -163,62 +196,6 @@ func (s *Service) Preview(ctx context.Context, projectID domain.ProjectID, input
 type TargetContent struct {
 	Target  TargetResolution
 	Content string
-}
-
-// buildTargetContent builds the proposed content for a specific target.
-func (s *Service) buildTargetContent(target TargetResolution, learning *domain.Learning, curation *domain.Curation, ctx *TargetContext) string {
-	if ctx == nil || ctx.ProjectKey == "" {
-		return BuildSkillContent(learning.Title, learning.Context,
-			learning.ReusableLesson, strings.Join(learning.RecommendedProcedure, "\n"))
-	}
-
-	// Determine which kind of target this is.
-	indexName := IndexSkillName(ctx.ProjectKey)
-	targetName := filepath.Base(filepath.Dir(target.Path)) // skill name from path
-
-	if targetName == indexName {
-		// Index skill: regenerate catalog.
-		entries, err := DiscoverChildSkills(s.projectRoot, ctx.ProjectKey)
-		if err != nil {
-			entries = nil
-		}
-		return GenerateIndexContent(ctx.ProjectKey, entries)
-	}
-
-	if target.Path == "AGENTS.md" {
-		return BuildAgentsRefManagedBlock(ctx.ProjectKey)
-	}
-
-	// Child skill: merge learning into existing skill content.
-	var sections []SkillSection
-
-	targetFullPath := filepath.Join(s.projectRoot, target.Root, target.Path)
-	if existing, err := os.ReadFile(targetFullPath); err == nil {
-		sections = parseSkillSections(string(existing))
-	}
-
-	sections = MergeLearningIntoSections(sections, learning)
-
-	// Collect all learning IDs.
-	ids := make([]domain.LearningID, 0, len(sections))
-	for _, sec := range sections {
-		ids = append(ids, sec.LearningID)
-	}
-
-	area := ctx.Area
-	if area == "" {
-		area = SkillArea(learning)
-	}
-	fm := SkillFrontmatter{
-		Name:        SkillName(ctx.ProjectKey, area),
-		Description: BuildDescription(ctx.ProjectKey, area, []*domain.Learning{learning}),
-		Source:      "royo-learn",
-		Project:     ctx.ProjectKey,
-		LearningIDs: ids,
-		UpdatedAt:   utcNowPublish().Format("2006-01-02"),
-	}
-
-	return GenerateSkillContent(fm, sections)
 }
 
 // loadProject loads the project from the database.

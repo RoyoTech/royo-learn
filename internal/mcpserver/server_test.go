@@ -175,8 +175,10 @@ func TestNewServer_InvalidProfile_DefaultsToStandard(t *testing.T) {
 	if srv == nil {
 		t.Fatal("expected non-nil server")
 	}
-	if srv.cfg.Profile != "standard" {
-		t.Errorf("expected profile 'standard', got %q", srv.cfg.Profile)
+	// An unrecognised profile falls back to the canonical default, "agent",
+	// which serves the same tool set the v0.1.9 default ("standard") served.
+	if srv.cfg.Profile != defaultProfile {
+		t.Errorf("expected profile %q, got %q", defaultProfile, srv.cfg.Profile)
 	}
 }
 
@@ -196,7 +198,8 @@ func TestListTools_ReturnsAllTools_StandardProfile(t *testing.T) {
 		t.Fatalf("ListTools: %v", err)
 	}
 
-	// Standard profile includes all tools except publish_learning (full only).
+	// Standard maps to the agent profile, which serves the normal cycle
+	// including publish and approve (D2/Recorrido C).
 	expectedTools := []string{
 		"capture_learning",
 		"search_learnings",
@@ -219,6 +222,13 @@ func TestListTools_ReturnsAllTools_StandardProfile(t *testing.T) {
 	}
 }
 
+// TestListTools_MinimalProfile_LimitedTools pins the deprecated "minimal" name
+// to the canonical read profile (D2).
+//
+// This test previously asserted that minimal served capture_learning, a WRITE,
+// while withholding get and list, which are reads. D2 makes the read profile
+// read-only, as docs/04-CLI-SPEC.md always specified. The deprecated name still
+// works; its tool set is what narrows.
 func TestListTools_MinimalProfile_LimitedTools(t *testing.T) {
 	t.Parallel()
 	ts := newTestServer(t, "minimal")
@@ -231,21 +241,24 @@ func TestListTools_MinimalProfile_LimitedTools(t *testing.T) {
 		t.Fatalf("ListTools: %v", err)
 	}
 
-	// Minimal profile should only include: capture_learning, search_learnings, doctor
+	// The read profile serves read-only canonical tools plus their deprecated
+	// aliases. learning_status (D17) is read-only and has no alias.
 	allowedTools := map[string]bool{
-		"capture_learning": true,
-		"search_learnings": true,
-		"doctor":           true,
+		"learning_search": true, "search_learnings": true,
+		"learning_get": true, "get_learning": true,
+		"learning_list": true, "list_learnings": true,
+		"learning_doctor": true, "doctor": true,
+		"learning_status": true,
 	}
 
 	for _, tool := range result.Tools {
 		if !allowedTools[tool.Name] {
-			t.Errorf("minimal profile includes unexpected tool %q", tool.Name)
+			t.Errorf("read profile includes unexpected tool %q", tool.Name)
 		}
 	}
 
-	if len(result.Tools) != 3 {
-		t.Errorf("minimal profile tool count = %d, want 3", len(result.Tools))
+	if len(result.Tools) != len(allowedTools) {
+		t.Errorf("read profile tool count = %d, want %d", len(result.Tools), len(allowedTools))
 	}
 }
 
@@ -820,12 +833,13 @@ func TestServerInstructions_ContainsUsageGuide(t *testing.T) {
 		t.Fatal("expected non-empty server instructions")
 	}
 
-	// Instructions should mention the profile.
+	// Instructions name the CANONICAL profile actually being served, not the
+	// deprecated name the client happened to ask for (D2, D14).
 	if !contains(instructions, "royo-learn") {
 		t.Error("instructions should mention 'royo-learn'")
 	}
-	if !contains(instructions, "standard") {
-		t.Error("instructions should mention the profile 'standard'")
+	if !contains(instructions, "Profile: agent") {
+		t.Error("instructions should name the canonical profile 'agent' that 'standard' maps to")
 	}
 
 	requiredOnboardingGuidance := `Prerequisite: each project must be initialized once before these tools work.

@@ -11,6 +11,7 @@ import (
 	"agent-royo-learn/internal/capture"
 	"agent-royo-learn/internal/curate"
 	"agent-royo-learn/internal/domain"
+	"agent-royo-learn/internal/evidence"
 	"agent-royo-learn/internal/publish"
 	"agent-royo-learn/internal/recurrence"
 	"agent-royo-learn/internal/storage"
@@ -25,15 +26,30 @@ import (
 type captureSvc struct {
 	db         *storage.DB
 	recordsDir string
+	evidence   *evidence.Service
 }
 
-func newCaptureSvc(db *storage.DB, recordsDir string) *captureSvc {
-	return &captureSvc{db: db, recordsDir: recordsDir}
+// newCaptureSvc wires capture to the evidence layer. Both are needed: a capture
+// service without evidence cannot produce a learning that satisfies the D3
+// approval threshold, which is the root defect Recorrido B repairs.
+func newCaptureSvc(db *storage.DB, recordsDir, projectRoot string, allowedCommands []string) (*captureSvc, error) {
+	ev, err := evidence.NewService(projectRoot, allowedCommands)
+	if err != nil {
+		return nil, err
+	}
+	return &captureSvc{db: db, recordsDir: recordsDir, evidence: ev}, nil
+}
+
+func (s *captureSvc) service() *capture.Service {
+	return capture.NewServiceWithEvidence(s.db, s.recordsDir, s.evidence)
 }
 
 func (s *captureSvc) Capture(ctx context.Context, projectID domain.ProjectID, input *capture.CaptureInput) (*capture.CaptureResult, error) {
-	svc := capture.NewService(s.db, s.recordsDir)
-	return svc.Capture(ctx, projectID, input)
+	return s.service().Capture(ctx, projectID, input)
+}
+
+func (s *captureSvc) AddEvidence(ctx context.Context, projectID domain.ProjectID, input *capture.AddEvidenceInput) (*capture.AddEvidenceResult, error) {
+	return s.service().AddEvidence(ctx, projectID, input)
 }
 
 type curateSvc struct {
@@ -59,11 +75,23 @@ func newPublishSvc(db *storage.DB, projectRoot, journalDir string) *publishSvc {
 	return &publishSvc{db: db, projectRoot: projectRoot}
 }
 
-func (s *publishSvc) Preview(ctx context.Context, projectID domain.ProjectID, input *publish.PreviewInput) (*publish.PreviewResult, error) {
-	svc := publish.NewService(s.db, s.projectRoot,
+func (s *publishSvc) service() *publish.Service {
+	return publish.NewService(s.db, s.projectRoot,
 		s.projectRoot+"/.royo-learn/backups",
-		s.projectRoot+"/.royo-learn")
-	return svc.Preview(ctx, projectID, input)
+		s.projectRoot+"/.royo-learn",
+		s.projectRoot+"/.royo-learn/records")
+}
+
+func (s *publishSvc) Preview(ctx context.Context, projectID domain.ProjectID, input *publish.PreviewInput) (*publish.PreviewResult, error) {
+	return s.service().Preview(ctx, projectID, input)
+}
+
+func (s *publishSvc) Approve(ctx context.Context, projectID domain.ProjectID, input *publish.ApproveInput) (*domain.Approval, error) {
+	return s.service().Approve(ctx, projectID, input)
+}
+
+func (s *publishSvc) Rollback(ctx context.Context, projectID domain.ProjectID, input *publish.RollbackPublicationInput) error {
+	return s.service().Rollback(ctx, projectID, input)
 }
 
 // ---------------------------------------------------------------------------
@@ -71,19 +99,80 @@ func (s *publishSvc) Preview(ctx context.Context, projectID domain.ProjectID, in
 // ---------------------------------------------------------------------------
 
 type captureLearningInput struct {
-	Title           string     `json:"title" jsonschema:"required,title of the learning (5-160 chars)"`
-	Type            string     `json:"type" jsonschema:"required,learning type: procedure, prevention, diagnostic, tooling, architecture, quality, security, hypothesis, preference"`
-	Context         string     `json:"context" jsonschema:"required,context where the learning occurred"`
-	Observation     string     `json:"observation" jsonschema:"required,what was observed"`
-	ReusableLesson  string     `json:"reusable_lesson" jsonschema:"required,reusable lesson learned"`
-	ScopeGuess      string     `json:"scope_guess" jsonschema:"required,scope: project, shared, personal, unknown"`
-	Confidence      string     `json:"confidence" jsonschema:"required,confidence: low, medium, high"`
-	EvidenceLevel   string     `json:"evidence_level" jsonschema:"required,evidence level: strong, moderate, weak, insufficient"`
-	Actor           actorInput `json:"actor" jsonschema:"required,who performed the action"`
-	RecommendedProc []string   `json:"recommended_procedure,omitempty"`
-	Limits          string     `json:"limits,omitempty"`
-	ProposedDest    string     `json:"proposed_destination,omitempty" jsonschema:"proposed destination: none, project, shared, skill, agents_rule"`
-	RetrievalTerms  []string   `json:"retrieval_terms,omitempty"`
+	Title           string              `json:"title" jsonschema:"required,title of the learning (5-160 chars)"`
+	Type            string              `json:"type" jsonschema:"required,learning type: procedure, prevention, diagnostic, tooling, architecture, quality, security, hypothesis, preference"`
+	Context         string              `json:"context" jsonschema:"required,context where the learning occurred"`
+	Observation     string              `json:"observation" jsonschema:"required,what was observed"`
+	ReusableLesson  string              `json:"reusable_lesson" jsonschema:"required,reusable lesson learned"`
+	ScopeGuess      string              `json:"scope_guess" jsonschema:"required,scope: project, shared, personal, unknown"`
+	Confidence      string              `json:"confidence" jsonschema:"required,confidence: low, medium, high"`
+	EvidenceLevel   string              `json:"evidence_level" jsonschema:"required,evidence level: strong, moderate, weak, insufficient"`
+	Actor           actorInput          `json:"actor" jsonschema:"required,who performed the action"`
+	RecommendedProc []string            `json:"recommended_procedure,omitempty"`
+	Limits          string              `json:"limits,omitempty"`
+	ProposedDest    string              `json:"proposed_destination,omitempty" jsonschema:"proposed destination: none, project, shared, skill, agents_rule"`
+	RetrievalTerms  []string            `json:"retrieval_terms,omitempty"`
+	Evidence        []evidenceItemInput `json:"evidence,omitempty" jsonschema:"evidence records persisted together with the learning; approval requires at least one"`
+	IdempotencyKey  string              `json:"idempotency_key,omitempty" jsonschema:"the same key on a retry returns the existing learning and does not duplicate its evidence"`
+}
+
+// evidenceItemInput is one element of an evidence[] array.
+//
+// `kind` is canonical (docs/03). `type` is accepted as an input alias because
+// the recovery plan writes the payload that way; both map to the same domain
+// EvidenceKind.
+type evidenceItemInput struct {
+	Kind    string `json:"kind,omitempty" jsonschema:"evidence kind: file, git_diff, git_commit, command, test, engram_observation, issue, pull_request, text, external_reference"`
+	Type    string `json:"type,omitempty" jsonschema:"alias of kind"`
+	Summary string `json:"summary" jsonschema:"required,human-readable summary of the record"`
+	Source  string `json:"source,omitempty" jsonschema:"origin of the record: a path, a command or a URL"`
+	Content string `json:"content,omitempty" jsonschema:"literal content; stored in the content-addressed blob store after redaction"`
+}
+
+type addEvidenceInput struct {
+	LearningID    string              `json:"learning_id" jsonschema:"required,learning to attach the evidence to"`
+	Evidence      []evidenceItemInput `json:"evidence" jsonschema:"required,evidence records to attach; at least one"`
+	EvidenceLevel string              `json:"evidence_level,omitempty" jsonschema:"optionally raise the declared evidence level: strong, moderate, weak, insufficient"`
+	Actor         actorInput          `json:"actor" jsonschema:"required"`
+}
+
+// toEvidenceItems maps the wire form onto domain evidence items, rejecting any
+// unknown kind rather than silently coercing it.
+func toEvidenceItems(in []evidenceItemInput) ([]evidence.Item, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	items := make([]evidence.Item, 0, len(in))
+	for i, raw := range in {
+		kind := raw.Kind
+		if kind == "" {
+			kind = raw.Type
+		}
+		if kind == "" {
+			kind = string(domain.KindText)
+		}
+		if !domain.IsValidEvidenceKind(domain.EvidenceKind(kind)) {
+			return nil, fmt.Errorf("evidence[%d]: unknown kind %q", i, kind)
+		}
+		if raw.Summary == "" {
+			return nil, fmt.Errorf("evidence[%d]: summary is required", i)
+		}
+		items = append(items, evidence.Item{
+			Kind:    domain.EvidenceKind(kind),
+			Summary: raw.Summary,
+			Source:  raw.Source,
+			Content: raw.Content,
+		})
+	}
+	return items, nil
+}
+
+func evidenceIDStrings(ids []domain.EvidenceID) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, string(id))
+	}
+	return out
 }
 
 type actorInput struct {
@@ -112,9 +201,21 @@ type previewPublicationInput struct {
 	Actor      actorInput `json:"actor" jsonschema:"required"`
 }
 
+type approveInput struct {
+	LearningID       string     `json:"learning_id" jsonschema:"required,learning being approved"`
+	PreviewHash      string     `json:"preview_hash" jsonschema:"required,hash of the exact preview being authorized"`
+	ApprovedBy       string     `json:"approved_by" jsonschema:"required,identity of the human granting approval"`
+	Reason           string     `json:"reason" jsonschema:"required,why the publication is authorized"`
+	ApprovalEvidence string     `json:"approval_evidence" jsonschema:"required,reference to the consent record (link, message id, ticket)"`
+	ExpiresAt        string     `json:"expires_at,omitempty" jsonschema:"optional RFC3339 instant after which the approval is rejected"`
+	Actor            actorInput `json:"actor,omitempty"`
+}
+
 type publishLearningInput struct {
 	LearningID  string     `json:"learning_id" jsonschema:"required"`
 	PreviewHash string     `json:"preview_hash" jsonschema:"required"`
+	ApprovalID  string     `json:"approval_id,omitempty" jsonschema:"required when the preview reports requires_approval=true"`
+	Apply       bool       `json:"apply,omitempty" jsonschema:"when false (default) the call is a dry run and writes nothing (D7)"`
 	Actor       actorInput `json:"actor" jsonschema:"required"`
 }
 
@@ -141,6 +242,27 @@ type computeMetricsInput struct {
 	LearningID string `json:"learning_id" jsonschema:"required,learning ID"`
 }
 
+type reportOccurrenceInput struct {
+	LearningID     string     `json:"learning_id" jsonschema:"required,learning whose pattern recurred"`
+	Fingerprint    string     `json:"fingerprint,omitempty" jsonschema:"override the derived recurrence fingerprint"`
+	Summary        string     `json:"summary,omitempty" jsonschema:"what recurred"`
+	Outcome        string     `json:"outcome,omitempty" jsonschema:"outcome of the recurrence"`
+	Retrieved      bool       `json:"retrieved,omitempty" jsonschema:"whether the learning was retrieved"`
+	SkillActivated bool       `json:"skill_activated,omitempty" jsonschema:"whether the skill was activated"`
+	Evidence       string     `json:"evidence,omitempty" jsonschema:"reference to evidence for this occurrence"`
+	IdempotencyKey string     `json:"idempotency_key,omitempty" jsonschema:"the same key on a retry does not create a second record (D5)"`
+	Actor          actorInput `json:"actor" jsonschema:"required"`
+}
+
+type statusInput struct {
+	LearningID string `json:"learning_id" jsonschema:"required,learning ID"`
+}
+
+type rollbackInput struct {
+	PublicationID string     `json:"publication_id" jsonschema:"required,publication to roll back"`
+	Actor         actorInput `json:"actor,omitempty"`
+}
+
 // ---------------------------------------------------------------------------
 // Tool helpers
 // ---------------------------------------------------------------------------
@@ -157,17 +279,42 @@ func toolResultJSON(v any) (*mcp.CallToolResult, any, error) {
 	}, nil, nil
 }
 
-func toolError(code, message string) (*mcp.CallToolResult, any, error) {
-	errJSON, _ := json.Marshal(map[string]string{
-		"code":    code,
-		"message": message,
+func toolErrorEnvelope(code, message string, recoverable bool, details map[string]any, nextAction string) (*mcp.CallToolResult, any, error) {
+	if details == nil {
+		details = map[string]any{}
+	}
+	body, _ := json.Marshal(map[string]any{
+		"code":        code,
+		"message":     message,
+		"recoverable": recoverable,
+		"details":     details,
+		"next_action": nextAction,
+		"error": map[string]any{
+			"code":        code,
+			"message":     message,
+			"recoverable": recoverable,
+			"details":     details,
+			"next_action": nextAction,
+		},
 	})
 	return &mcp.CallToolResult{
 		IsError: true,
 		Content: []mcp.Content{
-			&mcp.TextContent{Text: string(errJSON)},
+			&mcp.TextContent{Text: string(body)},
 		},
 	}, nil, nil
+}
+
+func toolError(code, message string) (*mcp.CallToolResult, any, error) {
+	return toolErrorEnvelope(code, message, true, nil, "")
+}
+
+// toolDomainError faithfully projects a service error onto the MCP contract.
+func toolDomainError(err error, fallbackCode string) (*mcp.CallToolResult, any, error) {
+	if domainErr, ok := domain.AsDomainError(err); ok {
+		return toolErrorEnvelope(string(domainErr.Code), domainErr.Message, domainErr.Recoverable, domainErr.Details, domainErr.NextAction)
+	}
+	return toolError(fallbackCode, err.Error())
 }
 
 func toActor(a actorInput) domain.Actor {
@@ -180,34 +327,10 @@ func toActor(a actorInput) domain.Actor {
 }
 
 // ---------------------------------------------------------------------------
-// Tool registration types (used by profiles.go and server.go)
-// ---------------------------------------------------------------------------
-
-// profileTool represents a tool enabled for specific profile sets.
-type profileTool struct {
-	name        string
-	description string
-	profiles    map[string]bool
-	register    func(*mcp.Server, *Server)
-}
-
-func (t profileTool) enabled(profile string) bool {
-	return t.profiles[profile]
-}
-
-// profileTools returns the tools enabled for a given profile.
-func profileTools(profile string) []profileTool {
-	var out []profileTool
-	for _, t := range allTools {
-		if t.enabled(profile) {
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
-// ---------------------------------------------------------------------------
 // Tool handler functions
+//
+// The registry that binds these handlers to canonical names, deprecated
+// aliases, profiles and annotations lives in profiles.go.
 // ---------------------------------------------------------------------------
 
 func handleCaptureLearning(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in captureLearningInput) (*mcp.CallToolResult, any, error) {
@@ -215,6 +338,11 @@ func handleCaptureLearning(srv *Server) func(ctx context.Context, req *mcp.CallT
 		dest := domain.DestinationType(in.ProposedDest)
 		if in.ProposedDest == "" {
 			dest = domain.DestProject
+		}
+
+		items, err := toEvidenceItems(in.Evidence)
+		if err != nil {
+			return toolError("invalid_argument", err.Error())
 		}
 
 		capIn := &capture.CaptureInput{
@@ -231,17 +359,57 @@ func handleCaptureLearning(srv *Server) func(ctx context.Context, req *mcp.CallT
 			Limits:         in.Limits,
 			RetrievalTerms: in.RetrievalTerms,
 			Actor:          toActor(in.Actor),
+			IdempotencyKey: in.IdempotencyKey,
+			Evidence:       items,
 		}
 
 		result, err := srv.capSvc.Capture(ctx, srv.projectID, capIn)
 		if err != nil {
-			return toolError("capture_failed", err.Error())
+			return toolDomainError(err, "capture_failed")
 		}
 
 		return toolResultJSON(map[string]any{
-			"learning_id": string(result.LearningID),
-			"status":      string(result.Status),
-			"new":         result.New,
+			"learning_id":    string(result.LearningID),
+			"status":         string(result.Status),
+			"new":            result.New,
+			"evidence_count": len(result.EvidenceIDs),
+			"evidence_ids":   evidenceIDStrings(result.EvidenceIDs),
+			"redacted":       result.Redacted,
+		})
+	}
+}
+
+func handleAddEvidence(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in addEvidenceInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in addEvidenceInput) (*mcp.CallToolResult, any, error) {
+		if in.LearningID == "" {
+			return toolError("invalid_argument", "learning_id is required")
+		}
+		items, err := toEvidenceItems(in.Evidence)
+		if err != nil {
+			return toolError("invalid_argument", err.Error())
+		}
+		if len(items) == 0 {
+			return toolError("invalid_argument", "at least one evidence record is required")
+		}
+
+		addIn := &capture.AddEvidenceInput{
+			LearningID:    domain.LearningID(in.LearningID),
+			Items:         items,
+			Actor:         toActor(in.Actor),
+			EvidenceLevel: domain.EvidenceLevel(in.EvidenceLevel),
+		}
+
+		result, err := srv.capSvc.AddEvidence(ctx, srv.projectID, addIn)
+		if err != nil {
+			return toolDomainError(err, "add_evidence_failed")
+		}
+
+		return toolResultJSON(map[string]any{
+			"learning_id":    string(result.LearningID),
+			"evidence_count": result.Count,
+			"evidence_ids":   evidenceIDStrings(result.EvidenceIDs),
+			"evidence_level": string(result.EvidenceLevel),
+			"redacted":       result.Redacted,
 		})
 	}
 }
@@ -254,7 +422,7 @@ func handleSearchLearnings(srv *Server) func(ctx context.Context, req *mcp.CallT
 
 		results, err := storage.Search(ctx, srv.db, srv.projectID, in.Query)
 		if err != nil {
-			return toolError("search_failed", err.Error())
+			return toolDomainError(err, "search_failed")
 		}
 
 		if in.Limit > 0 && in.Limit < len(results) {
@@ -271,9 +439,16 @@ func handleSearchLearnings(srv *Server) func(ctx context.Context, req *mcp.CallT
 
 func handleCurateLearning(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in curateLearningInput) (*mcp.CallToolResult, any, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest, in curateLearningInput) (*mcp.CallToolResult, any, error) {
+		// Validate against the single canonical allowlist shared with the CLI
+		// (D11 §11.2). The server no longer passes the decision raw.
+		decision, err := domain.ParseCurationDecision(in.Decision)
+		if err != nil {
+			return toolError("invalid_argument", err.Error())
+		}
+
 		curIn := &curate.CurateInput{
 			LearningID: domain.LearningID(in.LearningID),
-			Decision:   domain.CurationDecision(in.Decision),
+			Decision:   decision,
 			Rationale:  in.Rationale,
 			Actor:      toActor(in.Actor),
 			Area:       in.Area,
@@ -281,7 +456,7 @@ func handleCurateLearning(srv *Server) func(ctx context.Context, req *mcp.CallTo
 
 		result, err := srv.curateSvc.Curate(ctx, srv.projectID, curIn)
 		if err != nil {
-			return toolError("curate_failed", err.Error())
+			return toolDomainError(err, "curate_failed")
 		}
 
 		return toolResultJSON(map[string]any{
@@ -301,7 +476,7 @@ func handlePreviewPublication(srv *Server) func(ctx context.Context, req *mcp.Ca
 
 		result, err := srv.publishSvc.Preview(ctx, srv.projectID, previewIn)
 		if err != nil {
-			return toolError("preview_failed", err.Error())
+			return toolDomainError(err, "preview_failed")
 		}
 
 		return toolResultJSON(map[string]any{
@@ -314,20 +489,86 @@ func handlePreviewPublication(srv *Server) func(ctx context.Context, req *mcp.Ca
 	}
 }
 
+func handleApprove(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in approveInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in approveInput) (*mcp.CallToolResult, any, error) {
+		if in.PreviewHash == "" {
+			return toolError("invalid_argument", "preview_hash is required")
+		}
+		if in.ApprovedBy == "" {
+			return toolError("invalid_argument", "approved_by is required")
+		}
+		if in.Reason == "" {
+			return toolError("invalid_argument", "reason is required")
+		}
+		if in.ApprovalEvidence == "" {
+			return toolError("invalid_argument", "approval_evidence is required")
+		}
+
+		apprIn := &publish.ApproveInput{
+			LearningID:       domain.LearningID(in.LearningID),
+			PreviewHash:      in.PreviewHash,
+			ApprovedBy:       in.ApprovedBy,
+			Reason:           in.Reason,
+			ApprovalEvidence: in.ApprovalEvidence,
+			Actor:            toActor(in.Actor),
+		}
+		if in.ExpiresAt != "" {
+			expiresAt, err := time.Parse(time.RFC3339, in.ExpiresAt)
+			if err != nil {
+				return toolError("invalid_argument", "expires_at must be an RFC3339 timestamp: "+err.Error())
+			}
+			apprIn.ExpiresAt = &expiresAt
+		}
+
+		approval, err := srv.publishSvc.Approve(ctx, srv.projectID, apprIn)
+		if err != nil {
+			return toolDomainError(err, "approve_failed")
+		}
+
+		out := map[string]any{
+			"approval_id":  string(approval.ID),
+			"learning_id":  string(approval.LearningID),
+			"preview_hash": approval.PreviewHash,
+			"approved_by":  approval.ApprovedBy,
+		}
+		if approval.ExpiresAt != nil {
+			out["expires_at"] = approval.ExpiresAt.Format(time.RFC3339)
+		}
+		return toolResultJSON(out)
+	}
+}
+
 func handlePublishLearning(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in publishLearningInput) (*mcp.CallToolResult, any, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest, in publishLearningInput) (*mcp.CallToolResult, any, error) {
 		pubIn := &publish.PublishInput{
 			LearningID:  domain.LearningID(in.LearningID),
 			PreviewHash: in.PreviewHash,
+			Apply:       in.Apply,
 			Actor:       toActor(in.Actor),
+		}
+		if in.ApprovalID != "" {
+			id := domain.ApprovalID(in.ApprovalID)
+			pubIn.ApprovalID = &id
 		}
 
 		svc := publish.NewService(srv.db, srv.projectRoot,
 			srv.projectRoot+"/.royo-learn/backups",
-			srv.projectRoot+"/.royo-learn")
+			srv.projectRoot+"/.royo-learn",
+			srv.projectRoot+"/.royo-learn/records")
 		result, err := svc.Publish(ctx, srv.projectID, pubIn)
 		if err != nil {
-			return toolError("publish_failed", err.Error())
+			return toolDomainError(err, "publish_failed")
+		}
+
+		// Dry run (D7): report the plan without any write.
+		if result.DryRun {
+			return toolResultJSON(map[string]any{
+				"dry_run":      true,
+				"learning_id":  in.LearningID,
+				"preview_hash": in.PreviewHash,
+				"targets":      result.Targets,
+				"next_action":  "call again with apply=true to write the files",
+			})
 		}
 
 		return toolResultJSON(map[string]any{
@@ -364,7 +605,7 @@ func handleListLearnings(srv *Server) func(ctx context.Context, req *mcp.CallToo
 
 		learnings, err := storage.ListLearnings(ctx, tx, srv.projectID, filter)
 		if err != nil {
-			return toolError("list_failed", err.Error())
+			return toolDomainError(err, "list_failed")
 		}
 
 		items := make([]map[string]any, 0, len(learnings))
@@ -385,7 +626,7 @@ func handleGetLearning(srv *Server) func(ctx context.Context, req *mcp.CallToolR
 
 		learning, err := storage.GetLearning(ctx, tx, domain.LearningID(in.LearningID))
 		if err != nil {
-			return toolError("get_failed", err.Error())
+			return toolDomainError(err, "get_failed")
 		}
 		if learning == nil {
 			return toolError("learning_not_found", fmt.Sprintf("learning %q not found", in.LearningID))
@@ -442,7 +683,7 @@ func handleListRecurrences(srv *Server) func(ctx context.Context, req *mcp.CallT
 		}
 		records, err := recurrence.ListRecurrencesForLearning(ctx, srv.db, domain.LearningID(in.LearningID), limit)
 		if err != nil {
-			return toolError("list_recurrences_failed", err.Error())
+			return toolDomainError(err, "list_recurrences_failed")
 		}
 
 		items := make([]map[string]any, 0, len(records))
@@ -470,7 +711,7 @@ func handleComputeMetrics(srv *Server) func(ctx context.Context, req *mcp.CallTo
 
 		learning, err := storage.GetLearning(ctx, tx, domain.LearningID(in.LearningID))
 		if err != nil {
-			return toolError("get_learning_failed", err.Error())
+			return toolDomainError(err, "get_learning_failed")
 		}
 		if learning == nil {
 			return toolError("learning_not_found", fmt.Sprintf("learning %q not found", in.LearningID))
@@ -480,7 +721,7 @@ func handleComputeMetrics(srv *Server) func(ctx context.Context, req *mcp.CallTo
 		fp := recurrence.RecurrenceFingerprint(learning)
 		metrics, err := recurrence.ComputeMetrics(ctx, srv.db, srv.projectID, fp)
 		if err != nil {
-			return toolError("compute_metrics_failed", err.Error())
+			return toolDomainError(err, "compute_metrics_failed")
 		}
 
 		status, _ := recurrence.CheckNeedsReview(ctx, srv.db, srv.projectID, learning)
@@ -498,6 +739,103 @@ func handleComputeMetrics(srv *Server) func(ctx context.Context, req *mcp.CallTo
 			"trend":         string(metrics.Trend),
 			"needs_review":  metrics.NeedsReview,
 			"review_reason": metrics.ReviewReason,
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// report_occurrence / status / rollback (D17)
+// ---------------------------------------------------------------------------
+
+func handleReportOccurrence(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in reportOccurrenceInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in reportOccurrenceInput) (*mcp.CallToolResult, any, error) {
+		if in.LearningID == "" {
+			return toolError("invalid_argument", "learning_id is required")
+		}
+
+		tx, err := srv.db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if err != nil {
+			return toolError("db_error", err.Error())
+		}
+		learning, err := storage.GetLearning(ctx, tx, domain.LearningID(in.LearningID))
+		tx.Rollback()
+		if err != nil {
+			return toolDomainError(err, "get_learning_failed")
+		}
+		if learning == nil {
+			return toolError("learning_not_found", fmt.Sprintf("learning %q not found", in.LearningID))
+		}
+
+		rec, isNew, err := recurrence.RecordOccurrence(ctx, srv.db, srv.projectID, learning, recurrence.OccurrenceInput{
+			Summary:        in.Summary,
+			Fingerprint:    in.Fingerprint,
+			Outcome:        in.Outcome,
+			Retrieved:      in.Retrieved,
+			SkillActivated: in.SkillActivated,
+			Evidence:       in.Evidence,
+			Actor:          toActor(in.Actor),
+			IdempotencyKey: in.IdempotencyKey,
+		})
+		if err != nil {
+			return toolDomainError(err, "report_occurrence_failed")
+		}
+
+		return toolResultJSON(map[string]any{
+			"recurrence_id":   string(rec.ID),
+			"learning_id":     string(rec.LearningID),
+			"fingerprint":     rec.RecurrenceFingerprint,
+			"occurred_at":     rec.OccurredAt.Format(time.RFC3339),
+			"outcome":         rec.Outcome,
+			"retrieved":       rec.Retrieved,
+			"skill_activated": rec.SkillActivated,
+			"new":             isNew,
+		})
+	}
+}
+
+func handleStatus(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in statusInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in statusInput) (*mcp.CallToolResult, any, error) {
+		if in.LearningID == "" {
+			return toolError("invalid_argument", "learning_id is required")
+		}
+		tx, err := srv.db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if err != nil {
+			return toolError("db_error", err.Error())
+		}
+		learning, err := storage.GetLearning(ctx, tx, domain.LearningID(in.LearningID))
+		tx.Rollback()
+		if err != nil {
+			return toolDomainError(err, "get_learning_failed")
+		}
+		if learning == nil {
+			return toolError("learning_not_found", fmt.Sprintf("learning %q not found", in.LearningID))
+		}
+		return toolResultJSON(map[string]any{
+			"learning_id": string(learning.ID),
+			"status":      string(learning.Status),
+			"type":        string(learning.Type),
+			"title":       learning.Title,
+			"revision":    learning.Revision,
+			"updated_at":  learning.UpdatedAt.Format(time.RFC3339),
+		})
+	}
+}
+
+func handleRollback(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in rollbackInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in rollbackInput) (*mcp.CallToolResult, any, error) {
+		if in.PublicationID == "" {
+			return toolError("invalid_argument", "publication_id is required")
+		}
+		err := srv.publishSvc.Rollback(ctx, srv.projectID, &publish.RollbackPublicationInput{
+			PublicationID: domain.PublicationID(in.PublicationID),
+			Actor:         toActor(in.Actor),
+		})
+		if err != nil {
+			return toolDomainError(err, "rollback_failed")
+		}
+		return toolResultJSON(map[string]any{
+			"publication_id": in.PublicationID,
+			"status":         "rolled_back",
 		})
 	}
 }

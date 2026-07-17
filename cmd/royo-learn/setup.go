@@ -44,7 +44,7 @@ type skillSummary struct {
 
 func runSetup(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		return writeSetupError(stderr, "setup requires a subcommand: install | uninstall | status")
+		return writeSetupError(stderr, "setup requires a subcommand: install | uninstall | status | upgrade-skills")
 	}
 
 	switch args[0] {
@@ -54,8 +54,10 @@ func runSetup(args []string, stdout, stderr io.Writer) int {
 		return runSetupUninstall(args[1:], stdout, stderr)
 	case "status":
 		return runSetupStatus(args[1:], stdout, stderr)
+	case "upgrade-skills":
+		return runSetupUpgradeSkills(args[1:], stdout, stderr)
 	default:
-		return writeSetupError(stderr, "unknown setup subcommand %q: use install, uninstall, or status", args[0])
+		return writeSetupError(stderr, "unknown setup subcommand %q: use install, uninstall, status, or upgrade-skills", args[0])
 	}
 }
 
@@ -216,6 +218,118 @@ func runSetupStatus(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	return exitSuccess
+}
+
+// upgradeAgentResult is the per-agent JSON shape for setup upgrade-skills.
+type upgradeAgentResult struct {
+	Agent     string                     `json:"agent"`
+	SkillsDir string                     `json:"skills_dir"`
+	Actions   []setup.SkillUpgradeAction `json:"actions"`
+	Errors    []string                   `json:"errors,omitempty"`
+}
+
+func runSetupUpgradeSkills(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("setup upgrade-skills", flag.ContinueOnError)
+	agentFlag := fs.String("agent", "all", "target agent: claude-code | codex | opencode | all")
+	projectRoot := fs.String("project-root", "", "project root containing skills/ (default: current dir or repo root)")
+	apply := fs.Bool("apply", false, "perform the upgrade; without it, report only (dry-run is the default)")
+	dryRun := fs.Bool("dry-run", false, "report actions without applying changes (the default)")
+	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
+	if err := fs.Parse(args); err != nil {
+		return writeSetupError(stderr, "setup upgrade-skills: %v", err)
+	}
+	// Dry-run is the default; --apply is the only way to write. An explicit
+	// --dry-run always wins over --apply so the safe choice cannot be lost.
+	doApply := *apply && !*dryRun
+
+	kinds, err := parseAgentKinds(*agentFlag)
+	if err != nil {
+		return writeSetupError(stderr, "%v", err)
+	}
+
+	skillsSrc, err := resolveSkillsSource(*projectRoot)
+	if err != nil {
+		return writeSetupError(stderr, "%v", err)
+	}
+
+	results := make([]upgradeAgentResult, 0, len(kinds))
+	exitCode := exitSuccess
+
+	for _, kind := range kinds {
+		ar := upgradeAgentResult{Agent: string(kind)}
+		a, err := setup.ResolveAgent(kind)
+		if err != nil {
+			ar.Errors = append(ar.Errors, err.Error())
+			exitCode = exitFailure
+			results = append(results, ar)
+			continue
+		}
+		skillsDir, sErr := a.SkillsDir()
+		if sErr != nil {
+			ar.Errors = append(ar.Errors, fmt.Sprintf("skills dir unavailable: %v", sErr))
+			exitCode = exitFailure
+			results = append(results, ar)
+			continue
+		}
+		ar.SkillsDir = skillsDir
+
+		res, uErr := setup.UpgradeSkills(skillsSrc, skillsDir, doApply)
+		if uErr != nil {
+			ar.Errors = append(ar.Errors, uErr.Error())
+			exitCode = exitFailure
+			results = append(results, ar)
+			continue
+		}
+		ar.Actions = res.Actions
+		ar.Errors = append(ar.Errors, res.Errors...)
+		if len(res.Errors) > 0 {
+			exitCode = exitFailure
+		}
+		results = append(results, ar)
+	}
+
+	if *jsonFlag {
+		data, _ := json.MarshalIndent(map[string]any{
+			"command": "setup upgrade-skills",
+			"apply":   doApply,
+			"results": results,
+		}, "", "  ")
+		_, _ = fmt.Fprintf(stdout, "%s\n", string(data))
+	} else {
+		printUpgradeSummary(stdout, doApply, results)
+	}
+
+	return exitCode
+}
+
+func printUpgradeSummary(w io.Writer, applied bool, results []upgradeAgentResult) {
+	mode := "dry-run (no changes written; pass --apply to upgrade)"
+	if applied {
+		mode = "apply"
+	}
+	_, _ = fmt.Fprintf(w, "setup upgrade-skills [%s]\n", mode)
+	for _, r := range results {
+		_, _ = fmt.Fprintf(w, "[%s] %s\n", r.Agent, fallbackIfEmpty(r.SkillsDir, "(no skills dir)"))
+		for _, a := range r.Actions {
+			line := fmt.Sprintf("  %-12s %s", a.Status, a.Name)
+			if a.FromVersion != "" || a.ToVersion != "" {
+				line += fmt.Sprintf(" (%s -> %s)", fallbackIfEmpty(a.FromVersion, "?"), fallbackIfEmpty(a.ToVersion, "?"))
+			}
+			_, _ = fmt.Fprintln(w, line)
+			if a.Backup != "" {
+				_, _ = fmt.Fprintf(w, "      backup:    %s\n", a.Backup)
+			}
+			if a.Candidate != "" {
+				_, _ = fmt.Fprintf(w, "      candidate: %s\n", a.Candidate)
+			}
+			if a.Detail != "" {
+				_, _ = fmt.Fprintf(w, "      note:      %s\n", a.Detail)
+			}
+		}
+		for _, e := range r.Errors {
+			_, _ = fmt.Fprintf(w, "  ERROR: %s\n", e)
+		}
+	}
 }
 
 // parseAgentKinds validates --agent flag and expands "all".
