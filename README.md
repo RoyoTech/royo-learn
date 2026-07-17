@@ -368,6 +368,311 @@ royo-learn recurrences --learning-id <learning-id> --json
 royo-learn metrics --learning-id <learning-id> --json
 ```
 
+## El ciclo completo, de principio a fin
+
+El inicio rápido lista los comandos. Esta sección los encadena en un caso
+real para mostrar **qué garantiza el binario en cada paso**. Los nombres de
+campo y los valores de retorno son los que devuelve el código (verificados
+contra `cmd/royo-learn/main.go` y `internal/mcpserver/profiles.go`). Donde
+una salida pueda variar entre ejecuciones, se marca con `<…>`.
+
+### Escenario
+
+Maria aplica la migración `0047_add_user_prefs.sql` en producción. El
+framework la aplica, pero el chequeo de idempotencia del ORM falla porque
+la columna ya existía de un intento previo abortado. La base queda en un
+estado inconsistente. Media mañana perdida en revertir a mano. Maria
+decide que esto no puede pasar de nuevo, ni a ella en seis meses ni a
+nadie del equipo.
+
+Royo-Learn existe para que una corrección explicada una vez se convierta
+en un cambio **verificable, auditable y reversible** del comportamiento
+del proyecto.
+
+### Acto 1 — Inicialización (una vez por raíz)
+
+El sistema no existe hasta que el proyecto decide crearlo. Cada raíz de
+proyecto tiene su propio `.royo-learn/` con DB, records y backups.
+
+```bash
+$ royo-learn init --project-root ~/code/mi-app --json
+{
+  "status": "initialized",
+  "project_root": "~/code/mi-app",
+  "store": "~/code/mi-app/.royo-learn/store.db",
+  "config": "~/code/mi-app/.royo-learn/config.yaml",
+  "next_action": "run \"royo-learn doctor --project-root ~/code/mi-app --json\""
+}
+
+$ royo-learn doctor --project-root ~/code/mi-app --json
+{
+  "status": "ok",
+  "components": {
+    "database":          { "ok": true,  "migrations": "v3" },
+    "git":               { "ok": true },
+    "engram":            { "ok": false, "available": false, "degraded": true, "reason": "connection_refused" },
+    "skill_registry":    { "ok": false, "available": false }
+  }
+}
+```
+
+> Nota: `engram.available = false` no es un fallo. El sistema reporta
+> degradación explícita y sigue operativo.
+
+### Acto 2 — Captura (la LLM redacta, el binario valida)
+
+Maria le dice a su agente: *"Guardá esto: nunca aplicar una migración sin
+verificar primero su estado real en la base"*. El agente redacta el
+candidato, llama al binario, y el binario valida, redacta secretos, hashea,
+busca en FTS5 y persiste. **Una sola llamada, una sola garantía.**
+
+```bash
+$ royo-learn capture \
+    --project-root ~/code/mi-app \
+    --title "Migrations must be idempotent and state-checked" \
+    --context "Production incident: migration 0047 re-ran on a half-applied DB" \
+    --observation "ORM idempotency check failed mid-transaction; user_prefs table left inconsistent; manual rollback took half a day." \
+    --lesson "Always query schema_migrations before running make migrate; refuse to apply if state diverges from expected." \
+    --type procedure \
+    --scope project \
+    --destination agents_rule \
+    --idempotency-key "maria-2026-07-17-migration-state" \
+    --json
+{
+  "learning_id": "<ULID>",
+  "status": "needs_evidence",
+  "fingerprint": "<sha256>",
+  "similar": [
+    {
+      "learning_id": "<ULID previo>",
+      "title": "Check migration state before applying",
+      "status": "rejected",
+      "match": "lexical"
+    }
+  ],
+  "next_action": "run \"royo-learn evidence add <learning-id> --summary ...\""
+}
+```
+
+Cuatro cosas pasaron en esa sola llamada, sin que la LLM tuviera que
+recordarlas:
+
+1. **Validación de contrato** (campos requeridos, tipos, alcance).
+2. **Redacción de secretos** — si Maria hubiera pegado una contraseña en
+   `--context`, se reemplaza por `[REDACTED]` **antes** de tocar SQLite,
+   el blob store, el Markdown, el audit log y esta misma respuesta.
+3. **Hash normalizado** + búsqueda en FTS5 — encontró un candidato
+   rechazado previamente. No se duplica.
+4. **Estado inicial**: `needs_evidence`, porque la regla propuesta
+   (`agents_rule`) exige evidencia antes de poder aprobarse.
+
+### Acto 3 — Evidencia
+
+Maria adjunta el diff del fallo, el log del ORM y el fix manual. El
+estado **se mantiene** en `needs_evidence` hasta que la curación decida
+que es suficiente.
+
+```bash
+$ royo-learn evidence add <learning-id> \
+    --summary "Failed migration run + manual fix diff" \
+    --content "$(cat incident-0047.diff)" \
+    --json
+{
+  "learning_id": "<ULID>",
+  "evidence_id": "<ULID>",
+  "evidence_count": 1,
+  "status": "needs_evidence",
+  "next_action": "run \"royo-learn evidence add <learning-id> --summary ...\" or run \"royo-learn curate --learning-id <learning-id> --action approve\""
+}
+```
+
+### Acto 4 — Curación
+
+Maria revisa el candidato, ve que la evidencia alcanza, y aprueba con
+fundamento. Recién acá el estado pasa a `approved`.
+
+```bash
+$ royo-learn curate \
+    --learning-id <learning-id> \
+    --action approve \
+    --rationale "Validated against incident-0047; same pattern would prevent the next half-applied migration." \
+    --json
+{
+  "learning_id": "<ULID>",
+  "status": "approved",
+  "previous_status": "needs_evidence",
+  "actor": { "kind": "human", "name": "cli-user" },
+  "next_action": "run \"royo-learn preview --learning-id <learning-id>\""
+}
+```
+
+`--action` también acepta `reject`, `needs_evidence` (volver a pedir más),
+`relate` (vincular con otro existente), `merge` (fusionar con duplicado) y
+`approve_new_skill` / `approve_skill_update` para destinos de Skill.
+
+### Acto 5 — Preview de publicación
+
+**El sistema nunca escribe sin preview.** Antes de tocar un archivo del
+proyecto, muestra exactamente qué va a cambiar, dónde, y qué verificaciones
+correrá después. El preview lleva un hash SHA-256: cualquier cambio
+invalida aprobaciones previas.
+
+```bash
+$ royo-learn preview --learning-id <learning-id> --json
+{
+  "learning_id": "<ULID>",
+  "destination": "agents_rule",
+  "targets": [
+    {
+      "path": "AGENTS.md",
+      "operation": "append_section",
+      "preview_sha256": "<sha256 del diff>",
+      "diff_excerpt": "+## Migrations\n+- Always query schema_migrations before running make migrate.\n+- Refuse to apply if state diverges from expected.\n"
+    }
+  ],
+  "requires_approval": true,
+  "verification_commands": [
+    "git diff -- AGENTS.md",
+    "git status --porcelain"
+  ],
+  "rollback_plan": {
+    "strategy": "restore_backup",
+    "backup_path": ".royo-learn/backups/<id>.bak"
+  },
+  "next_action": "run \"royo-learn approve --learning-id <learning-id> --preview-hash <hash> --approved-by maria\""
+}
+```
+
+`requires_approval: true` aparece porque el destino `agents_rule` (escribir
+una regla en `AGENTS.md` compartido) está marcado como sensible. Maria no
+puede saltarse este paso.
+
+### Acto 6 — Aprobación humana
+
+La aprobación está **ligada al hash exacto del preview**. Si Maria
+recalcula el preview mañana porque cambió una palabra, el hash cambia y
+la aprobación vieja queda inválida.
+
+```bash
+$ royo-learn approve \
+    --learning-id <learning-id> \
+    --preview-hash <preview_sha256> \
+    --approved-by maria \
+    --reason "Reviewed the incident diff and the proposed rule; ship it." \
+    --json
+{
+  "approval_id": "<ULID>",
+  "learning_id": "<ULID>",
+  "preview_hash": "<sha256>",
+  "approved_by": "maria",
+  "approved_at": "<RFC3339 UTC>",
+  "next_action": "run \"royo-learn publish --learning-id <learning-id> --preview-hash <hash> --approval-id <id> --apply\""
+}
+```
+
+### Acto 7 — Publicación atómica
+
+**Dry-run por defecto.** Sin `--apply`, el binario solo reporta el plan.
+Con `--apply`: backup → escritura atómica → verificación → `published`.
+Si la verificación falla, revierte el contenido previo byte por byte y el
+estado NO queda como `published`.
+
+```bash
+$ royo-learn publish \
+    --learning-id <learning-id> \
+    --preview-hash <preview_sha256> \
+    --approval-id <approval_id> \
+    --apply \
+    --json
+{
+  "publication_id": "<ULID>",
+  "learning_id": "<ULID>",
+  "status": "published",
+  "journal_id": "<ULID>"
+}
+```
+
+`journal_id` es la llave para revertir. Si Maria descubre dentro de un
+mes que la regla estaba mal redactada:
+
+```bash
+royo-learn rollback --journal-id <journal_id> --json
+```
+
+El binario restaura el contenido anterior desde el backup, marca la
+publicación como `superseded`, y deja el aprendizaje en `approved` (no en
+`published`). Listo para corregir y volver a publicar.
+
+### Acto 8 — La regla vive
+
+`AGENTS.md` ahora contiene, en una sección identificada:
+
+<!-- prettier-ignore -->
+```markdown
+## Migrations
+
+- Always query schema_migrations before running make migrate.
+- Refuse to apply if state diverges from expected.
+```
+
+La próxima vez que cualquier agente de cualquier sesión lea
+`AGENTS.md` antes de empezar a trabajar (que es la convención del
+proyecto), va a leer esta regla.
+
+### Acto 9 — Tres semanas después: la reincidencia
+
+Un agente nuevo arranca una tarea sobre el mismo proyecto. Lee
+`AGENTS.md`, ve la regla, y antes de correr `make migrate` ejecuta la
+verificación. Detecta que el estado del ORM no coincide con la migración
+esperada y **aborta con un mensaje claro** en vez de avanzar y romper la
+base. Maria registra el incidente como reincidencia **prevenida**.
+
+```bash
+$ royo-learn occurrence \
+    --learning-id <learning-id> \
+    --outcome prevented \
+    --json
+{
+  "learning_id": "<ULID>",
+  "occurrence_id": "<ULID>",
+  "outcome": "prevented",
+  "rule_retrieved": true,
+  "next_action": "run \"royo-learn metrics --learning-id <learning-id>\""
+}
+
+$ royo-learn metrics --learning-id <learning-id> --json
+{
+  "learning_id": "<ULID>",
+  "occurrences": 1,
+  "prevented": 1,
+  "recurred": 0,
+  "retrieval_rate": 1.0
+}
+```
+
+**El ciclo cierra.** Una corrección explicada una vez se convirtió en un
+cambio verificable del comportamiento, con auditoría completa y métrica
+que demuestra que la regla sirvió.
+
+### El mismo ciclo, vía MCP
+
+Todos los pasos anteriores están disponibles como tools MCP con el perfil
+`agent` (default) o `admin` (suma `learning_rollback`):
+
+```text
+learning_capture                  learning_publication_preview
+learning_add_evidence             learning_approve
+learning_curate                   learning_publish
+learning_search                   learning_report_occurrence
+learning_get                      learning_compute_metrics
+learning_list                     learning_list_recurrences
+learning_status                   learning_doctor
+```
+
+Mismas garantías, mismo formato de respuesta JSON, mismo contrato de
+errores (`code`, `recoverable`, `details`, `next_action`). El servidor
+corre por `stdio` con `royo-learn mcp-serve`.
+
 ## Integración opcional con Engram
 
 Si Engram está corriendo en `http://127.0.0.1:7437`, Royo-Learn lo usa para:
