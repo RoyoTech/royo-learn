@@ -821,6 +821,13 @@ func TestSymlinkSafetyBranchesWhenSupported(t *testing.T) {
 	if _, err := inspectRootRegularFile(rootHandle, "target-link"); err == nil {
 		t.Fatal("inspectRootRegularFile accepted symlink")
 	}
+	manager := NewBackupManager(root, filepath.Join(root, ".royo-learn", "backups"))
+	if _, err := manager.SnapshotFile("target-link"); err == nil {
+		t.Fatal("SnapshotFile followed a symlink target")
+	}
+	if _, err := manager.SnapshotFile(filepath.Join("parent-link", "file")); err == nil {
+		t.Fatal("SnapshotFile followed a symlink parent")
+	}
 
 	journalLink := filepath.Join(root, "journal-link")
 	if err := os.Symlink(outside, journalLink); err != nil {
