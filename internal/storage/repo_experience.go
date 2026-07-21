@@ -66,9 +66,10 @@ func UpdateExperienceSession(ctx context.Context, tx *sql.Tx, session *domain.Ex
 	result, err := tx.ExecContext(ctx, `
 		UPDATE experience_sessions
 		SET locator_json = ?, started_at = ?, updated_at = ?, closed_at = ?, metadata_sha256 = ?
-		WHERE id = ?
+		WHERE id = ? AND project_id = ? AND source = ? AND external_session_id = ?
 	`, string(locatorJSON), nullableTime(session.StartedAt), formatTime(session.UpdatedAt),
-		nullableTime(session.ClosedAt), session.MetadataSHA256, string(session.ID))
+		nullableTime(session.ClosedAt), session.MetadataSHA256, string(session.ID),
+		string(session.ProjectID), string(session.Source), session.ExternalSessionID)
 	if err != nil {
 		return fmt.Errorf("UpdateExperienceSession: %w", err)
 	}
@@ -117,8 +118,9 @@ func FindExperienceTurn(ctx context.Context, tx *sql.Tx, sessionID domain.Experi
 	return turn, nil
 }
 
-// UpdateExperienceTurn stores a new revision of an existing turn identity.
-func UpdateExperienceTurn(ctx context.Context, tx *sql.Tx, turn *domain.ExperienceTurn) error {
+// UpdateExperienceTurn stores a new revision of an existing turn identity when
+// the caller's expected source revision is still current.
+func UpdateExperienceTurn(ctx context.Context, tx *sql.Tx, turn *domain.ExperienceTurn, expectedSourceRevision string) error {
 	if err := domain.ValidateExperienceTurn(turn); err != nil {
 		return err
 	}
@@ -127,10 +129,11 @@ func UpdateExperienceTurn(ctx context.Context, tx *sql.Tx, turn *domain.Experien
 		SET sequence = ?, status = ?, fingerprint = ?, user_digest = ?, assistant_digest = ?,
 		    tool_calls_digest = ?, safe_summary = ?, occurred_at = ?, stable_at = ?, ingested_at = ?,
 		    source_revision = ?, redacted = ?
-		WHERE id = ?
+		WHERE id = ? AND session_id = ? AND external_turn_id = ? AND source_revision = ?
 	`, turn.Sequence, string(turn.Status), turn.Fingerprint, turn.UserDigest, turn.AssistantDigest,
 		turn.ToolCallsDigest, turn.SafeSummary, formatTime(turn.OccurredAt), nullableTime(turn.StableAt),
-		formatTime(turn.IngestedAt), turn.SourceRevision, boolToInt(turn.Redacted), string(turn.ID))
+		formatTime(turn.IngestedAt), turn.SourceRevision, boolToInt(turn.Redacted), string(turn.ID),
+		string(turn.SessionID), turn.ExternalTurnID, expectedSourceRevision)
 	if err != nil {
 		return fmt.Errorf("UpdateExperienceTurn: %w", err)
 	}

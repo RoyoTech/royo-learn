@@ -29,6 +29,7 @@ func validEvent() *ExperienceEvent {
 		TurnID:     "turn-1",
 		Kind:       EventUserCorrection,
 		Summary:    "user corrected the migration order",
+		Detector:   DetectorIdentity{Kind: "deterministic", Name: "test-outcome", Version: "1.0.0"},
 		Confidence: ConfidenceMedium,
 	}
 }
@@ -136,7 +137,13 @@ func TestValidateExperienceEvent(t *testing.T) {
 		{"missing turn provenance", func(e *ExperienceEvent) { e.TurnID = "" }, ErrInvalidArgument},
 		{"invalid kind", func(e *ExperienceEvent) { e.Kind = "chatter" }, ErrInvalidArgument},
 		{"missing summary", func(e *ExperienceEvent) { e.Summary = "" }, ErrInvalidArgument},
+		{"missing detector kind", func(e *ExperienceEvent) { e.Detector = DetectorIdentity{} }, ErrInvalidArgument},
+		{"unknown detector kind", func(e *ExperienceEvent) { e.Detector.Kind = "heuristic" }, ErrInvalidArgument},
 		{"invalid confidence", func(e *ExperienceEvent) { e.Confidence = "certainish" }, ErrInvalidArgument},
+		{"host llm high confidence", func(e *ExperienceEvent) {
+			e.Detector.Kind = "host_llm"
+			e.Confidence = ConfidenceHigh
+		}, ErrInvalidArgument},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -145,6 +152,14 @@ func TestValidateExperienceEvent(t *testing.T) {
 			wantCode(t, ValidateExperienceEvent(e), tc.code)
 		})
 	}
+
+	t.Run("deterministic detector may use high confidence", func(t *testing.T) {
+		e := validEvent()
+		e.Confidence = ConfidenceHigh
+		if err := ValidateExperienceEvent(e); err != nil {
+			t.Fatalf("deterministic high-confidence event rejected: %v", err)
+		}
+	})
 }
 
 func TestExperienceErrorCodesRegistered(t *testing.T) {

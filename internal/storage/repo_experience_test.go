@@ -217,13 +217,14 @@ func TestExperienceRepositoryRoundTripsAndUpdates(t *testing.T) {
 	session.MetadataSHA256 = "metadata-updated"
 	turn.Status = domain.TurnSuperseded
 	turn.Fingerprint = "fingerprint-updated"
+	expectedSourceRevision := turn.SourceRevision
 	turn.SourceRevision = "revision-2"
 	turn.StableAt = timePtr(turn.OccurredAt.Add(time.Minute))
 	if err := WithTx(ctx, db, func(tx *sql.Tx) error {
 		if err := UpdateExperienceSession(ctx, tx, session); err != nil {
 			return err
 		}
-		return UpdateExperienceTurn(ctx, tx, turn)
+		return UpdateExperienceTurn(ctx, tx, turn, expectedSourceRevision)
 	}); err != nil {
 		t.Fatalf("update experience entities: %v", err)
 	}
@@ -239,6 +240,153 @@ func TestExperienceRepositoryRoundTripsAndUpdates(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatalf("read updated entities: %v", err)
+	}
+}
+
+func TestUpdateExperienceSessionRejectsIdentityMismatch(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*domain.ExperienceSession)
+	}{
+		{name: "project", mutate: func(session *domain.ExperienceSession) {
+			session.ProjectID = domain.ProjectID(newUUID())
+		}},
+		{name: "source", mutate: func(session *domain.ExperienceSession) {
+			session.Source = domain.SourceManual
+		}},
+		{name: "external session", mutate: func(session *domain.ExperienceSession) {
+			session.ExternalSessionID = "different-session"
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, project := setupTestDB(t)
+			ctx := context.Background()
+			session, _, _, _ := newExperienceBundle(project.ID, "session-identity")
+			if err := WithTx(ctx, db, func(tx *sql.Tx) error {
+				return SaveExperienceSession(ctx, tx, session)
+			}); err != nil {
+				t.Fatalf("save session: %v", err)
+			}
+
+			candidate := *session
+			candidate.MetadataSHA256 = "tampered-metadata"
+			tt.mutate(&candidate)
+			err := WithTx(ctx, db, func(tx *sql.Tx) error {
+				return UpdateExperienceSession(ctx, tx, &candidate)
+			})
+			assertExperienceConflict(t, err)
+
+			if err := WithTx(ctx, db, func(tx *sql.Tx) error {
+				got, findErr := FindExperienceSession(ctx, tx, project.ID, session.Source, session.ExternalSessionID)
+				if findErr != nil {
+					return findErr
+				}
+				if !reflect.DeepEqual(got, session) {
+					t.Fatalf("session after mismatched update = %#v, want %#v", got, session)
+				}
+				return nil
+			}); err != nil {
+				t.Fatalf("read session after mismatched update: %v", err)
+			}
+		})
+	}
+}
+
+func TestUpdateExperienceTurnRejectsIdentityMismatch(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*domain.ExperienceTurn)
+	}{
+		{name: "session", mutate: func(turn *domain.ExperienceTurn) {
+			turn.SessionID = domain.ExperienceSessionID(newUUID())
+		}},
+		{name: "external turn", mutate: func(turn *domain.ExperienceTurn) {
+			turn.ExternalTurnID = "different-turn"
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, project := setupTestDB(t)
+			ctx := context.Background()
+			session, turn, _, _ := newExperienceBundle(project.ID, "turn-identity")
+			if err := WithTx(ctx, db, func(tx *sql.Tx) error {
+				if err := SaveExperienceSession(ctx, tx, session); err != nil {
+					return err
+				}
+				return SaveExperienceTurn(ctx, tx, turn)
+			}); err != nil {
+				t.Fatalf("save session and turn: %v", err)
+			}
+
+			candidate := *turn
+			candidate.Fingerprint = "tampered-fingerprint"
+			candidate.SourceRevision = "revision-2"
+			tt.mutate(&candidate)
+			err := WithTx(ctx, db, func(tx *sql.Tx) error {
+				return UpdateExperienceTurn(ctx, tx, &candidate, turn.SourceRevision)
+			})
+			assertExperienceConflict(t, err)
+
+			if err := WithTx(ctx, db, func(tx *sql.Tx) error {
+				got, findErr := FindExperienceTurn(ctx, tx, turn.SessionID, turn.ExternalTurnID)
+				if findErr != nil {
+					return findErr
+				}
+				if !reflect.DeepEqual(got, turn) {
+					t.Fatalf("turn after mismatched update = %#v, want %#v", got, turn)
+				}
+				return nil
+			}); err != nil {
+				t.Fatalf("read turn after mismatched update: %v", err)
+			}
+		})
+	}
+}
+
+func TestUpdateExperienceTurnCompareAndSwap(t *testing.T) {
+	db, project := setupTestDB(t)
+	ctx := context.Background()
+	session, turn, _, _ := newExperienceBundle(project.ID, "turn-cas")
+	if err := WithTx(ctx, db, func(tx *sql.Tx) error {
+		if err := SaveExperienceSession(ctx, tx, session); err != nil {
+			return err
+		}
+		return SaveExperienceTurn(ctx, tx, turn)
+	}); err != nil {
+		t.Fatalf("save session and turn: %v", err)
+	}
+
+	updated := *turn
+	updated.Fingerprint = "forward-fingerprint"
+	updated.SourceRevision = "revision-2"
+	if err := WithTx(ctx, db, func(tx *sql.Tx) error {
+		return UpdateExperienceTurn(ctx, tx, &updated, turn.SourceRevision)
+	}); err != nil {
+		t.Fatalf("matching forward update: %v", err)
+	}
+
+	stale := updated
+	stale.Fingerprint = "stale-fingerprint"
+	stale.SourceRevision = "revision-3"
+	err := WithTx(ctx, db, func(tx *sql.Tx) error {
+		return UpdateExperienceTurn(ctx, tx, &stale, turn.SourceRevision)
+	})
+	assertExperienceConflict(t, err)
+
+	if err := WithTx(ctx, db, func(tx *sql.Tx) error {
+		got, findErr := FindExperienceTurn(ctx, tx, turn.SessionID, turn.ExternalTurnID)
+		if findErr != nil {
+			return findErr
+		}
+		if !reflect.DeepEqual(got, &updated) {
+			t.Fatalf("turn after stale update = %#v, want %#v", got, &updated)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("read turn after stale update: %v", err)
 	}
 }
 
@@ -531,6 +679,15 @@ func assertDomainCode(t *testing.T, err error, want domain.ErrorCode) {
 	got, ok := domain.AsDomainError(err)
 	if !ok || got.Code != want {
 		t.Fatalf("error = %T %v, code = %q; want %q", err, err, gotCode(got), want)
+	}
+}
+
+func assertExperienceConflict(t *testing.T, err error) {
+	t.Helper()
+	assertDomainCode(t, err, domain.ErrExperienceRevisionConflict)
+	var conflict *domain.ConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("error = %T %v, want ConflictError", err, err)
 	}
 }
 

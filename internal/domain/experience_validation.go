@@ -97,9 +97,17 @@ func ValidateExperienceEvent(e *ExperienceEvent) error {
 	if e.Summary == "" {
 		return NewValidationError(ErrInvalidArgument, "experience event summary is required")
 	}
+	if !isValidDetectorKind(e.Detector.Kind) {
+		return NewValidationError(ErrInvalidArgument,
+			fmt.Sprintf("invalid detector kind: %q", e.Detector.Kind))
+	}
 	if !isValidConfidence(e.Confidence) {
 		return NewValidationError(ErrInvalidArgument,
 			fmt.Sprintf("invalid confidence: %q", e.Confidence))
+	}
+	if e.Detector.Kind == "host_llm" && e.Confidence == ConfidenceHigh {
+		return NewValidationError(ErrInvalidArgument,
+			"host_llm events cannot use high confidence")
 	}
 	return nil
 }
@@ -127,6 +135,14 @@ func isValidExperienceEventKind(k ExperienceEventKind) bool {
 	case EventUserCorrection, EventCommandFailure, EventTestFailure, EventTestSuccess,
 		EventSuccessfulProcedure, EventRetryCorrected, EventToolLimitation,
 		EventArchitectureDecision, EventPreference, EventUnknown:
+		return true
+	}
+	return false
+}
+
+func isValidDetectorKind(kind string) bool {
+	switch kind {
+	case "deterministic", "host_llm":
 		return true
 	}
 	return false
