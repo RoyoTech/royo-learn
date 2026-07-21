@@ -48,6 +48,17 @@ const (
 	ErrPayloadTooLarge       ErrorCode = "payload_too_large"
 	ErrExternalCommandFailed ErrorCode = "external_command_failed"
 	ErrTimeout               ErrorCode = "timeout"
+
+	// Experience-discovery ingestion codes (Hito 1). See
+	// docs/22-ADAPTER-CONTRACT.md and docs/17-ERROR-CODES.md.
+	ErrExperienceSourceNotFound     ErrorCode = "experience_source_not_found"
+	ErrExperienceSchemaUnsupported  ErrorCode = "experience_source_schema_unsupported"
+	ErrExperienceTurnIncomplete     ErrorCode = "experience_turn_incomplete"
+	ErrExperienceLocatorInvalid     ErrorCode = "experience_locator_invalid"
+	ErrExperienceLocatorOutsideRoot ErrorCode = "experience_locator_outside_root"
+	ErrExperiencePayloadTooLarge    ErrorCode = "experience_payload_too_large"
+	ErrExperienceRevisionConflict   ErrorCode = "experience_revision_conflict"
+	ErrExperienceCursorConflict     ErrorCode = "experience_cursor_conflict"
 )
 
 // AllErrorCodes returns every stable error code modeled by the domain.
@@ -63,32 +74,39 @@ func AllErrorCodes() []ErrorCode {
 		ErrDatabaseCorrupt, ErrMigrationChecksum, ErrRecordHashMismatch, ErrEngramUnavailable,
 		ErrEngramAmbiguous, ErrGentleAIUnavailable, ErrSkillRegistryFailed, ErrMCPProtocolError,
 		ErrPayloadTooLarge, ErrExternalCommandFailed, ErrTimeout,
+		ErrExperienceSourceNotFound, ErrExperienceSchemaUnsupported,
+		ErrExperienceTurnIncomplete, ErrExperienceLocatorInvalid,
+		ErrExperienceLocatorOutsideRoot, ErrExperiencePayloadTooLarge,
+		ErrExperienceRevisionConflict, ErrExperienceCursorConflict,
 	}
 }
 
 // ExitCode maps a stable error code to docs/04-CLI-SPEC.md exit codes.
 func (c ErrorCode) ExitCode() int {
 	switch c {
-	case ErrInvalidArgument, ErrEvidenceMissing, ErrEvidenceTooLarge, ErrPayloadTooLarge:
+	case ErrInvalidArgument, ErrEvidenceMissing, ErrEvidenceTooLarge, ErrPayloadTooLarge,
+		ErrExperienceTurnIncomplete, ErrExperienceLocatorInvalid, ErrExperiencePayloadTooLarge:
 		return 2
-	case ErrInvalidConfig:
+	case ErrInvalidConfig, ErrExperienceSchemaUnsupported:
 		return 3
 	case ErrProjectNotFound, ErrAmbiguousProject, ErrUnknownProject:
 		return 4
-	case ErrLearningNotFound, ErrPreviewNotFound:
+	case ErrLearningNotFound, ErrPreviewNotFound, ErrExperienceSourceNotFound:
 		return 5
 	case ErrInvalidTransition:
 		return 6
 	case ErrApprovalRequired, ErrApprovalInvalid, ErrApprovalExpired:
 		return 7
 	case ErrDuplicateLearning, ErrTargetAmbiguous, ErrTargetChanged, ErrDirtyTarget,
-		ErrPublicationConflict, ErrPreviewHashMismatch, ErrRollbackConflict:
+		ErrPublicationConflict, ErrPreviewHashMismatch, ErrRollbackConflict,
+		ErrExperienceRevisionConflict, ErrExperienceCursorConflict:
 		return 8
 	case ErrVerificationFailed:
 		return 9
 	case ErrEngramUnavailable, ErrEngramAmbiguous, ErrGentleAIUnavailable, ErrSkillRegistryFailed:
 		return 10
-	case ErrPathOutsideRoot, ErrSymlinkEscape, ErrProtectedPath, ErrSecretDetected:
+	case ErrPathOutsideRoot, ErrSymlinkEscape, ErrProtectedPath, ErrSecretDetected,
+		ErrExperienceLocatorOutsideRoot:
 		return 11
 	case ErrDatabaseCorrupt, ErrMigrationChecksum, ErrRecordHashMismatch:
 		return 12
