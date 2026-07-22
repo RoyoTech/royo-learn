@@ -59,6 +59,7 @@ const (
 	ErrExperiencePayloadTooLarge    ErrorCode = "experience_payload_too_large"
 	ErrExperienceRevisionConflict   ErrorCode = "experience_revision_conflict"
 	ErrExperienceCursorConflict     ErrorCode = "experience_cursor_conflict"
+	ErrExperienceCommitUnknown      ErrorCode = "experience_commit_unknown"
 )
 
 // AllErrorCodes returns every stable error code modeled by the domain.
@@ -78,6 +79,7 @@ func AllErrorCodes() []ErrorCode {
 		ErrExperienceTurnIncomplete, ErrExperienceLocatorInvalid,
 		ErrExperienceLocatorOutsideRoot, ErrExperiencePayloadTooLarge,
 		ErrExperienceRevisionConflict, ErrExperienceCursorConflict,
+		ErrExperienceCommitUnknown,
 	}
 }
 
@@ -110,7 +112,7 @@ func (c ErrorCode) ExitCode() int {
 		return 11
 	case ErrDatabaseCorrupt, ErrMigrationChecksum, ErrRecordHashMismatch:
 		return 12
-	case ErrDatabaseLocked, ErrRollbackFailed, ErrPublicationFailed:
+	case ErrDatabaseLocked, ErrRollbackFailed, ErrPublicationFailed, ErrExperienceCommitUnknown:
 		return 13
 	case ErrMCPProtocolError:
 		return 14
@@ -204,6 +206,19 @@ func NewConflictError(code ErrorCode, msg string) *ConflictError {
 			NextAction:  "resolve the conflict before retrying",
 		},
 	}
+}
+
+// NewExperienceCommitUnknownError preserves the database error while making it
+// explicit that a commit response cannot prove whether the transaction became
+// durable.
+func NewExperienceCommitUnknownError(cause error) *ConflictError {
+	return &ConflictError{&DomainError{
+		Code:        ErrExperienceCommitUnknown,
+		Message:     "experience ingestion commit outcome is unknown",
+		Recoverable: true,
+		NextAction:  "inspect the commit-unknown audit outcome and retry idempotently",
+		Cause:       cause,
+	}}
 }
 
 func NewValidationError(code ErrorCode, msg string) *ValidationError {
