@@ -4,10 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"agent-royo-learn/internal/testutil"
 )
 
 func TestBackupConfig_CreatesTimestampedCopy(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	configPath := filepath.Join(dir, "opencode.json")
 	original := []byte(`{"mcpServers":{},"skills":{}}`)
 	if err := os.WriteFile(configPath, original, 0o644); err != nil {
@@ -38,7 +40,7 @@ func TestBackupConfig_CreatesTimestampedCopy(t *testing.T) {
 }
 
 func TestBackupConfig_MissingFile(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	configPath := filepath.Join(dir, "nonexistent.json")
 
 	_, err := BackupConfig(configPath)
@@ -48,7 +50,7 @@ func TestBackupConfig_MissingFile(t *testing.T) {
 }
 
 func TestBackupConfig_EmptyFile(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	configPath := filepath.Join(dir, "empty.json")
 	if err := os.WriteFile(configPath, []byte{}, 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)

@@ -5,10 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"agent-royo-learn/internal/testutil"
 )
 
 func TestClaudeCode_RegisterMCP_NewEntry(t *testing.T) {
-	home := t.TempDir()
+	home := testutil.TempDir(t)
 	c := NewClaudeCodeWithHome(home)
 
 	entry := MCPServerEntry{
@@ -48,7 +50,7 @@ func TestClaudeCode_RegisterMCP_NewEntry(t *testing.T) {
 }
 
 func TestClaudeCode_RegisterMCP_DuplicateIsNoop(t *testing.T) {
-	home := t.TempDir()
+	home := testutil.TempDir(t)
 	c := NewClaudeCodeWithHome(home)
 	entry := MCPServerEntry{Name: "royo-learn", Command: "royo-learn", Args: []string{"mcp-serve"}}
 
@@ -65,7 +67,7 @@ func TestClaudeCode_RegisterMCP_DuplicateIsNoop(t *testing.T) {
 }
 
 func TestClaudeCode_RegisterMCP_AppendsToExistingConfig(t *testing.T) {
-	home := t.TempDir()
+	home := testutil.TempDir(t)
 	cfgPath := filepath.Join(home, ".claude", "mcp.json")
 	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -108,7 +110,7 @@ func TestClaudeCode_RegisterMCP_AppendsToExistingConfig(t *testing.T) {
 }
 
 func TestClaudeCode_UnregisterMCP(t *testing.T) {
-	home := t.TempDir()
+	home := testutil.TempDir(t)
 	c := NewClaudeCodeWithHome(home)
 	entry := MCPServerEntry{Name: "royo-learn", Command: "royo-learn"}
 	if _, err := c.RegisterMCP(entry); err != nil {
@@ -127,7 +129,7 @@ func TestClaudeCode_UnregisterMCP(t *testing.T) {
 }
 
 func TestClaudeCode_VerifyMCP_TrueAndFalse(t *testing.T) {
-	home := t.TempDir()
+	home := testutil.TempDir(t)
 	c := NewClaudeCodeWithHome(home)
 
 	ok, err := c.VerifyMCP("royo-learn")
@@ -148,7 +150,7 @@ func TestClaudeCode_VerifyMCP_TrueAndFalse(t *testing.T) {
 }
 
 func TestClaudeCode_BackupMCPConfig_EmptyWhenAbsent(t *testing.T) {
-	home := t.TempDir()
+	home := testutil.TempDir(t)
 	c := NewClaudeCodeWithHome(home)
 	backup, err := c.BackupMCPConfig()
 	if err != nil {
@@ -160,7 +162,7 @@ func TestClaudeCode_BackupMCPConfig_EmptyWhenAbsent(t *testing.T) {
 }
 
 func TestClaudeCode_BackupMCPConfig_CreatesTimestamped(t *testing.T) {
-	home := t.TempDir()
+	home := testutil.TempDir(t)
 	c := NewClaudeCodeWithHome(home)
 	if _, err := c.RegisterMCP(MCPServerEntry{Name: "x", Command: "x"}); err != nil {
 		t.Fatal(err)
@@ -178,7 +180,7 @@ func TestClaudeCode_BackupMCPConfig_CreatesTimestamped(t *testing.T) {
 }
 
 func TestClaudeCode_SkillsDir(t *testing.T) {
-	home := t.TempDir()
+	home := testutil.TempDir(t)
 	c := NewClaudeCodeWithHome(home)
 	got, err := c.SkillsDir()
 	if err != nil {

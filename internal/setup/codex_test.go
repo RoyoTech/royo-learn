@@ -4,10 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"agent-royo-learn/internal/testutil"
 )
 
 func TestCodex_VerifyMCP_HeaderDetection(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	cfgPath := filepath.Join(dir, "config.toml")
 	c := NewCodexWithConfig(cfgPath)
 
@@ -51,7 +53,7 @@ enabled = true
 }
 
 func TestCodex_VerifyMCP_HeaderMustBeExact(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	cfgPath := filepath.Join(dir, "config.toml")
 	c := NewCodexWithConfig(cfgPath)
 
@@ -76,7 +78,7 @@ func TestCodex_VerifyMCP_HeaderMustBeExact(t *testing.T) {
 }
 
 func TestCodex_BackupMCPConfig_Absent(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	c := NewCodexWithConfig(filepath.Join(dir, "nope.toml"))
 	backup, err := c.BackupMCPConfig()
 	if err != nil {
@@ -88,7 +90,7 @@ func TestCodex_BackupMCPConfig_Absent(t *testing.T) {
 }
 
 func TestCodex_BackupMCPConfig_Present(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	cfgPath := filepath.Join(dir, "config.toml")
 	if err := os.WriteFile(cfgPath, []byte("model = \"x\"\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -107,7 +109,7 @@ func TestCodex_BackupMCPConfig_Present(t *testing.T) {
 }
 
 func TestCodex_RegisterMCP_RequiresBinary(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	c := NewCodexWithConfig(filepath.Join(dir, "config.toml"))
 	if c.IsInstalled() {
 		t.Skip("codex binary is on PATH in this environment; skipping negative test")
