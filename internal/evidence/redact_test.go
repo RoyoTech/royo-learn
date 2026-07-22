@@ -82,6 +82,32 @@ func TestRedactPrivateKey(t *testing.T) {
 	}
 }
 
+func TestRedactQuotedColonAssignmentsAndEncryptedPrivateKey(t *testing.T) {
+	t.Parallel()
+
+	inputs := []string{
+		`TOKEN: "quoted-secret-value"`,
+		`"api_key": "json-secret-value"`,
+		`PASSWORD = 'single-quoted-secret'`,
+		"-----BEGIN ENCRYPTED PRIVATE KEY-----\nbase64-private-material\n-----END ENCRYPTED PRIVATE KEY-----",
+	}
+	for _, input := range inputs {
+		input := input
+		t.Run(input, func(t *testing.T) {
+			redacted := Redact([]byte(input), nil)
+			if bytes.Equal(redacted, []byte(input)) {
+				t.Fatalf("input was not redacted: %q", input)
+			}
+			if bytes.Contains(redacted, []byte("quoted-secret-value")) ||
+				bytes.Contains(redacted, []byte("json-secret-value")) ||
+				bytes.Contains(redacted, []byte("single-quoted-secret")) ||
+				bytes.Contains(redacted, []byte("base64-private-material")) {
+				t.Fatalf("secret material reached output: %q", redacted)
+			}
+		})
+	}
+}
+
 func TestRedactPasswordsInURL(t *testing.T) {
 	t.Parallel()
 
@@ -112,6 +138,34 @@ func TestRedactConnectionString(t *testing.T) {
 
 	if !bytes.Contains(redacted, []byte("[REDACTED:connection_string]")) {
 		t.Errorf("expected [REDACTED:connection_string], got %q", string(redacted))
+	}
+}
+
+func TestRedactCookies(t *testing.T) {
+	t.Parallel()
+
+	input := []byte("Cookie: session_id=super-secret; theme=dark")
+	redacted := Redact(input, nil)
+
+	if !bytes.Contains(redacted, []byte("[REDACTED:cookie]")) {
+		t.Errorf("expected [REDACTED:cookie], got %q", string(redacted))
+	}
+	if bytes.Contains(redacted, []byte("super-secret")) {
+		t.Error("cookie value was NOT redacted")
+	}
+}
+
+func TestRedactPrivateTags(t *testing.T) {
+	t.Parallel()
+
+	input := []byte("before <private>reasoning and secret data</private> after")
+	redacted := Redact(input, nil)
+
+	if !bytes.Contains(redacted, []byte("[REDACTED:private_tag]")) {
+		t.Errorf("expected [REDACTED:private_tag], got %q", string(redacted))
+	}
+	if bytes.Contains(redacted, []byte("reasoning and secret data")) {
+		t.Error("private tag content was NOT redacted")
 	}
 }
 

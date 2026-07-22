@@ -13,15 +13,17 @@ var secretPatterns = []struct {
 	label string
 	re    *regexp.Regexp
 }{
-	{"openai_key", regexp.MustCompile(`sk-(proj-)?[A-Za-z0-9]{10,}`)},
+	{"openai_key", regexp.MustCompile(`sk-(proj-)?[A-Za-z0-9]{8,}`)},
 	{"anthropic_key", regexp.MustCompile(`sk-ant-[A-Za-z0-9]{10,}`)},
-	{"github_token", regexp.MustCompile(`gh[ps]_[A-Za-z0-9]{20,}`)},
+	{"github_token", regexp.MustCompile(`gh[ps]_[A-Za-z0-9]{16,}`)},
 	{"aws_key", regexp.MustCompile(`AKIA[0-9A-Z]{16}`)},
-	{"private_key", regexp.MustCompile(`-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----[\s\S]*?-----END (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----`)},
+	{"private_key", regexp.MustCompile(`-----BEGIN (RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----[\s\S]*?-----END (RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----`)},
 	{"connection_string", regexp.MustCompile(`(?i)(?:Password|Pwd)\s*=\s*(\S+)`)},
 	{"password_url", regexp.MustCompile(`://[^:@/]+:([^:@/]+)@`)},
 	{"bearer_token", regexp.MustCompile(`Bearer\s+([A-Za-z0-9._\-]{20,})`)},
-	{"env_assignment", regexp.MustCompile(`(?i)(?:SECRET|TOKEN|KEY|PASSWORD)\s*=\s*([A-Za-z0-9._\-]{4,})`)},
+	{"cookie", regexp.MustCompile(`(?i)\b(?:Cookie|Set-Cookie)\s*[:=]\s*[^\r\n]+`)},
+	{"private_tag", regexp.MustCompile(`(?is)<private\b[^>]*>.*?</private\s*>`)},
+	{"env_assignment", regexp.MustCompile(`(?i)\b(?:SECRET|TOKEN|KEY|PASSWORD|API[_-]?KEY|ACCESS[_-]?KEY|PRIVATE[_-]?KEY)\b["']?\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)`)},
 }
 
 // Redact replaces known secrets in content with [REDACTED:<type>] markers.
