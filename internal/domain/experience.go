@@ -65,22 +65,22 @@ const (
 // local-only and must be validated against user-configured roots before use;
 // the repository cannot widen those roots. Its content is never executed.
 type TranscriptLocator struct {
-	Kind       string // sqlite, jsonl, rollout, file, api
-	Path       string
-	SessionID  string
-	TurnID     string
-	Offset     int64
-	SourceHash string
+	Kind       string `json:"kind"` // sqlite, jsonl, rollout, file, api
+	Path       string `json:"path"`
+	SessionID  string `json:"session_id"`
+	TurnID     string `json:"turn_id"`
+	Offset     int64  `json:"offset"`
+	SourceHash string `json:"source_hash"`
 }
 
 // DetectorIdentity records which detector produced an event. Host-LLM output is
 // untrusted: it cannot raise evidence to strong nor trigger automatic promotion.
 type DetectorIdentity struct {
-	Kind       string // deterministic, host_llm
-	Name       string
-	Version    string
-	Model      string // host_llm only
-	PromptHash string // host_llm only
+	Kind       string `json:"kind"` // deterministic, host_llm
+	Name       string `json:"name"`
+	Version    string `json:"version"`
+	Model      string `json:"model"`       // host_llm only
+	PromptHash string `json:"prompt_hash"` // host_llm only
 }
 
 // --- Entities -------------------------------------------------
@@ -150,4 +150,7 @@ type IngestionCursor struct {
 	LastErrorMessage string
 	InputDigest      string
 	Revision         int
+	// SourceOrder is the adapter-supplied monotonic position of this checkpoint.
+	// It is separate from the local revision so a late source read cannot win.
+	SourceOrder int64
 }

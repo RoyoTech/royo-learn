@@ -167,7 +167,7 @@ func TestExperienceErrorCodesRegistered(t *testing.T) {
 		ErrExperienceSourceNotFound, ErrExperienceSchemaUnsupported,
 		ErrExperienceTurnIncomplete, ErrExperienceLocatorInvalid,
 		ErrExperienceLocatorOutsideRoot, ErrExperiencePayloadTooLarge,
-		ErrExperienceRevisionConflict, ErrExperienceCursorConflict,
+		ErrExperienceRevisionConflict, ErrExperienceCursorConflict, ErrExperienceCommitUnknown,
 	}
 	all := make(map[ErrorCode]bool)
 	for _, c := range AllErrorCodes() {
