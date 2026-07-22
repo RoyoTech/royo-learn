@@ -18,7 +18,7 @@ func TestExperienceMigrationSchema(t *testing.T) {
 		"experience_sessions": {"id", "project_id", "source", "external_session_id", "locator_json", "started_at", "updated_at", "closed_at", "metadata_sha256", "created_at"},
 		"experience_turns":    {"id", "session_id", "external_turn_id", "sequence", "status", "fingerprint", "user_digest", "assistant_digest", "tool_calls_digest", "safe_summary", "occurred_at", "stable_at", "ingested_at", "source_revision", "redacted"},
 		"experience_events":   {"id", "project_id", "turn_id", "kind", "summary", "observation", "outcome", "fingerprint", "evidence_json", "detector_json", "confidence", "created_at"},
-		"ingestion_cursors":   {"project_id", "source", "source_instance", "cursor_json", "last_successful_at", "last_attempt_at", "last_error_code", "last_error_message", "input_digest", "revision"},
+		"ingestion_cursors":   {"project_id", "source", "source_instance", "cursor_json", "last_successful_at", "last_attempt_at", "last_error_code", "last_error_message", "input_digest", "revision", "source_order"},
 	}
 	for table, want := range wantColumns {
 		t.Run(table, func(t *testing.T) {
@@ -85,6 +85,21 @@ func TestExperienceMigrationSchema(t *testing.T) {
 		}
 	}
 
+	var migrationName string
+	if err := db.DB.QueryRow(`SELECT name FROM schema_migrations WHERE version = 4`).Scan(&migrationName); err != nil {
+		t.Fatalf("query migration 004 name: %v", err)
+	}
+	if migrationName != "004_experience_ingestion" {
+		t.Fatalf("migration 004 name = %q, want %q", migrationName, "004_experience_ingestion")
+	}
+	var futureMigrationCount int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE version = 5`).Scan(&futureMigrationCount); err != nil {
+		t.Fatalf("query reserved migration 005: %v", err)
+	}
+	if futureMigrationCount != 0 {
+		t.Fatalf("reserved migration 005 rows = %d, want 0", futureMigrationCount)
+	}
+
 	if err := Migrate(db); err != nil {
 		t.Fatalf("second Migrate: %v", err)
 	}
@@ -125,6 +140,13 @@ func TestOpenEnablesForeignKeysOnPooledConnections(t *testing.T) {
 			}
 			if enabled != 1 {
 				t.Fatalf("foreign_keys = %d, want 1", enabled)
+			}
+			var busyTimeout int
+			if err := conn.QueryRowContext(ctx, "PRAGMA busy_timeout").Scan(&busyTimeout); err != nil {
+				t.Fatalf("query busy_timeout: %v", err)
+			}
+			if busyTimeout < 5000 {
+				t.Fatalf("busy_timeout = %d, want at least 5000", busyTimeout)
 			}
 		})
 	}
@@ -212,6 +234,7 @@ func TestExperienceRepositoryRoundTripsAndUpdates(t *testing.T) {
 		t.Fatalf("read experience bundle: %v", err)
 	}
 
+	expectedSessionUpdatedAt := session.UpdatedAt
 	session.Locator.Offset++
 	session.UpdatedAt = session.UpdatedAt.Add(time.Minute)
 	session.MetadataSHA256 = "metadata-updated"
@@ -221,7 +244,7 @@ func TestExperienceRepositoryRoundTripsAndUpdates(t *testing.T) {
 	turn.SourceRevision = "revision-2"
 	turn.StableAt = timePtr(turn.OccurredAt.Add(time.Minute))
 	if err := WithTx(ctx, db, func(tx *sql.Tx) error {
-		if err := UpdateExperienceSession(ctx, tx, session); err != nil {
+		if err := UpdateExperienceSession(ctx, tx, session, expectedSessionUpdatedAt); err != nil {
 			return err
 		}
 		return UpdateExperienceTurn(ctx, tx, turn, expectedSourceRevision)
@@ -274,7 +297,7 @@ func TestUpdateExperienceSessionRejectsIdentityMismatch(t *testing.T) {
 			candidate.MetadataSHA256 = "tampered-metadata"
 			tt.mutate(&candidate)
 			err := WithTx(ctx, db, func(tx *sql.Tx) error {
-				return UpdateExperienceSession(ctx, tx, &candidate)
+				return UpdateExperienceSession(ctx, tx, &candidate, session.UpdatedAt)
 			})
 			assertExperienceConflict(t, err)
 
@@ -291,6 +314,48 @@ func TestUpdateExperienceSessionRejectsIdentityMismatch(t *testing.T) {
 				t.Fatalf("read session after mismatched update: %v", err)
 			}
 		})
+	}
+}
+
+func TestUpdateExperienceSessionCompareAndSwap(t *testing.T) {
+	db, project := setupTestDB(t)
+	ctx := context.Background()
+	session, _, _, _ := newExperienceBundle(project.ID, "session-cas")
+	if err := WithTx(ctx, db, func(tx *sql.Tx) error {
+		return SaveExperienceSession(ctx, tx, session)
+	}); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+
+	expected := session.UpdatedAt
+	updated := *session
+	updated.UpdatedAt = expected.Add(time.Minute)
+	updated.MetadataSHA256 = "new-metadata"
+	if err := WithTx(ctx, db, func(tx *sql.Tx) error {
+		return UpdateExperienceSession(ctx, tx, &updated, expected)
+	}); err != nil {
+		t.Fatalf("matching session update: %v", err)
+	}
+
+	stale := updated
+	stale.UpdatedAt = expected.Add(2 * time.Minute)
+	stale.MetadataSHA256 = "stale-metadata"
+	err := WithTx(ctx, db, func(tx *sql.Tx) error {
+		return UpdateExperienceSession(ctx, tx, &stale, expected)
+	})
+	assertExperienceConflict(t, err)
+
+	if err := WithTx(ctx, db, func(tx *sql.Tx) error {
+		got, findErr := FindExperienceSession(ctx, tx, project.ID, session.Source, session.ExternalSessionID)
+		if findErr != nil {
+			return findErr
+		}
+		if !reflect.DeepEqual(got, &updated) {
+			t.Fatalf("session after stale update = %#v, want %#v", got, &updated)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("read session after stale update: %v", err)
 	}
 }
 
@@ -513,6 +578,7 @@ func TestUpdateIngestionCursorCompareAndSwap(t *testing.T) {
 	updated := *cursor
 	updated.CursorJSON = `{"offset":22}`
 	updated.Revision = 2
+	updated.SourceOrder = 2
 	updated.LastSuccessfulAt = timePtr(time.Date(2026, 7, 21, 13, 0, 0, 456789000, time.UTC))
 	if err := WithTx(ctx, db, func(tx *sql.Tx) error {
 		return UpdateIngestionCursor(ctx, tx, &updated, 1)
@@ -539,6 +605,165 @@ func TestUpdateIngestionCursorCompareAndSwap(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatalf("read cursor: %v", err)
+	}
+
+	late := updated
+	late.Revision = 3
+	late.SourceOrder = 1
+	late.CursorJSON = `{"offset":1}`
+	err = WithTx(ctx, db, func(tx *sql.Tx) error {
+		return UpdateIngestionCursor(ctx, tx, &late, updated.Revision)
+	})
+	assertDomainCode(t, err, domain.ErrExperienceCursorConflict)
+}
+
+func TestRecordIngestionCursorFailureRejectsOlderSourceOrder(t *testing.T) {
+	db, project := setupTestDB(t)
+	ctx := context.Background()
+	newerAttempt := time.Date(2026, 7, 22, 9, 0, 0, 0, time.UTC)
+	olderAttempt := newerAttempt.Add(time.Minute)
+
+	if err := WithTx(ctx, db, func(tx *sql.Tx) error {
+		return RecordIngestionCursorFailure(
+			ctx, tx, project.ID, domain.SourceOpenCode, "failure-order", 3,
+			`{"offset":3}`, "digest-3", "newer-failure", "newer failure", newerAttempt,
+		)
+	}); err != nil {
+		t.Fatalf("record newer failure: %v", err)
+	}
+
+	err := WithTx(ctx, db, func(tx *sql.Tx) error {
+		return RecordIngestionCursorFailure(
+			ctx, tx, project.ID, domain.SourceOpenCode, "failure-order", 2,
+			`{"offset":2}`, "digest-2", "older-failure", "older failure", olderAttempt,
+		)
+	})
+	assertDomainCode(t, err, domain.ErrExperienceCursorConflict)
+
+	if err := WithTx(ctx, db, func(tx *sql.Tx) error {
+		got, findErr := FindIngestionCursor(ctx, tx, project.ID, domain.SourceOpenCode, "failure-order")
+		if findErr != nil {
+			return findErr
+		}
+		if got == nil {
+			t.Fatal("failure cursor = nil, want newer failure metadata")
+		}
+		if got.CursorJSON != `{"offset":3}` || got.InputDigest != "digest-3" || got.SourceOrder != 3 || got.Revision != 1 {
+			t.Fatalf("failure cursor = %#v, want source order 3 metadata", got)
+		}
+		if got.LastSuccessfulAt != nil {
+			t.Fatalf("last successful at = %v, want nil for failed checkpoint", got.LastSuccessfulAt)
+		}
+		if got.LastErrorCode != "newer-failure" || got.LastErrorMessage != "newer failure" {
+			t.Fatalf("failure metadata = code:%q message:%q, want newer failure", got.LastErrorCode, got.LastErrorMessage)
+		}
+		if got.LastAttemptAt == nil || !got.LastAttemptAt.Equal(newerAttempt) {
+			t.Fatalf("last attempt = %v, want %s", got.LastAttemptAt, newerAttempt)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("read failure cursor after stale attempt: %v", err)
+	}
+}
+
+func TestRecordIngestionCursorFailureRejectsSameOrderMismatchedPendingCursor(t *testing.T) {
+	db, project := setupTestDB(t)
+	ctx := context.Background()
+	originalAttempt := time.Date(2026, 7, 22, 10, 0, 0, 0, time.UTC)
+
+	if err := WithTx(ctx, db, func(tx *sql.Tx) error {
+		return RecordIngestionCursorFailure(
+			ctx, tx, project.ID, domain.SourceOpenCode, "same-order-pending", 7,
+			`{"offset":7}`, "digest-7", "original-failure", "original failure", originalAttempt,
+		)
+	}); err != nil {
+		t.Fatalf("record original failure: %v", err)
+	}
+
+	var original domain.IngestionCursor
+	if err := WithTx(ctx, db, func(tx *sql.Tx) error {
+		got, findErr := FindIngestionCursor(ctx, tx, project.ID, domain.SourceOpenCode, "same-order-pending")
+		if findErr != nil {
+			return findErr
+		}
+		if got == nil {
+			t.Fatal("original failure cursor = nil")
+		}
+		original = *got
+		return nil
+	}); err != nil {
+		t.Fatalf("read original failure cursor: %v", err)
+	}
+
+	err := WithTx(ctx, db, func(tx *sql.Tx) error {
+		return RecordIngestionCursorFailure(
+			ctx, tx, project.ID, domain.SourceOpenCode, "same-order-pending", 7,
+			`{"offset":8}`, "digest-8", "mismatched-failure", "mismatched failure", originalAttempt.Add(time.Minute),
+		)
+	})
+	assertDomainCode(t, err, domain.ErrExperienceCursorConflict)
+
+	if err := WithTx(ctx, db, func(tx *sql.Tx) error {
+		got, findErr := FindIngestionCursor(ctx, tx, project.ID, domain.SourceOpenCode, "same-order-pending")
+		if findErr != nil {
+			return findErr
+		}
+		if !reflect.DeepEqual(got, &original) {
+			t.Fatalf("cursor after mismatched failure = %#v, want %#v", got, &original)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("read cursor after mismatched failure: %v", err)
+	}
+
+	recovered := original
+	recoveryAt := originalAttempt.Add(2 * time.Minute)
+	recovered.LastSuccessfulAt = timePtr(recoveryAt)
+	recovered.LastAttemptAt = timePtr(recoveryAt)
+	recovered.LastErrorCode = ""
+	recovered.LastErrorMessage = ""
+	recovered.Revision++
+	if err := WithTx(ctx, db, func(tx *sql.Tx) error {
+		return UpdateIngestionCursor(ctx, tx, &recovered, original.Revision)
+	}); err != nil {
+		t.Fatalf("recover original failed cursor: %v", err)
+	}
+}
+
+func TestRecordIngestionCursorFailureRejectsSameOrderMismatchedSuccessfulCursor(t *testing.T) {
+	db, project := setupTestDB(t)
+	ctx := context.Background()
+	_, _, _, cursor := newExperienceBundle(project.ID, "same-order-success")
+	cursor.SourceInstance = "same-order-success"
+	cursor.CursorJSON = `{"offset":7}`
+	cursor.InputDigest = "digest-7"
+	cursor.SourceOrder = 7
+
+	if err := WithTx(ctx, db, func(tx *sql.Tx) error {
+		return SaveIngestionCursor(ctx, tx, cursor)
+	}); err != nil {
+		t.Fatalf("save successful cursor: %v", err)
+	}
+
+	err := WithTx(ctx, db, func(tx *sql.Tx) error {
+		return RecordIngestionCursorFailure(
+			ctx, tx, project.ID, domain.SourceOpenCode, "same-order-success", 7,
+			`{"offset":8}`, "digest-8", "mismatched-failure", "mismatched failure", cursor.LastAttemptAt.Add(time.Minute),
+		)
+	})
+	assertDomainCode(t, err, domain.ErrExperienceCursorConflict)
+
+	if err := WithTx(ctx, db, func(tx *sql.Tx) error {
+		got, findErr := FindIngestionCursor(ctx, tx, project.ID, domain.SourceOpenCode, "same-order-success")
+		if findErr != nil {
+			return findErr
+		}
+		if !reflect.DeepEqual(got, cursor) {
+			t.Fatalf("successful cursor after mismatched failure = %#v, want %#v", got, cursor)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("read successful cursor after mismatched failure: %v", err)
 	}
 }
 
@@ -654,7 +879,7 @@ func newExperienceBundle(projectID domain.ProjectID, suffix string) (*domain.Exp
 	cursor := &domain.IngestionCursor{
 		ProjectID: projectID, Source: domain.SourceOpenCode, SourceInstance: "instance-" + suffix,
 		CursorJSON: `{"offset":21}`, LastSuccessfulAt: &closed, LastAttemptAt: &lastAttempt,
-		LastErrorCode: "", LastErrorMessage: "", InputDigest: "input-digest", Revision: 1,
+		LastErrorCode: "", LastErrorMessage: "", InputDigest: "input-digest", Revision: 1, SourceOrder: 1,
 	}
 	return session, turn, event, cursor
 }
