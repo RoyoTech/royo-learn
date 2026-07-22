@@ -42,7 +42,7 @@ func Open(path string) (*DB, error) {
 }
 
 func sqliteDSN(path string) string {
-	const pragma = "_pragma=foreign_keys(1)"
+	const pragma = "_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
 	separator := "?"
 	if strings.Contains(path, "?") {
 		separator = "&"

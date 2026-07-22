@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -304,6 +305,83 @@ func TestConcurrentMigration(t *testing.T) {
 	}
 	if count < 1 {
 		t.Errorf("schema_migrations row count after concurrent Migrate = %d, want >= 1", count)
+	}
+}
+
+func TestConcurrentIdenticalMigrationApplicationIsTolerated(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "migration-race.db")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatalf("open first database: %v", err)
+	}
+	defer first.Close()
+	second, err := Open(path)
+	if err != nil {
+		t.Fatalf("open second database: %v", err)
+	}
+	defer second.Close()
+	if _, err := first.DB.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, checksum TEXT NOT NULL, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatalf("create schema_migrations: %v", err)
+	}
+
+	m := migration{
+		Version:  99,
+		Name:     "099_concurrent_test",
+		SQL:      `CREATE TABLE IF NOT EXISTS concurrent_migration_table (id INTEGER PRIMARY KEY)`,
+		Checksum: "same-checksum",
+	}
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, db := range []*sql.DB{first.DB, second.DB} {
+		wg.Add(1)
+		go func(conn *sql.DB) {
+			defer wg.Done()
+			<-start
+			errs <- applyMigration(conn, m)
+		}(db)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("identical concurrent migration failed: %v", err)
+		}
+	}
+
+	var count int
+	if err := first.DB.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE version = 99 AND checksum = 'same-checksum'`).Scan(&count); err != nil {
+		t.Fatalf("read migration row: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("migration rows = %d, want 1", count)
+	}
+}
+
+func TestConcurrentMigrationChecksumMismatchStillFails(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "migration-checksum.db")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.DB.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, checksum TEXT NOT NULL, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatalf("create schema_migrations: %v", err)
+	}
+	if _, err := db.DB.Exec(`INSERT INTO schema_migrations(version, name, checksum, applied_at) VALUES (100, '100_test', 'stored-checksum', datetime('now'))`); err != nil {
+		t.Fatalf("insert stored migration: %v", err)
+	}
+	err = applyMigration(db.DB, migration{
+		Version:  100,
+		Name:     "100_test",
+		SQL:      `CREATE TABLE IF NOT EXISTS checksum_test_table (id INTEGER PRIMARY KEY)`,
+		Checksum: "current-checksum",
+	})
+	if err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("error = %v, want checksum mismatch", err)
 	}
 }
 
