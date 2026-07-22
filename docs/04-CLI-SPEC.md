@@ -12,6 +12,14 @@
 
 ## Comandos
 
+### `royo-learn experience inject`
+
+Inyecta un `ExperienceEnvelope` JSON de fixture mediante `--envelope <path>` o `--envelope=-` para stdin. La operación valida el contrato de experiencia y escribe un único JSON de resultado a `stdout`; los errores estructurados van a `stderr`.
+
+```text
+royo-learn experience inject --envelope fixture.json --project-root /repo
+```
+
 ### `royo-learn version`
 
 Muestra versión, commit, fecha y Go version.

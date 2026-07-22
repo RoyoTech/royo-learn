@@ -52,6 +52,14 @@ mcp_protocol_error
 payload_too_large
 external_command_failed
 timeout
+experience_source_not_found
+experience_source_schema_unsupported
+experience_turn_incomplete
+experience_locator_invalid
+experience_locator_outside_root
+experience_payload_too_large
+experience_revision_conflict
+experience_cursor_conflict
 experience_commit_unknown
 ```
 

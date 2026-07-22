@@ -326,3 +326,10 @@ type Actor struct {
 - Una evidencia nunca contiene un secreto conocido sin redacción.
 - Una relación no puede referenciar el mismo ID en ambos extremos.
 - El audit log no se actualiza ni elimina.
+
+
+## Experiencia observada
+
+`ExperienceEnvelope` es una entrada estructurada y acotada para sesiones y turnos observados. La ingestión persiste referencias, digests redacted, cursores y auditoría en SQLite; no convierte experiencia en aprendizaje aprobado ni almacena transcript completo por defecto.
+
+Invariantes de Hito 1: redacción antes de hash y persistencia, reintentos exactos idempotentes, revisiones mediante `source_revision`, y cursor avanzado solo después del commit transaccional.

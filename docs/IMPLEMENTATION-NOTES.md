@@ -414,3 +414,9 @@ the existing in-file pattern.
 3. Hito 1 closure gate: `-race`, `internal/experience` coverage,
    cross-build windows/linux/darwin, contracts verification.
 
+
+## Slice 1.D — Experience fixture ingestion
+
+- `feat(config): add ExperienceConfig disabled by default` (`eeeb938`): added the contract-minimal opt-in flag and merge behavior.
+- `feat(cli): add experience inject fixture command` (`ec163f1`): added adapter-free JSON fixture ingestion with stable stdout and stderr errors.
+- `test(experience): add Hito 1 acceptance suite` (`08a600a`): covered creation, retry idempotency, revision CAS, redaction sinks, and cursor rollback.
