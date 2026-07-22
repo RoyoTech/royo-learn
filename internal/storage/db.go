@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"sync"
 
 	_ "modernc.org/sqlite"
@@ -18,7 +19,7 @@ type DB struct {
 // Open opens a SQLite database at path and applies the required pragmas.
 // It returns a ready-to-use *DB connection.
 func Open(path string) (*DB, error) {
-	conn, err := sql.Open("sqlite", path)
+	conn, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {
 		return nil, fmt.Errorf("storage: open %q: %w", path, err)
 	}
@@ -38,6 +39,18 @@ func Open(path string) (*DB, error) {
 	}
 
 	return &DB{DB: conn, path: path}, nil
+}
+
+func sqliteDSN(path string) string {
+	const pragma = "_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+	if strings.HasSuffix(path, "?") || strings.HasSuffix(path, "&") {
+		separator = ""
+	}
+	return path + separator + pragma
 }
 
 // Close closes the underlying database connection.

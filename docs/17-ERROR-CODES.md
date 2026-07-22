@@ -52,6 +52,7 @@ mcp_protocol_error
 payload_too_large
 external_command_failed
 timeout
+experience_commit_unknown
 ```
 
 Todos deben mapear a CLI exit code y MCP envelope.

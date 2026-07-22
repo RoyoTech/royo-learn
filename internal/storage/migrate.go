@@ -9,10 +9,15 @@ import (
 	"io/fs"
 	"sort"
 	"strings"
+	"sync"
 )
 
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
+
+// migrationMu prevents duplicate work between DB wrappers in one process. The
+// schema row reconciliation below remains necessary for separate processes.
+var migrationMu sync.Mutex
 
 // MigrateError signals that a migration could not be applied.
 type MigrateError struct {
@@ -37,8 +42,9 @@ type migration struct {
 // directory. It is safe to call multiple times: applied migrations are skipped,
 // and if a previously applied migration has been modified it returns an error.
 //
-// Concurrent calls are serialised via a mutex; only the first caller applies
-// migrations while later callers receive an error.
+// Concurrent calls on the same DB wrapper are rejected by its fast mutex. Calls
+// using separate wrappers are serialised locally and also reconcile an
+// identical schema row if another process wins the SQLite race.
 func Migrate(db *DB) error {
 	if db == nil || db.DB == nil {
 		return errors.New("storage: nil database connection")
@@ -48,6 +54,8 @@ func Migrate(db *DB) error {
 		return errors.New("storage: migration already in progress")
 	}
 	defer db.mu.Unlock()
+	migrationMu.Lock()
+	defer migrationMu.Unlock()
 
 	return migrateDB(db.DB)
 }
@@ -172,6 +180,13 @@ func applyMigration(conn *sql.DB, m migration) error {
 	}()
 
 	if _, err := tx.Exec(m.SQL); err != nil {
+		_ = tx.Rollback()
+		tx = nil
+		if handled, statusErr := reconcileConcurrentMigration(conn, m); statusErr != nil {
+			return statusErr
+		} else if handled {
+			return nil
+		}
 		return &MigrateError{Version: m.Version, Name: m.Name, Reason: fmt.Sprintf("exec: %v", err)}
 	}
 
@@ -179,6 +194,15 @@ func applyMigration(conn *sql.DB, m migration) error {
 		`INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, datetime('now'))`,
 		m.Version, m.Name, m.Checksum,
 	); err != nil {
+		if isUniqueViolation(err) {
+			_ = tx.Rollback()
+			tx = nil
+			if handled, statusErr := reconcileConcurrentMigration(conn, m); statusErr != nil {
+				return statusErr
+			} else if handled {
+				return nil
+			}
+		}
 		return &MigrateError{Version: m.Version, Name: m.Name, Reason: fmt.Sprintf("record: %v", err)}
 	}
 
@@ -187,6 +211,26 @@ func applyMigration(conn *sql.DB, m migration) error {
 	}
 	tx = nil // prevent rollback in defer
 	return nil
+}
+
+// reconcileConcurrentMigration distinguishes an identical concurrent winner
+// from a tampered migration. It never treats a checksum mismatch as success.
+func reconcileConcurrentMigration(conn *sql.DB, m migration) (bool, error) {
+	applied, storedChecksum, err := isApplied(conn, m.Version)
+	if err != nil {
+		return false, &MigrateError{Version: m.Version, Name: m.Name, Reason: fmt.Sprintf("reconcile status: %v", err)}
+	}
+	if !applied {
+		return false, nil
+	}
+	if storedChecksum != m.Checksum {
+		return false, &MigrateError{
+			Version: m.Version,
+			Name:    m.Name,
+			Reason:  fmt.Sprintf("checksum mismatch: stored=%s current=%s", storedChecksum, m.Checksum),
+		}
+	}
+	return true, nil
 }
 
 // MigrationPlan describes a single pending migration without applying it.
