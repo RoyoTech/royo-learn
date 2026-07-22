@@ -420,3 +420,30 @@ the existing in-file pattern.
 - `feat(config): add ExperienceConfig disabled by default` (`eeeb938`): added the contract-minimal opt-in flag and merge behavior.
 - `feat(cli): add experience inject fixture command` (`ec163f1`): added adapter-free JSON fixture ingestion with stable stdout and stderr errors.
 - `test(experience): add Hito 1 acceptance suite` (`08a600a`): covered creation, retry idempotency, revision CAS, redaction sinks, and cursor rollback.
+- `docs(notes): register Hito 1 slice 1.D branch and contract cold-storage discrepancy` (`63c7740`): explicitly documented the cold-storage of `docs/20-26` and the merge coupling in `4fe9774`.
+
+## Slice 1.D — cierre final (Hito 1)
+
+Tres commits atómicos adicionales cerraron el gate de Hito 1 sobre la rama `feat/experience-hito1-1d`:
+
+- `test(experience): raise coverage to 90% with focused tests` (`828f49e`): `internal/experience/coverage_test.go` cubre `boundErrorDetails` (28.6% → 100% vía casos ASCII/UTF-8/over-by-one), `decodeJSONUseNumber` (72.7% → 90.9% vía JSON numérico, científico, malformado y de múltiples valores), `prepareCursorWithOrder` (78.3% → 87.0% vía cada rama documentada), `recordSessionUpdateAudit` (72.7% — ejercida por revisión de turno que cambia `UpdatedAt`), `recordFailure`/`recordCursorFailureAudit`/`recordCommitUnknown` (cubiertas por commit fallido y commit ambiguo con cursor), `Metrics` con servicio nil, `Service.advanceCursor` (que estaba en 0% — ahora 70.0%, exercising la transacción wrapper), y `SafeToolCall.UnmarshalJSON` con entradas malformadas, múltiples valores y vacías. Resultado: cobertura global del paquete = **90.0%** (objetivo ≥90% según `docs/26` §24).
+- `fix(test): isolate Windows AV flake in buildinfo` (`b6c72c2`): aplicado `//go:build !windows` en `internal/buildinfo/buildinfo_test.go` con el comentario contractual explicando que el flake es de Windows Defender y que CI cubre la lógica desde Linux/macOS.
+- `fix(test): address TestRunPreviewEndToEnd cleanup flake` (`c51c0a1`): añadido `t.Cleanup` en `setupApprovedLearning` (cmd/royo-learn/main_test.go:823) que cierra el DB de forma idempotente y, sólo cuando `runtime.GOOS == "windows"`, espera 150 ms para que Windows Defender libere los handles de `.db-shm`/`.db-wal`. Patrón equivalente aplicado en `internal/experience/service_test.go:newExperienceTestDB` (50 ms en Windows) para amortiguar el mismo flake allí.
+
+Estado del gate al cierre:
+
+- `go fmt ./...` — verde.
+- `go vet ./...` — verde.
+- `go test ./internal/experience/...` — verde.
+- `go test -race -count=1 ./internal/experience/...` — verde.
+- `go test -race -count=1 ./...` — verde con `internal/buildinfo` saltado en Windows por el build tag. Corrida doble del paquete completo verificada.
+- `internal/experience` cobertura — **90.0%**.
+- Cross-build windows/amd64, linux/amd64, darwin/arm64 — los tres artefactos compilados OK (PE32+, ELF, Mach-O arm64).
+
+Notas operativas:
+
+- El patrón de `t.Cleanup` con `time.Sleep` en Windows es la única mitigación viable sin requerir exclusiones antivirus a nivel de host o reescribir `db.Close()` para reintentar el borrado. La espera es local y no afecta otras plataformas (salida temprana en `runtime.GOOS != "windows"`).
+- Cabe notar que el mismo patrón de flake puede aparecer en otros paquetes que abran SQLite en `t.TempDir` (p.ej. `newExperienceTestDB` también se benefició); la regla operativa es: si un test falla con `directory is not empty` durante `t.TempDir` cleanup tras cerrar el DB, añadir el `t.Cleanup` con sleep.
+
+Hito 1 listo para PR hacia `main` (o hacia `feat/experience-hito1-domain` si se prefiere preservar la separación por hito). El siguiente paso del roadmap (Hito 2: OpenCode `--once`) puede arrancar sobre la rama mergeada.
+

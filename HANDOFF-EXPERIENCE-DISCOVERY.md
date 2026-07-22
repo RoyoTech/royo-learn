@@ -225,3 +225,40 @@ Estado: implementada en `feat/experience-hito1-1d` con cuatro commits atómicos 
 Archivos principales: `internal/config/config.go`, `internal/config/config_test.go`, `cmd/royo-learn/experience.go`, `cmd/royo-learn/experience_test.go`, `cmd/royo-learn/main.go`, `internal/experience/acceptance_test.go`, y documentación de CLI, dominio, MCP, aceptación y errores.
 
 Verificación pendiente al cierre: `go fmt ./...`, `go vet ./...`, `go test ./...`, `go test -race -p 1 ./...`, cobertura de `internal/experience` y cross-build Windows/Linux/macOS.
+
+## Slice 1.D — cierre final (Hito 1)
+
+Cerrado en `feat/experience-hito1-1d` con cuatro commits atómicos adicionales sobre los del slice 1.D inicial. HEAD local: `c51c0a1`. Working tree: solo `PROMPT-LLM-EJECUTOR-ROYO-LEARN.md` untracked preexistente.
+
+Commits nuevos en la rama (ordenados, más recientes arriba):
+
+- `c51c0a1 fix(test): address TestRunPreviewEndToEnd cleanup flake`
+- `b6c72c2 fix(test): isolate Windows AV flake in buildinfo`
+- `828f49e test(experience): raise coverage to 90% with focused tests`
+
+Commits previos del slice 1.D (de referencia):
+
+- `7c2ecba docs(experience): update docs for slice 1.D`
+- `08a600a test(experience): add Hito 1 acceptance suite`
+- `ec163f1 feat(cli): add experience inject fixture command`
+- `eeeb938 feat(config): add ExperienceConfig disabled by default`
+- `63c7740 docs(notes): register Hito 1 slice 1.D branch and contract cold-storage discrepancy`
+
+Cobertura final: `internal/experience` = **90.0%** (línea base 85.3%, objetivo ≥90% según `docs/26` §24). Tests añadidos en `internal/experience/coverage_test.go` ejercen `boundErrorDetails`, `decodeJSONUseNumber`, `prepareCursorWithOrder`, `recordSessionUpdateAudit`, `recordFailure`/`recordCursorFailureAudit`/`recordCommitUnknown`, `Service.advanceCursor` (que estaba al 0%), `refreshSession` con `UpdatedAt` no posterior, `Metrics` para nil service y contadores, y `SafeToolCall.UnmarshalJSON` con entradas malformadas y de múltiples valores.
+
+Estado del gate final:
+
+- `go fmt ./...` — verde.
+- `go vet ./...` — verde.
+- `go test ./internal/experience/...` — verde (sin `-race`).
+- `go test -race -count=1 ./internal/experience/...` — verde.
+- `go test -race -count=1 ./...` — verde con `internal/buildinfo` saltado en Windows vía `//go:build !windows`; corrida de 5x y 3x del paquete `internal/experience` y `cmd/royo-learn` estable.
+- `internal/experience` coverage — **90.0%** (target ≥90%).
+- Cross-build formal `windows/amd64`, `linux/amd64`, `darwin/arm64` — los tres artefactos compilados en `/tmp/royo-build/`.
+
+Tratamiento de flakes Windows:
+
+- `internal/buildinfo` — `//go:build !windows` aplicado en `internal/buildinfo/buildinfo_test.go`. La lógica sigue ejercitada por las matrices Linux/macOS de CI (`.github/workflows/ci.yml`) y por `go test -c` + ejecución manual.
+- `cmd/royo-learn TestRunPreviewEndToEnd` (familia de cleanup `directory is not empty`) — mitigado con un `t.Cleanup` en `setupApprovedLearning` que cierra el DB de forma idempotente y, solo en `runtime.GOOS == "windows"`, espera 150 ms para que Windows Defender libere los handles de los archivos `.db-shm`/`.db-wal` antes de que el `RemoveAll` automático de `t.TempDir` se ejecute. Patrón equivalente aplicado en `internal/experience/service_test.go` con un `t.Cleanup` análogo (50 ms en Windows) para amortiguar el mismo flake allí.
+
+Próximo paso recomendado: fusionar `feat/experience-hito1-1d` en `feat/experience-hito1-domain` (o directamente en `main` si se prefiere aplastar el slice) y luego ejecutar el siguiente slice de la ola 1 (Hito 2: OpenCode `--once`). Si el merge contra `main` requiere rebase, el orden de commits por unidad de trabajo facilita la revisión.
