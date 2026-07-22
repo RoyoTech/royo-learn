@@ -55,9 +55,14 @@ func FindExperienceSession(ctx context.Context, tx *sql.Tx, projectID domain.Pro
 }
 
 // UpdateExperienceSession refreshes mutable session metadata without changing identity.
-func UpdateExperienceSession(ctx context.Context, tx *sql.Tx, session *domain.ExperienceSession) error {
+// The updated-at predicate prevents an older envelope from winning a refresh race.
+func UpdateExperienceSession(ctx context.Context, tx *sql.Tx, session *domain.ExperienceSession, expectedUpdatedAt time.Time) error {
 	if err := domain.ValidateExperienceSession(session); err != nil {
 		return err
+	}
+	if expectedUpdatedAt.IsZero() || !session.UpdatedAt.After(expectedUpdatedAt) {
+		return domain.NewConflictError(domain.ErrExperienceRevisionConflict,
+			"experience session update timestamp is stale")
 	}
 	locatorJSON, err := json.Marshal(session.Locator)
 	if err != nil {
@@ -66,10 +71,10 @@ func UpdateExperienceSession(ctx context.Context, tx *sql.Tx, session *domain.Ex
 	result, err := tx.ExecContext(ctx, `
 		UPDATE experience_sessions
 		SET locator_json = ?, started_at = ?, updated_at = ?, closed_at = ?, metadata_sha256 = ?
-		WHERE id = ? AND project_id = ? AND source = ? AND external_session_id = ?
+		WHERE id = ? AND project_id = ? AND source = ? AND external_session_id = ? AND updated_at = ?
 	`, string(locatorJSON), nullableTime(session.StartedAt), formatTime(session.UpdatedAt),
 		nullableTime(session.ClosedAt), session.MetadataSHA256, string(session.ID),
-		string(session.ProjectID), string(session.Source), session.ExternalSessionID)
+		string(session.ProjectID), string(session.Source), session.ExternalSessionID, formatTime(expectedUpdatedAt))
 	if err != nil {
 		return fmt.Errorf("UpdateExperienceSession: %w", err)
 	}
@@ -204,11 +209,11 @@ func SaveIngestionCursor(ctx context.Context, tx *sql.Tx, cursor *domain.Ingesti
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO ingestion_cursors
 			(project_id, source, source_instance, cursor_json, last_successful_at, last_attempt_at,
-			 last_error_code, last_error_message, input_digest, revision)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 last_error_code, last_error_message, input_digest, revision, source_order)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, string(cursor.ProjectID), string(cursor.Source), cursor.SourceInstance, cursor.CursorJSON,
 		nullableTime(cursor.LastSuccessfulAt), nullableTime(cursor.LastAttemptAt), cursor.LastErrorCode,
-		cursor.LastErrorMessage, cursor.InputDigest, cursor.Revision)
+		cursor.LastErrorMessage, cursor.InputDigest, cursor.Revision, cursor.SourceOrder)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return domain.NewConflictError(domain.ErrExperienceRevisionConflict, "ingestion cursor identity already exists")
@@ -222,7 +227,7 @@ func SaveIngestionCursor(ctx context.Context, tx *sql.Tx, cursor *domain.Ingesti
 func FindIngestionCursor(ctx context.Context, tx *sql.Tx, projectID domain.ProjectID, source domain.ExperienceSource, sourceInstance string) (*domain.IngestionCursor, error) {
 	row := tx.QueryRowContext(ctx, `
 		SELECT project_id, source, source_instance, cursor_json, last_successful_at, last_attempt_at,
-		       last_error_code, last_error_message, input_digest, revision
+		       last_error_code, last_error_message, input_digest, revision, source_order
 		FROM ingestion_cursors WHERE project_id = ? AND source = ? AND source_instance = ?
 	`, string(projectID), string(source), sourceInstance)
 	cursor, err := scanIngestionCursor(row)
@@ -246,11 +251,14 @@ func UpdateIngestionCursor(ctx context.Context, tx *sql.Tx, cursor *domain.Inges
 	result, err := tx.ExecContext(ctx, `
 		UPDATE ingestion_cursors
 		SET cursor_json = ?, last_successful_at = ?, last_attempt_at = ?, last_error_code = ?,
-		    last_error_message = ?, input_digest = ?, revision = ?
+		    last_error_message = ?, input_digest = ?, revision = ?, source_order = ?
 		WHERE project_id = ? AND source = ? AND source_instance = ? AND revision = ?
+		  AND (last_successful_at IS NULL OR source_order < ? OR
+		       (source_order = ? AND (last_successful_at IS NULL OR last_error_code <> '') AND input_digest = ?))
 	`, cursor.CursorJSON, nullableTime(cursor.LastSuccessfulAt), nullableTime(cursor.LastAttemptAt),
-		cursor.LastErrorCode, cursor.LastErrorMessage, cursor.InputDigest, cursor.Revision,
-		string(cursor.ProjectID), string(cursor.Source), cursor.SourceInstance, expectedRevision)
+		cursor.LastErrorCode, cursor.LastErrorMessage, cursor.InputDigest, cursor.Revision, cursor.SourceOrder,
+		string(cursor.ProjectID), string(cursor.Source), cursor.SourceInstance, expectedRevision,
+		cursor.SourceOrder, cursor.SourceOrder, cursor.InputDigest)
 	if err != nil {
 		return fmt.Errorf("UpdateIngestionCursor: %w", err)
 	}
@@ -260,6 +268,79 @@ func UpdateIngestionCursor(ctx context.Context, tx *sql.Tx, cursor *domain.Inges
 	}
 	if rows != 1 {
 		return domain.NewConflictError(domain.ErrExperienceCursorConflict, "ingestion cursor revision is stale")
+	}
+	return nil
+}
+
+// RecordIngestionCursorFailure records the last failed attempt without moving
+// the successful checkpoint. A source-order guard prevents stale failures from
+// overwriting a newer cursor, while a first failure creates an unsucceeded row
+// that can be completed by an exact retry.
+func RecordIngestionCursorFailure(ctx context.Context, tx *sql.Tx, projectID domain.ProjectID, source domain.ExperienceSource, sourceInstance string, sourceOrder int64, cursorJSON, inputDigest, code, message string, attemptedAt time.Time) error {
+	if projectID == "" || !domain.IsValidExperienceSource(source) || sourceInstance == "" || cursorJSON == "" || inputDigest == "" || sourceOrder < 0 {
+		return domain.NewValidationError(domain.ErrInvalidArgument, "invalid ingestion cursor failure")
+	}
+	if len(string(projectID)) > domain.MaxExperienceIDBytes ||
+		len(sourceInstance) > domain.MaxExperienceSourceInstanceBytes ||
+		len(cursorJSON) > domain.MaxExperienceCursorBytes ||
+		len(inputDigest) > domain.MaxExperienceDigestBytes ||
+		len(code) > domain.MaxExperienceErrorCodeBytes {
+		return domain.NewValidationError(domain.ErrExperiencePayloadTooLarge, "ingestion cursor failure metadata is too large")
+	}
+	if len(message) > maxExperienceErrorMessageBytes {
+		return domain.NewValidationError(domain.ErrExperiencePayloadTooLarge, "ingestion cursor failure message is too large")
+	}
+	existing, err := FindIngestionCursor(ctx, tx, projectID, source, sourceInstance)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		attempt := attemptedAt
+		return SaveIngestionCursor(ctx, tx, &domain.IngestionCursor{
+			ProjectID:        projectID,
+			Source:           source,
+			SourceInstance:   sourceInstance,
+			CursorJSON:       cursorJSON,
+			LastAttemptAt:    &attempt,
+			LastErrorCode:    code,
+			LastErrorMessage: message,
+			InputDigest:      inputDigest,
+			Revision:         1,
+			// A failed attempt is not a successful checkpoint. Retain its
+			// source order only to reject older failure metadata; a later
+			// successful attempt may still replace this unsucceeded row.
+			SourceOrder: sourceOrder,
+		})
+	}
+	if sourceOrder < existing.SourceOrder {
+		return domain.NewConflictError(domain.ErrExperienceCursorConflict,
+			"ingestion cursor failure source order is stale")
+	}
+	if sourceOrder == existing.SourceOrder &&
+		(cursorJSON != existing.CursorJSON || inputDigest != existing.InputDigest) {
+		return domain.NewConflictError(domain.ErrExperienceCursorConflict,
+			"ingestion cursor failure metadata conflicts at source order")
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE ingestion_cursors
+		SET cursor_json = CASE WHEN last_successful_at IS NULL THEN ? ELSE cursor_json END,
+		    input_digest = CASE WHEN last_successful_at IS NULL THEN ? ELSE input_digest END,
+		    last_attempt_at = ?, last_error_code = ?, last_error_message = ?,
+		    source_order = CASE WHEN last_successful_at IS NULL THEN ? ELSE source_order END,
+		    revision = revision + 1
+		WHERE project_id = ? AND source = ? AND source_instance = ? AND revision = ?
+		  AND (last_successful_at IS NULL OR source_order <= ?)
+	`, cursorJSON, inputDigest, nullableTime(&attemptedAt), code, message, sourceOrder, string(projectID), string(source), sourceInstance, existing.Revision, sourceOrder)
+	if err != nil {
+		return fmt.Errorf("RecordIngestionCursorFailure: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("RecordIngestionCursorFailure: rows affected: %w", err)
+	}
+	if rows != 1 {
+		return domain.NewConflictError(domain.ErrExperienceCursorConflict,
+			"ingestion cursor failure target is stale")
 	}
 	return nil
 }
@@ -341,7 +422,7 @@ func scanIngestionCursor(row scanner) (*domain.IngestionCursor, error) {
 	var lastSuccessfulAt, lastAttemptAt sql.NullString
 	if err := row.Scan((*string)(&cursor.ProjectID), (*string)(&cursor.Source), &cursor.SourceInstance,
 		&cursor.CursorJSON, &lastSuccessfulAt, &lastAttemptAt, &cursor.LastErrorCode,
-		&cursor.LastErrorMessage, &cursor.InputDigest, &cursor.Revision); err != nil {
+		&cursor.LastErrorMessage, &cursor.InputDigest, &cursor.Revision, &cursor.SourceOrder); err != nil {
 		return nil, err
 	}
 	var err error
@@ -361,20 +442,43 @@ func validateIngestionCursor(cursor *domain.IngestionCursor) error {
 	if cursor.ProjectID == "" {
 		return domain.NewValidationError(domain.ErrInvalidArgument, "ingestion cursor project_id is required")
 	}
+	if len(string(cursor.ProjectID)) > domain.MaxExperienceIDBytes {
+		return domain.NewValidationError(domain.ErrExperiencePayloadTooLarge, "ingestion cursor project_id is too large")
+	}
 	if !domain.IsValidExperienceSource(cursor.Source) {
-		return domain.NewValidationError(domain.ErrInvalidArgument, fmt.Sprintf("invalid experience source: %q", cursor.Source))
+		return domain.NewValidationError(domain.ErrInvalidArgument, "invalid experience source")
 	}
 	if cursor.SourceInstance == "" {
 		return domain.NewValidationError(domain.ErrInvalidArgument, "ingestion cursor source_instance is required")
 	}
+	if len(cursor.SourceInstance) > domain.MaxExperienceSourceInstanceBytes {
+		return domain.NewValidationError(domain.ErrExperiencePayloadTooLarge, "ingestion cursor source_instance is too large")
+	}
 	if cursor.CursorJSON == "" {
 		return domain.NewValidationError(domain.ErrInvalidArgument, "ingestion cursor cursor_json is required")
+	}
+	if len(cursor.CursorJSON) > domain.MaxExperienceCursorBytes {
+		return domain.NewValidationError(domain.ErrExperiencePayloadTooLarge, "ingestion cursor cursor_json is too large")
+	}
+	if len(cursor.LastErrorCode) > domain.MaxExperienceErrorCodeBytes {
+		return domain.NewValidationError(domain.ErrExperiencePayloadTooLarge, "ingestion cursor error code is too large")
+	}
+	if len(cursor.InputDigest) > domain.MaxExperienceDigestBytes {
+		return domain.NewValidationError(domain.ErrExperiencePayloadTooLarge, "ingestion cursor input digest is too large")
 	}
 	if cursor.Revision < 1 {
 		return domain.NewValidationError(domain.ErrInvalidArgument, "ingestion cursor revision must be positive")
 	}
+	if cursor.SourceOrder < 0 {
+		return domain.NewValidationError(domain.ErrInvalidArgument, "ingestion cursor source order must be non-negative")
+	}
+	if len(cursor.LastErrorMessage) > maxExperienceErrorMessageBytes {
+		return domain.NewValidationError(domain.ErrExperiencePayloadTooLarge, "ingestion cursor error message is too large")
+	}
 	return nil
 }
+
+const maxExperienceErrorMessageBytes = domain.MaxExperienceErrorMessageBytes
 
 func requireExperienceUpdate(result sql.Result, entity string) error {
 	rows, err := result.RowsAffected()

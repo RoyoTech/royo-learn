@@ -72,5 +72,6 @@ CREATE TABLE IF NOT EXISTS ingestion_cursors (
     last_error_message TEXT NOT NULL,
     input_digest TEXT NOT NULL,
     revision INTEGER NOT NULL,
+    source_order INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY(project_id, source, source_instance)
 );
