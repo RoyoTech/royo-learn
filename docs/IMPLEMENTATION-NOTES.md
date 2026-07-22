@@ -447,3 +447,21 @@ Notas operativas:
 
 Hito 1 listo para PR hacia `main` (o hacia `feat/experience-hito1-domain` si se prefiere preservar la separación por hito). El siguiente paso del roadmap (Hito 2: OpenCode `--once`) puede arrancar sobre la rama mergeada.
 
+### Mitigaciones adicionales para flakes Windows
+
+Durante la verificación final del gate se detectaron más apariciones del mismo patrón `TempDir RemoveAll cleanup: ... directory is not empty` en paquetes no cubiertos explícitamente por las tareas 2 y 3. Se abordaron cinco commits atómicos siguiendo la misma mitigación (`testutil.TempDir(t)` reescribe la idempotencia del `RemoveAll`):
+
+- `fix(test): address TestRunPreviewEndToEnd cleanup flake` (`c51c0a1`): `t.Cleanup` con espera de 150 ms en Windows en `setupApprovedLearning` (cmd/royo-learn/main_test.go).
+- `fix(test): dampen internal/experience cleanup flake on Windows` (`a35809b`): `t.Cleanup` análogo en `newExperienceTestDB` (internal/experience/service_test.go), 50 ms en Windows.
+- `fix(test): amortize remaining Windows cleanup flakes in shared helpers` (`1505f30`): cambio de `t.TempDir()` a `testutil.TempDir(t)` en `cmd/royo-learn/evidence_cli_test.go:initProject` (sleep 50 ms) y en `internal/storage/db_test.go` para los tests de migración concurrentes y `TestMigrateDryRun`.
+- `fix(test): amortize Windows cleanup flakes in internal/setup` (`96e1fbf`): migrado todo `internal/setup/*_test.go` (7 archivos, 31 ocurrencias) a `testutil.TempDir(t)`.
+- `fix(test): amortize Windows cleanup flakes in internal/selfupdate` (`4e29b12`): migrado `internal/selfupdate/checksum_test.go`, `replace_test.go`, `selfupdate_test.go` (3 archivos, 16 ocurrencias).
+- `fix(test): amortize onboarding skill install cleanup flake` (`271c7c2`): `cmd/royo-learn/mcp_test.go:TestOnboardingSkillInstallsFromRepository` cambia el destino de `setup.InstallSkills` de `t.TempDir()` a `testutil.TempDir(t)`.
+
+Decisión técnica: el helper `testutil.RemoveAllWithRetry` ya existía y se prefiere por sobre `time.Sleep` fixed-window porque reintenta adaptativamente (20 intentos × 50 ms en el peor caso). `time.Sleep` se reservó para casos donde necesitamos específicamente esperar a que Windows Defender complete su escaneo después de un `db.Close()` que no libera handles de forma observable.
+
+Pendiente fuera de scope:
+
+- Las pruebas en `internal/project`, `internal/evidence`, `internal/integration`, `internal/publish`, `internal/record`, `internal/capture`, `internal/doctor` que aún usan `t.TempDir()` directamente. Recomendable migrar cuando aparezca el flake, siguiendo el mismo patrón.
+- La sensibilidad de timeout en `internal/mcpserver` (`ListTools: context deadline exceeded`) no es un flake de Windows AV — es una suite MCP que ocasionalmente excede el deadline del cliente. Merece una investigación/ADR antes de Hito 2.
+
