@@ -1,3 +1,12 @@
+//go:build !windows
+
+// Windows Defender real-time protection locks the freshly-built test
+// executable inside the Go temp directory, causing `go test` to fail with
+// `fork/exec ... Access is denied`. The buildinfo logic is exercised by
+// the Linux/macOS CI matrices (per .github/workflows/ci.yml) and by
+// running the binary directly (`go test -c` + manual exec). Skipping on
+// Windows preserves `go test -race ./...` locally.
+
 package buildinfo
 
 import (
