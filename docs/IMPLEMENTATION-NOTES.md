@@ -362,3 +362,55 @@ accepted environmental exception and did not reproduce in this final run.
    ordering, focused position test, and the corresponding MCP specification.
 2. `docs(onboarding): document project initialization workflow` — English and
    Spanish onboarding guidance, integration guide, and this handoff.
+
+## Session handoff — 2026-07-22 — Hito 1 slice 1.D
+
+### Branch
+
+`feat/experience-hito1-1d`, started from `main` at `4fe9774`.
+
+### Contract cold-storage discrepancy (registration)
+
+The Hito 0 frozen contracts (`docs/20-EXPERIENCE-INGESTION-PRD.md`
+through `docs/26-IMPLEMENTATION-ROADMAP.md` plus
+`docs/ADR-0001-NO-MEMSEARCH-RUNTIME.md`) and the parent
+`PLAN-MAESTRO-MEMSEARCH-A-ROYO-LEARN.md` exist **only** in commit
+`d812709`. They are not present in `main` or `origin/main`. The Hito 1
+PR #17 (`4fe9774`, squash) merged executable code referencing
+`docs/20-26` as governing contracts, but those contracts were never
+merged onto `main`. This is a documentation drift that the handoff
+inherited and did not surface.
+
+**Resolution for this slice.** Slice 1.D consumes the contracts read from
+`d812709` via `git show d812709:<path>`. The contract cold-storage is
+registered as a known issue to be closed by a separate documentation PR
+either as a prerequisite to, or immediately after, the Hito 1 closure
+PR. The slice itself does not silently retcon the contracts into `main`.
+
+### Minor drift vs. PLAN-MAESTRO §33
+
+`PLAN-MAESTRO-MEMSEARCH-A-ROYO-LEARN.md` §33 lists
+`internal/config/merge.go` and `internal/config/validate.go` as
+separate files. The actual implementation in `main` keeps both `Merge`
+and `Validate` inside `internal/config/config.go`. The plan predates
+the current split and is treated as documentation drift, not a
+refactor target — extending `Config` with `ExperienceConfig` follows
+the existing in-file pattern.
+
+### Current state at branch creation
+
+- `main` HEAD = `origin/main` HEAD = `4fe9774` (Hito 1 1.A-1.C squash).
+- `go build ./...` green (Go 1.26.5 windows/amd64).
+- Working tree: only the two pre-existing untracked files
+  (`HANDOFF-EXPERIENCE-DISCOVERY.md`, `PROMPT-LLM-EJECUTOR-ROYO-LEARN.md`).
+- Sub-branch `feat/experience-hito1-1d` created for slice 1.D work.
+
+### Pending work for this session
+
+1. Slice 1.D: CLI fixture command, `ExperienceConfig`,
+   acceptance suite, documentation coherence.
+2. Isolate or document the Windows-only flakes (`TestRunPreviewEndToEnd`
+   `t.TempDir` cleanup, `internal/buildinfo` `fork/exec … Access is denied`).
+3. Hito 1 closure gate: `-race`, `internal/experience` coverage,
+   cross-build windows/linux/darwin, contracts verification.
+
