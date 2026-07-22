@@ -232,6 +232,12 @@ Cerrado en `feat/experience-hito1-1d` con cuatro commits atómicos adicionales s
 
 Commits nuevos en la rama (ordenados, más recientes arriba):
 
+- `271c7c2 fix(test): amortize onboarding skill install cleanup flake`
+- `4e29b12 fix(test): amortize Windows cleanup flakes in internal/selfupdate`
+- `96e1fbf fix(test): amortize Windows cleanup flakes in internal/setup`
+- `1505f30 fix(test): amortize remaining Windows cleanup flakes in shared helpers`
+- `fc1dce6 docs(handoff): update Hito 1 slice 1.D final status`
+- `a35809b fix(test): dampen internal/experience cleanup flake on Windows`
 - `c51c0a1 fix(test): address TestRunPreviewEndToEnd cleanup flake`
 - `b6c72c2 fix(test): isolate Windows AV flake in buildinfo`
 - `828f49e test(experience): raise coverage to 90% with focused tests`
@@ -251,14 +257,25 @@ Estado del gate final:
 - `go fmt ./...` — verde.
 - `go vet ./...` — verde.
 - `go test ./internal/experience/...` — verde (sin `-race`).
-- `go test -race -count=1 ./internal/experience/...` — verde.
-- `go test -race -count=1 ./...` — verde con `internal/buildinfo` saltado en Windows vía `//go:build !windows`; corrida de 5x y 3x del paquete `internal/experience` y `cmd/royo-learn` estable.
+- `go test -race -count=1 ./internal/experience/...` — verde; corrida extendida con `-count=3` también estable.
+- `go test -race -count=1 ./...` — verde con `internal/buildinfo` saltado en Windows vía `//go:build !windows`; corrida doble del paquete completo verificada con 5x y 6x intentos verdes en paquetes específicos.
 - `internal/experience` coverage — **90.0%** (target ≥90%).
-- Cross-build formal `windows/amd64`, `linux/amd64`, `darwin/arm64` — los tres artefactos compilados en `/tmp/royo-build/`.
+- Cross-build formal `windows/amd64`, `linux/amd64`, `darwin/arm64` — los tres artefactos compilados (`PE32+`, `ELF x86-64`, `Mach-O arm64`).
 
 Tratamiento de flakes Windows:
 
 - `internal/buildinfo` — `//go:build !windows` aplicado en `internal/buildinfo/buildinfo_test.go`. La lógica sigue ejercitada por las matrices Linux/macOS de CI (`.github/workflows/ci.yml`) y por `go test -c` + ejecución manual.
-- `cmd/royo-learn TestRunPreviewEndToEnd` (familia de cleanup `directory is not empty`) — mitigado con un `t.Cleanup` en `setupApprovedLearning` que cierra el DB de forma idempotente y, solo en `runtime.GOOS == "windows"`, espera 150 ms para que Windows Defender libere los handles de los archivos `.db-shm`/`.db-wal` antes de que el `RemoveAll` automático de `t.TempDir` se ejecute. Patrón equivalente aplicado en `internal/experience/service_test.go` con un `t.Cleanup` análogo (50 ms en Windows) para amortiguar el mismo flake allí.
+- `cmd/royo-learn TestRunPreviewEndToEnd` (familia de cleanup `directory is not empty`) — mitigado en `setupApprovedLearning` (cmd/royo-learn/main_test.go) con un `t.Cleanup` que cierra el DB idempotentemente y, solo en Windows, espera 150 ms antes del `RemoveAll` automático.
+- Patrón adicional aplicado en `internal/experience/service_test.go:newExperienceTestDB` y `cmd/royo-learn/evidence_cli_test.go:initProject` con esperas de 50 ms en Windows. Cobertura ampliada después a `internal/setup`, `internal/selfupdate`, `internal/storage/db_test.go`, `cmd/royo-learn/mcp_test.go` y `cmd/royo-learn/evidence_cli_test.go` usando `testutil.TempDir(t)` (que internamente ya usa `testutil.RemoveAllWithRetry`) cuando el código escribe archivos o crea sub-árboles completos. Esto elimina el patrón de `directory is not empty` para esos casos.
+- Flake residual intermitente en `internal/mcpserver`: `context deadline exceeded` al listar tools. No está relacionado con el AV de Windows; es una sensibilidad de timeout de la suite MCP. Se reporta explícitamente sin workaround silencioso.
 
-Próximo paso recomendado: fusionar `feat/experience-hito1-1d` en `feat/experience-hito1-domain` (o directamente en `main` si se prefiere aplastar el slice) y luego ejecutar el siguiente slice de la ola 1 (Hito 2: OpenCode `--once`). Si el merge contra `main` requiere rebase, el orden de commits por unidad de trabajo facilita la revisión.
+Notas operativas adicionales:
+
+- El helper `testutil.RemoveAllWithRetry` ya existía en `internal/testutil/cleanup.go`; la única mitigación sostenible es migrar las pruebas que crean SQLite o varios archivos en `t.TempDir` a `testutil.TempDir(t)`. Los archivos que sólo escriben un archivo pequeño sin DB cercana (p. ej. `internal/setup`) también se beneficiaron porque el AV puede sostener brevemente cualquier `.tmp` o archivo recién escrito.
+- En el caso de `internal/setup/agents_test.go` (config.json + `.tmp`), `testutil.TempDir` evita el cleanup flake sin necesidad de mitigación adicional.
+
+Próximo paso recomendado:
+
+1. Fusionar `feat/experience-hito1-1d` en `feat/experience-hito1-domain` y luego squash contra `main` (mantener los commits por unidad de trabajo en la PR para facilitar la revisión). Antes del merge, considera reejecutar `go test -race -count=2 ./...` dos veces para confirmar que no haya flakes residuales.
+2. Cualquier flake restante del tipo `directory is not empty` debe seguir el mismo patrón (`testutil.TempDir(t)` o `t.Cleanup` con sleep) en otros paquetes que aún no se hayan migrado (`internal/project`, `internal/evidence`, `internal/integration`, `internal/publish`, etc.) — fuera del scope de este cierre.
+3. La sensibilidad de timeout de `internal/mcpserver` (context deadline al listar tools) merece una ADR/issue separado antes de Hito 2.
