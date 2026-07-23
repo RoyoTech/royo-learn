@@ -320,3 +320,8 @@ Siempre usar respuesta estructurada:
 - error estructurado;
 - compatibilidad con Codex;
 - prueba con MCP Inspector.
+
+
+## Experiencia fixture
+
+La CLI `experience inject` es una superficie interna de pruebas; no añade una herramienta MCP ni altera el transporte stdio.

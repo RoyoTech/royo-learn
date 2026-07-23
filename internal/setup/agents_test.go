@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"agent-royo-learn/internal/testutil"
 )
 
 func TestResolveAgent_AllSupportedKinds(t *testing.T) {
@@ -37,7 +39,7 @@ func TestHomeDir_ResolvesFromEnv(t *testing.T) {
 }
 
 func TestWriteFileAtomic_Success(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	path := filepath.Join(dir, "config.json")
 	if err := writeFileAtomic(path, []byte(`{"k":"v"}`), 0o644); err != nil {
 		t.Fatalf("writeFileAtomic: %v", err)

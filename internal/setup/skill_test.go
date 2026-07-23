@@ -4,11 +4,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"agent-royo-learn/internal/testutil"
 )
 
 func TestInstallSkills_CopiesToTarget(t *testing.T) {
-	srcDir := t.TempDir()
-	dstDir := t.TempDir()
+	srcDir := testutil.TempDir(t)
+	dstDir := testutil.TempDir(t)
 
 	// Create a skill dir with SKILL.md.
 	skillDir := filepath.Join(srcDir, "test-skill")
@@ -44,8 +46,8 @@ func TestInstallSkills_CopiesToTarget(t *testing.T) {
 }
 
 func TestInstallSkills_SkipsExisting(t *testing.T) {
-	srcDir := t.TempDir()
-	dstDir := t.TempDir()
+	srcDir := testutil.TempDir(t)
+	dstDir := testutil.TempDir(t)
 
 	// Create source skill.
 	skillDir := filepath.Join(srcDir, "existing-skill")
@@ -87,8 +89,8 @@ func TestInstallSkills_SkipsExisting(t *testing.T) {
 }
 
 func TestInstallSkills_EmptySource(t *testing.T) {
-	srcDir := t.TempDir()
-	dstDir := t.TempDir()
+	srcDir := testutil.TempDir(t)
+	dstDir := testutil.TempDir(t)
 
 	result, err := InstallSkills(srcDir, dstDir)
 	if err != nil {

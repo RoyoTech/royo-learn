@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"agent-royo-learn/internal/testutil"
 )
 
 func writeFileOrFatal(t *testing.T, path string, content []byte) {
@@ -25,11 +27,11 @@ func readFileOrFatal(t *testing.T, path string) []byte {
 }
 
 func TestReplaceUnixStyle(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	target := filepath.Join(dir, "royo-learn")
 	writeFileOrFatal(t, target, []byte("old binary"))
 
-	stagingDir := t.TempDir() // deliberately a different directory
+	stagingDir := testutil.TempDir(t) // deliberately a different directory
 	newBinary := filepath.Join(stagingDir, "royo-learn.new")
 	writeFileOrFatal(t, newBinary, []byte("new binary"))
 
@@ -55,11 +57,11 @@ func TestReplaceUnixStyle(t *testing.T) {
 }
 
 func TestReplaceWindowsStyle(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	target := filepath.Join(dir, "royo-learn.exe")
 	writeFileOrFatal(t, target, []byte("old binary"))
 
-	stagingDir := t.TempDir()
+	stagingDir := testutil.TempDir(t)
 	newBinary := filepath.Join(stagingDir, "royo-learn.exe.new")
 	writeFileOrFatal(t, newBinary, []byte("new binary"))
 
@@ -86,13 +88,13 @@ func TestReplaceWindowsStyle(t *testing.T) {
 }
 
 func TestReplaceFailsWhenLockHeld(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	target := filepath.Join(dir, "royo-learn.exe")
 	writeFileOrFatal(t, target, []byte("old binary"))
 	lockPath := target + updateLockSuffix
 	writeFileOrFatal(t, lockPath, []byte(""))
 
-	stagingDir := t.TempDir()
+	stagingDir := testutil.TempDir(t)
 	newBinary := filepath.Join(stagingDir, "royo-learn.exe.new")
 	writeFileOrFatal(t, newBinary, []byte("new binary"))
 
@@ -116,11 +118,11 @@ func TestReplaceFailsWhenLockHeld(t *testing.T) {
 }
 
 func TestReplaceReleasesLockAfterSuccessfulUnixRun(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	target := filepath.Join(dir, "royo-learn")
 	writeFileOrFatal(t, target, []byte("old binary"))
 
-	stagingDir := t.TempDir()
+	stagingDir := testutil.TempDir(t)
 	newBinary := filepath.Join(stagingDir, "royo-learn.new")
 	writeFileOrFatal(t, newBinary, []byte("new binary"))
 
@@ -133,11 +135,11 @@ func TestReplaceReleasesLockAfterSuccessfulUnixRun(t *testing.T) {
 }
 
 func TestReplaceWindowsStyleStagingFailureLeavesBinaryUntouched(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	target := filepath.Join(dir, "royo-learn.exe")
 	writeFileOrFatal(t, target, []byte("old binary"))
 
-	stagingDir := t.TempDir()
+	stagingDir := testutil.TempDir(t)
 	newBinary := filepath.Join(stagingDir, "royo-learn.exe.new")
 	writeFileOrFatal(t, newBinary, []byte("new binary"))
 
@@ -160,12 +162,12 @@ func TestReplaceWindowsStyleStagingFailureLeavesBinaryUntouched(t *testing.T) {
 }
 
 func TestReplaceWindowsStyleOverwritesStaleOld(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	target := filepath.Join(dir, "royo-learn.exe")
 	writeFileOrFatal(t, target, []byte("old binary"))
 	writeFileOrFatal(t, target+oldBinarySuffix, []byte("stale leftover"))
 
-	stagingDir := t.TempDir()
+	stagingDir := testutil.TempDir(t)
 	newBinary := filepath.Join(stagingDir, "royo-learn.exe.new")
 	writeFileOrFatal(t, newBinary, []byte("new binary"))
 
@@ -181,7 +183,7 @@ func TestReplaceWindowsStyleOverwritesStaleOld(t *testing.T) {
 }
 
 func TestCleanupOldBinaryRemovesLeftover(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	target := filepath.Join(dir, "royo-learn.exe")
 	writeFileOrFatal(t, target, []byte("current"))
 	writeFileOrFatal(t, target+oldBinarySuffix, []byte("leftover"))
@@ -197,7 +199,7 @@ func TestCleanupOldBinaryRemovesLeftover(t *testing.T) {
 }
 
 func TestCleanupOldBinaryNoLeftoverIsNoop(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	target := filepath.Join(dir, "royo-learn.exe")
 	writeFileOrFatal(t, target, []byte("current"))
 

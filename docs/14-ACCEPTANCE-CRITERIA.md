@@ -150,3 +150,13 @@ No se acepta como terminado si:
 - no existe instalador Windows;
 - hay TODOs en rutas críticas;
 - los tests e2e están simulados sin filesystem/SQLite real.
+
+
+## K. Experiencia Hito 1
+
+- [ ] un envelope válido crea sesión y turno;
+- [ ] el reintento exacto no duplica;
+- [ ] una revisión nueva actualiza el turno de forma segura;
+- [ ] secretos no llegan a SQLite ni auditoría;
+- [ ] el cursor solo avanza tras un commit exitoso;
+- [ ] `experience inject` conserva JSON en stdout y errores en stderr.

@@ -9,6 +9,21 @@ import (
 	"testing"
 )
 
+func TestDefaultConfigDisablesExperience(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Experience.Enabled {
+		t.Fatal("experience should be disabled by default")
+	}
+}
+
+func TestMergeExperienceConfig(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Merge(&Config{Experience: ExperienceConfig{Enabled: true}})
+	if !cfg.Experience.Enabled {
+		t.Fatal("experience enabled value was not merged")
+	}
+}
+
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 	if cfg.Database.Path != DefaultDatabaseFilename || cfg.Records.Dir != ".royo-learn/records" ||

@@ -12,6 +12,7 @@ import (
 
 	"agent-royo-learn/internal/project"
 	"agent-royo-learn/internal/setup"
+	"agent-royo-learn/internal/testutil"
 )
 
 func TestMCPServe_UninitializedProjectRequiresInit(t *testing.T) {
@@ -117,7 +118,7 @@ func TestOnboardingSkillInstallsFromRepository(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve repository skills: %v", err)
 	}
-	target := t.TempDir()
+	target := testutil.TempDir(t)
 	if _, err := setup.InstallSkills(source, target); err != nil {
 		t.Fatalf("install repository skills: %v", err)
 	}

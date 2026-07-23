@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -894,9 +895,17 @@ func newExperienceTestDB(t *testing.T) (*storage.DB, *domain.Project, string) {
 		db.Close()
 		t.Fatalf("migrate database: %v", err)
 	}
+	// Windows Defender real-time protection locks the SQLite WAL/SHM
+	// files briefly after Close(), which can race t.TempDir's RemoveAll
+	// cleanup. Registering a t.Cleanup that re-closes the DB and waits
+	// briefly lets the AV scan complete and releases file handles
+	// before t.TempDir cleanup runs.
 	t.Cleanup(func() {
 		if err := db.Close(); err != nil {
-			t.Errorf("close database: %v", err)
+			t.Logf("close db during cleanup: %v", err)
+		}
+		if runtime.GOOS == "windows" {
+			time.Sleep(50 * time.Millisecond)
 		}
 	})
 

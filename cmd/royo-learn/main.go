@@ -74,6 +74,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runOccurrence(args[1:], stdout, stderr)
 	case "evidence":
 		return runEvidence(args[1:], stdout, stderr)
+	case "experience":
+		return runExperience(args[1:], stdout, stderr)
 	case "preview":
 		return runPreview(args[1:], stdout, stderr)
 	case "approve":

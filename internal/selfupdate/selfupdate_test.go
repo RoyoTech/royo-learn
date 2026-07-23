@@ -18,6 +18,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"agent-royo-learn/internal/testutil"
 )
 
 // makeTarGz builds an in-memory .tar.gz archive containing a single file.
@@ -162,7 +164,7 @@ func newTestUpdater(t *testing.T, rs *releaseServer, currentVersion, execPath, g
 }
 
 func TestUpdateFullFlowTarGz(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	execPath := filepath.Join(dir, "royo-learn")
 	writeFileOrFatal(t, execPath, []byte("old executable"))
 
@@ -200,7 +202,7 @@ func TestUpdateFullFlowTarGz(t *testing.T) {
 }
 
 func TestUpdateFullFlowZipWindows(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	execPath := filepath.Join(dir, "royo-learn.exe")
 	writeFileOrFatal(t, execPath, []byte("old executable"))
 
@@ -233,7 +235,7 @@ func TestUpdateFullFlowZipWindows(t *testing.T) {
 }
 
 func TestUpdateAlreadyUpToDate(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	execPath := filepath.Join(dir, "royo-learn")
 	writeFileOrFatal(t, execPath, []byte("current executable"))
 
@@ -257,7 +259,7 @@ func TestUpdateAlreadyUpToDate(t *testing.T) {
 }
 
 func TestUpdateRefusesImplicitDowngrade(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	execPath := filepath.Join(dir, "royo-learn")
 	writeFileOrFatal(t, execPath, []byte("current executable"))
 
@@ -280,7 +282,7 @@ func TestUpdateRefusesImplicitDowngrade(t *testing.T) {
 }
 
 func TestUpdateRefusesDevBuildWithoutExplicitVersion(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	execPath := filepath.Join(dir, "royo-learn")
 	writeFileOrFatal(t, execPath, []byte("dev executable"))
 
@@ -303,7 +305,7 @@ func TestUpdateRefusesDevBuildWithoutExplicitVersion(t *testing.T) {
 }
 
 func TestUpdateDevBuildAllowedWithExplicitVersion(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	execPath := filepath.Join(dir, "royo-learn")
 	writeFileOrFatal(t, execPath, []byte("dev executable"))
 
@@ -331,7 +333,7 @@ func TestUpdateDevBuildAllowedWithExplicitVersion(t *testing.T) {
 }
 
 func TestUpdateExplicitVersionAllowsDowngrade(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	execPath := filepath.Join(dir, "royo-learn")
 	writeFileOrFatal(t, execPath, []byte("newer executable"))
 
@@ -364,7 +366,7 @@ func TestUpdateExplicitVersionAllowsDowngrade(t *testing.T) {
 // TestUpdateChecksumMismatchLeavesBinaryUntouched is the critical safety
 // test: a corrupted download must never brick the installed CLI.
 func TestUpdateChecksumMismatchLeavesBinaryUntouched(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	execPath := filepath.Join(dir, "royo-learn")
 	original := []byte("original executable — must survive")
 	writeFileOrFatal(t, execPath, original)
@@ -393,7 +395,7 @@ func TestUpdateChecksumMismatchLeavesBinaryUntouched(t *testing.T) {
 }
 
 func TestUpdateCleansLeftoverOldBinary(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	execPath := filepath.Join(dir, "royo-learn")
 	writeFileOrFatal(t, execPath, []byte("current executable"))
 	writeFileOrFatal(t, execPath+oldBinarySuffix, []byte("leftover from previous update"))
@@ -411,7 +413,7 @@ func TestUpdateCleansLeftoverOldBinary(t *testing.T) {
 }
 
 func TestCheckReportsUpdateAvailableWithoutDownloading(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	execPath := filepath.Join(dir, "royo-learn")
 	writeFileOrFatal(t, execPath, []byte("current executable"))
 
@@ -444,7 +446,7 @@ func TestCheckReportsUpdateAvailableWithoutDownloading(t *testing.T) {
 }
 
 func TestCheckReportsUpToDate(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	execPath := filepath.Join(dir, "royo-learn")
 	writeFileOrFatal(t, execPath, []byte("current executable"))
 
@@ -472,7 +474,7 @@ func TestRateLimitErrorIsReadable(t *testing.T) {
 			server := httptest.NewServer(mux)
 			defer server.Close()
 
-			dir := t.TempDir()
+			dir := testutil.TempDir(t)
 			execPath := filepath.Join(dir, "royo-learn")
 			writeFileOrFatal(t, execPath, []byte("current executable"))
 
@@ -513,7 +515,7 @@ func TestNewRejectsInsecureBaseURLInProductionMode(t *testing.T) {
 }
 
 func TestUpdateUnsupportedPlatform(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	execPath := filepath.Join(dir, "royo-learn")
 	writeFileOrFatal(t, execPath, []byte("current executable"))
 
@@ -533,7 +535,7 @@ func TestUpdateUnsupportedPlatform(t *testing.T) {
 // a tag the version parser cannot understand must abort the update before
 // anything is downloaded, exactly like Check treats the same failure.
 func TestUpdateFailsClosedOnMalformedLatestTag(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	execPath := filepath.Join(dir, "royo-learn")
 	writeFileOrFatal(t, execPath, []byte("current executable"))
 
@@ -559,7 +561,7 @@ func TestUpdateFailsClosedOnMalformedLatestTag(t *testing.T) {
 }
 
 func TestDownloadRejectsNonHTTPSInProductionMode(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	execPath := filepath.Join(dir, "royo-learn")
 	writeFileOrFatal(t, execPath, []byte("current executable"))
 
@@ -589,7 +591,7 @@ func TestDownloadRejectsNonHTTPSInProductionMode(t *testing.T) {
 }
 
 func TestRedirectToNonHTTPSRefusedInProductionMode(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	execPath := filepath.Join(dir, "royo-learn")
 	writeFileOrFatal(t, execPath, []byte("current executable"))
 
@@ -665,7 +667,7 @@ func TestCopyLimitedEnforcesArtifactCap(t *testing.T) {
 func TestGitHubTokenIsSentWhenSet(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "test-token-123")
 
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	execPath := filepath.Join(dir, "royo-learn")
 	writeFileOrFatal(t, execPath, []byte("old executable"))
 
@@ -698,7 +700,7 @@ func TestGitHubTokenIsSentWhenSet(t *testing.T) {
 func TestGitHubTokenAbsentSendsNoAuthHeader(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	execPath := filepath.Join(dir, "royo-learn")
 	writeFileOrFatal(t, execPath, []byte("current executable"))
 
@@ -719,7 +721,7 @@ func TestGitHubTokenAbsentSendsNoAuthHeader(t *testing.T) {
 // TestUpdateExplicitBareVersionNormalized exercises the v-prefix
 // normalization branch: "0.2.0" must resolve to the "v0.2.0" release.
 func TestUpdateExplicitBareVersionNormalized(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	execPath := filepath.Join(dir, "royo-learn")
 	writeFileOrFatal(t, execPath, []byte("old executable"))
 
@@ -752,7 +754,7 @@ func TestUpdateExplicitBareVersionNormalized(t *testing.T) {
 // TestCheckDevBuildReportsUpdateAvailable covers Check() when the running
 // binary is a local development build.
 func TestCheckDevBuildReportsUpdateAvailable(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	execPath := filepath.Join(dir, "royo-learn")
 	writeFileOrFatal(t, execPath, []byte("dev executable"))
 

@@ -5,10 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"agent-royo-learn/internal/testutil"
 )
 
 func TestRegisterMCPServer_NewEntry(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	cfgPath := filepath.Join(dir, "opencode.json")
 
 	// Start with a config that has no MCP servers.
@@ -57,7 +59,7 @@ func TestRegisterMCPServer_NewEntry(t *testing.T) {
 }
 
 func TestRegisterMCPServer_DuplicateSkip(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	cfgPath := filepath.Join(dir, "opencode.json")
 
 	// Config already has royo-learn.
@@ -90,7 +92,7 @@ func TestRegisterMCPServer_DuplicateSkip(t *testing.T) {
 }
 
 func TestRegisterMCPServer_MissingConfig(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	cfgPath := filepath.Join(dir, "nonexistent.json")
 
 	entry := MCPServerEntry{

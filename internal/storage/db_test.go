@@ -309,7 +309,7 @@ func TestConcurrentMigration(t *testing.T) {
 }
 
 func TestConcurrentIdenticalMigrationApplicationIsTolerated(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	path := filepath.Join(dir, "migration-race.db")
 	first, err := Open(path)
 	if err != nil {
@@ -361,7 +361,7 @@ func TestConcurrentIdenticalMigrationApplicationIsTolerated(t *testing.T) {
 }
 
 func TestConcurrentMigrationChecksumMismatchStillFails(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	path := filepath.Join(dir, "migration-checksum.db")
 	db, err := Open(path)
 	if err != nil {
@@ -390,15 +390,7 @@ func TestMigrateDryRun(t *testing.T) {
 		t.Skip("skipping migration test in short mode")
 	}
 
-	dir, err := os.MkdirTemp("", "royo-test-*")
-	if err != nil {
-		t.Fatalf("MkdirTemp: %v", err)
-	}
-	defer func() {
-		if err := testutil.RemoveAllWithRetry(dir); err != nil {
-			t.Errorf("clean up database directory %q: %v", dir, err)
-		}
-	}()
+	dir := testutil.TempDir(t)
 	path := filepath.Join(dir, "test.db")
 	db, err := Open(path)
 	if err != nil {

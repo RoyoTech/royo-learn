@@ -5,10 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"agent-royo-learn/internal/testutil"
 )
 
 func TestOpenCode_RegisterMCP_StoresArrayCommand(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	cfgPath := filepath.Join(dir, "opencode.json")
 	o := NewOpenCodeWithConfig(cfgPath)
 
@@ -58,7 +60,7 @@ func TestOpenCode_RegisterMCP_StoresArrayCommand(t *testing.T) {
 }
 
 func TestOpenCode_RegisterMCP_DuplicateIsNoop(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	o := NewOpenCodeWithConfig(filepath.Join(dir, "opencode.json"))
 	entry := MCPServerEntry{Name: "royo-learn", Command: "royo-learn"}
 
@@ -75,7 +77,7 @@ func TestOpenCode_RegisterMCP_DuplicateIsNoop(t *testing.T) {
 }
 
 func TestOpenCode_RegisterMCP_PreservesExistingConfig(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	cfgPath := filepath.Join(dir, "opencode.json")
 	original := map[string]any{
 		"$schema": "https://opencode.ai/config.json",
@@ -118,7 +120,7 @@ func TestOpenCode_RegisterMCP_PreservesExistingConfig(t *testing.T) {
 }
 
 func TestOpenCode_VerifyMCP(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	o := NewOpenCodeWithConfig(filepath.Join(dir, "opencode.json"))
 
 	ok, err := o.VerifyMCP("royo-learn")
@@ -139,7 +141,7 @@ func TestOpenCode_VerifyMCP(t *testing.T) {
 }
 
 func TestOpenCode_UnregisterMCP(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	o := NewOpenCodeWithConfig(filepath.Join(dir, "opencode.json"))
 	if _, err := o.RegisterMCP(MCPServerEntry{Name: "royo-learn", Command: "x"}); err != nil {
 		t.Fatal(err)
@@ -168,7 +170,7 @@ func TestOpenCode_SkillsDir(t *testing.T) {
 }
 
 func TestOpenCode_BackupMCPConfig_Absent(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	o := NewOpenCodeWithConfig(filepath.Join(dir, "nope.json"))
 	backup, err := o.BackupMCPConfig()
 	if err != nil {

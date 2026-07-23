@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The tests in this file drive the acceptance criterion of Recorrido B:
@@ -38,6 +40,16 @@ func initProject(t *testing.T) string {
 	if code := run([]string{"init", "--project-root", root}, &buf, &buf); code != exitSuccess {
 		t.Fatalf("init failed: %s", buf.String())
 	}
+	// Windows Defender real-time protection locks the SQLite WAL/SHM
+	// files briefly after the CLI closes them, which can race t.TempDir's
+	// RemoveAll cleanup. Registering a t.Cleanup that waits briefly lets
+	// the AV scan complete and releases file handles before t.TempDir
+	// cleanup runs.
+	t.Cleanup(func() {
+		if runtime.GOOS == "windows" {
+			time.Sleep(50 * time.Millisecond)
+		}
+	})
 	return root
 }
 

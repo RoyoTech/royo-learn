@@ -886,6 +886,23 @@ func setupApprovedLearning(t *testing.T, root string) string {
 		return ""
 	}
 
+	// Windows Defender real-time protection locks the SQLite WAL/SHM files
+	// for tens of milliseconds after db.Close() returns, which can cause
+	// t.TempDir's RemoveAll cleanup to fail with
+	// `directory is not empty`. Registering a t.Cleanup that explicitly
+	// closes the DB and waits briefly lets the AV scan complete and
+	// releases the file handles before t.TempDir cleanup runs. The 150 ms
+	// wait is Windows-only; on Unix the cleanup proceeds immediately after
+	// db.Close() without sleeping.
+	t.Cleanup(func() {
+		if cerr := db.Close(); cerr != nil {
+			t.Logf("close db during cleanup: %v", cerr)
+		}
+		if runtime.GOOS == "windows" {
+			time.Sleep(150 * time.Millisecond)
+		}
+	})
+
 	return learningID
 }
 

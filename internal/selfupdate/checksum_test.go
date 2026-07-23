@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"agent-royo-learn/internal/testutil"
 )
 
 func sha256Hex(data []byte) string {
@@ -39,7 +41,7 @@ func TestParseChecksumsRejectsMalformedLine(t *testing.T) {
 }
 
 func TestVerifyFileChecksumSuccess(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	path := filepath.Join(dir, "archive.tar.gz")
 	content := []byte("archive payload")
 	if err := os.WriteFile(path, content, 0o644); err != nil {
@@ -52,7 +54,7 @@ func TestVerifyFileChecksumSuccess(t *testing.T) {
 }
 
 func TestVerifyFileChecksumMismatch(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.TempDir(t)
 	path := filepath.Join(dir, "archive.tar.gz")
 	if err := os.WriteFile(path, []byte("archive payload"), 0o644); err != nil {
 		t.Fatal(err)

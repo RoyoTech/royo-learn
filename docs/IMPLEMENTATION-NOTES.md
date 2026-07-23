@@ -362,3 +362,106 @@ accepted environmental exception and did not reproduce in this final run.
    ordering, focused position test, and the corresponding MCP specification.
 2. `docs(onboarding): document project initialization workflow` — English and
    Spanish onboarding guidance, integration guide, and this handoff.
+
+## Session handoff — 2026-07-22 — Hito 1 slice 1.D
+
+### Branch
+
+`feat/experience-hito1-1d`, started from `main` at `4fe9774`.
+
+### Contract cold-storage discrepancy (registration)
+
+The Hito 0 frozen contracts (`docs/20-EXPERIENCE-INGESTION-PRD.md`
+through `docs/26-IMPLEMENTATION-ROADMAP.md` plus
+`docs/ADR-0001-NO-MEMSEARCH-RUNTIME.md`) and the parent
+`PLAN-MAESTRO-MEMSEARCH-A-ROYO-LEARN.md` exist **only** in commit
+`d812709`. They are not present in `main` or `origin/main`. The Hito 1
+PR #17 (`4fe9774`, squash) merged executable code referencing
+`docs/20-26` as governing contracts, but those contracts were never
+merged onto `main`. This is a documentation drift that the handoff
+inherited and did not surface.
+
+**Resolution for this slice.** Slice 1.D consumes the contracts read from
+`d812709` via `git show d812709:<path>`. The contract cold-storage is
+registered as a known issue to be closed by a separate documentation PR
+either as a prerequisite to, or immediately after, the Hito 1 closure
+PR. The slice itself does not silently retcon the contracts into `main`.
+
+### Minor drift vs. PLAN-MAESTRO §33
+
+`PLAN-MAESTRO-MEMSEARCH-A-ROYO-LEARN.md` §33 lists
+`internal/config/merge.go` and `internal/config/validate.go` as
+separate files. The actual implementation in `main` keeps both `Merge`
+and `Validate` inside `internal/config/config.go`. The plan predates
+the current split and is treated as documentation drift, not a
+refactor target — extending `Config` with `ExperienceConfig` follows
+the existing in-file pattern.
+
+### Current state at branch creation
+
+- `main` HEAD = `origin/main` HEAD = `4fe9774` (Hito 1 1.A-1.C squash).
+- `go build ./...` green (Go 1.26.5 windows/amd64).
+- Working tree: only the two pre-existing untracked files
+  (`HANDOFF-EXPERIENCE-DISCOVERY.md`, `PROMPT-LLM-EJECUTOR-ROYO-LEARN.md`).
+- Sub-branch `feat/experience-hito1-1d` created for slice 1.D work.
+
+### Pending work for this session
+
+1. Slice 1.D: CLI fixture command, `ExperienceConfig`,
+   acceptance suite, documentation coherence.
+2. Isolate or document the Windows-only flakes (`TestRunPreviewEndToEnd`
+   `t.TempDir` cleanup, `internal/buildinfo` `fork/exec … Access is denied`).
+3. Hito 1 closure gate: `-race`, `internal/experience` coverage,
+   cross-build windows/linux/darwin, contracts verification.
+
+
+## Slice 1.D — Experience fixture ingestion
+
+- `feat(config): add ExperienceConfig disabled by default` (`eeeb938`): added the contract-minimal opt-in flag and merge behavior.
+- `feat(cli): add experience inject fixture command` (`ec163f1`): added adapter-free JSON fixture ingestion with stable stdout and stderr errors.
+- `test(experience): add Hito 1 acceptance suite` (`08a600a`): covered creation, retry idempotency, revision CAS, redaction sinks, and cursor rollback.
+- `docs(notes): register Hito 1 slice 1.D branch and contract cold-storage discrepancy` (`63c7740`): explicitly documented the cold-storage of `docs/20-26` and the merge coupling in `4fe9774`.
+
+## Slice 1.D — cierre final (Hito 1)
+
+Tres commits atómicos adicionales cerraron el gate de Hito 1 sobre la rama `feat/experience-hito1-1d`:
+
+- `test(experience): raise coverage to 90% with focused tests` (`828f49e`): `internal/experience/coverage_test.go` cubre `boundErrorDetails` (28.6% → 100% vía casos ASCII/UTF-8/over-by-one), `decodeJSONUseNumber` (72.7% → 90.9% vía JSON numérico, científico, malformado y de múltiples valores), `prepareCursorWithOrder` (78.3% → 87.0% vía cada rama documentada), `recordSessionUpdateAudit` (72.7% — ejercida por revisión de turno que cambia `UpdatedAt`), `recordFailure`/`recordCursorFailureAudit`/`recordCommitUnknown` (cubiertas por commit fallido y commit ambiguo con cursor), `Metrics` con servicio nil, `Service.advanceCursor` (que estaba en 0% — ahora 70.0%, exercising la transacción wrapper), y `SafeToolCall.UnmarshalJSON` con entradas malformadas, múltiples valores y vacías. Resultado: cobertura global del paquete = **90.0%** (objetivo ≥90% según `docs/26` §24).
+- `fix(test): isolate Windows AV flake in buildinfo` (`b6c72c2`): aplicado `//go:build !windows` en `internal/buildinfo/buildinfo_test.go` con el comentario contractual explicando que el flake es de Windows Defender y que CI cubre la lógica desde Linux/macOS.
+- `fix(test): address TestRunPreviewEndToEnd cleanup flake` (`c51c0a1`): añadido `t.Cleanup` en `setupApprovedLearning` (cmd/royo-learn/main_test.go:823) que cierra el DB de forma idempotente y, sólo cuando `runtime.GOOS == "windows"`, espera 150 ms para que Windows Defender libere los handles de `.db-shm`/`.db-wal`. Patrón equivalente aplicado en `internal/experience/service_test.go:newExperienceTestDB` (50 ms en Windows) para amortiguar el mismo flake allí.
+
+Estado del gate al cierre:
+
+- `go fmt ./...` — verde.
+- `go vet ./...` — verde.
+- `go test ./internal/experience/...` — verde.
+- `go test -race -count=1 ./internal/experience/...` — verde.
+- `go test -race -count=1 ./...` — verde con `internal/buildinfo` saltado en Windows por el build tag. Corrida doble del paquete completo verificada.
+- `internal/experience` cobertura — **90.0%**.
+- Cross-build windows/amd64, linux/amd64, darwin/arm64 — los tres artefactos compilados OK (PE32+, ELF, Mach-O arm64).
+
+Notas operativas:
+
+- El patrón de `t.Cleanup` con `time.Sleep` en Windows es la única mitigación viable sin requerir exclusiones antivirus a nivel de host o reescribir `db.Close()` para reintentar el borrado. La espera es local y no afecta otras plataformas (salida temprana en `runtime.GOOS != "windows"`).
+- Cabe notar que el mismo patrón de flake puede aparecer en otros paquetes que abran SQLite en `t.TempDir` (p.ej. `newExperienceTestDB` también se benefició); la regla operativa es: si un test falla con `directory is not empty` durante `t.TempDir` cleanup tras cerrar el DB, añadir el `t.Cleanup` con sleep.
+
+Hito 1 listo para PR hacia `main` (o hacia `feat/experience-hito1-domain` si se prefiere preservar la separación por hito). El siguiente paso del roadmap (Hito 2: OpenCode `--once`) puede arrancar sobre la rama mergeada.
+
+### Mitigaciones adicionales para flakes Windows
+
+Durante la verificación final del gate se detectaron más apariciones del mismo patrón `TempDir RemoveAll cleanup: ... directory is not empty` en paquetes no cubiertos explícitamente por las tareas 2 y 3. Se abordaron cinco commits atómicos siguiendo la misma mitigación (`testutil.TempDir(t)` reescribe la idempotencia del `RemoveAll`):
+
+- `fix(test): address TestRunPreviewEndToEnd cleanup flake` (`c51c0a1`): `t.Cleanup` con espera de 150 ms en Windows en `setupApprovedLearning` (cmd/royo-learn/main_test.go).
+- `fix(test): dampen internal/experience cleanup flake on Windows` (`a35809b`): `t.Cleanup` análogo en `newExperienceTestDB` (internal/experience/service_test.go), 50 ms en Windows.
+- `fix(test): amortize remaining Windows cleanup flakes in shared helpers` (`1505f30`): cambio de `t.TempDir()` a `testutil.TempDir(t)` en `cmd/royo-learn/evidence_cli_test.go:initProject` (sleep 50 ms) y en `internal/storage/db_test.go` para los tests de migración concurrentes y `TestMigrateDryRun`.
+- `fix(test): amortize Windows cleanup flakes in internal/setup` (`96e1fbf`): migrado todo `internal/setup/*_test.go` (7 archivos, 31 ocurrencias) a `testutil.TempDir(t)`.
+- `fix(test): amortize Windows cleanup flakes in internal/selfupdate` (`4e29b12`): migrado `internal/selfupdate/checksum_test.go`, `replace_test.go`, `selfupdate_test.go` (3 archivos, 16 ocurrencias).
+- `fix(test): amortize onboarding skill install cleanup flake` (`271c7c2`): `cmd/royo-learn/mcp_test.go:TestOnboardingSkillInstallsFromRepository` cambia el destino de `setup.InstallSkills` de `t.TempDir()` a `testutil.TempDir(t)`.
+
+Decisión técnica: el helper `testutil.RemoveAllWithRetry` ya existía y se prefiere por sobre `time.Sleep` fixed-window porque reintenta adaptativamente (20 intentos × 50 ms en el peor caso). `time.Sleep` se reservó para casos donde necesitamos específicamente esperar a que Windows Defender complete su escaneo después de un `db.Close()` que no libera handles de forma observable.
+
+Pendiente fuera de scope:
+
+- Las pruebas en `internal/project`, `internal/evidence`, `internal/integration`, `internal/publish`, `internal/record`, `internal/capture`, `internal/doctor` que aún usan `t.TempDir()` directamente. Recomendable migrar cuando aparezca el flake, siguiendo el mismo patrón.
+- La sensibilidad de timeout en `internal/mcpserver` (`ListTools: context deadline exceeded`) no es un flake de Windows AV — es una suite MCP que ocasionalmente excede el deadline del cliente. Registrada en `docs/ADR-0002-MCP-LISTTOOLS-TIMEOUT.md` (status: Proposed) con el límite de investigación antes de Hito 2.
+

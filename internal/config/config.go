@@ -52,10 +52,11 @@ type Warning struct {
 type Config struct {
 	Version int `yaml:"version,omitempty"`
 
-	Project    Project    `yaml:"project,omitempty"`
-	Engram     Engram     `yaml:"engram,omitempty"`
-	GentleAI   GentleAI   `yaml:"gentle_ai,omitempty"`
-	Publishing Publishing `yaml:"publishing,omitempty"`
+	Project    Project          `yaml:"project,omitempty"`
+	Engram     Engram           `yaml:"engram,omitempty"`
+	Experience ExperienceConfig `yaml:"experience,omitempty"`
+	GentleAI   GentleAI         `yaml:"gentle_ai,omitempty"`
+	Publishing Publishing       `yaml:"publishing,omitempty"`
 
 	// Legacy/direct paths. These are kept alongside the structured project
 	// block so callers can choose the layout that fits their use case.
@@ -85,6 +86,11 @@ type Engram struct {
 	BaseURL        string `yaml:"base_url,omitempty"`
 	TimeoutSeconds int    `yaml:"timeout_seconds,omitempty"`
 	WriteReference bool   `yaml:"write_reference,omitempty"`
+}
+
+// ExperienceConfig controls the optional, fixture-driven experience ingestion layer.
+type ExperienceConfig struct {
+	Enabled bool `yaml:"enabled,omitempty"`
 }
 
 // GentleAI holds the optional Gentle-AI skill registry integration settings.
@@ -294,6 +300,7 @@ func (c *Config) Merge(other *Config) {
 	}
 	mergeProject(&c.Project, other.Project)
 	mergeEngram(&c.Engram, other.Engram)
+	mergeExperience(&c.Experience, other.Experience)
 	mergeGentleAI(&c.GentleAI, other.GentleAI)
 	mergePublishing(&c.Publishing, other.Publishing)
 	if other.ProjectRoot != "" {
@@ -361,6 +368,12 @@ func mergeEngram(dst *Engram, src Engram) {
 	}
 	if src.WriteReference {
 		dst.WriteReference = true
+	}
+}
+
+func mergeExperience(dst *ExperienceConfig, src ExperienceConfig) {
+	if src.Enabled {
+		dst.Enabled = true
 	}
 }
 
