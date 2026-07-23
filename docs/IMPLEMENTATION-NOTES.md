@@ -463,5 +463,5 @@ Decisión técnica: el helper `testutil.RemoveAllWithRetry` ya existía y se pre
 Pendiente fuera de scope:
 
 - Las pruebas en `internal/project`, `internal/evidence`, `internal/integration`, `internal/publish`, `internal/record`, `internal/capture`, `internal/doctor` que aún usan `t.TempDir()` directamente. Recomendable migrar cuando aparezca el flake, siguiendo el mismo patrón.
-- La sensibilidad de timeout en `internal/mcpserver` (`ListTools: context deadline exceeded`) no es un flake de Windows AV — es una suite MCP que ocasionalmente excede el deadline del cliente. Merece una investigación/ADR antes de Hito 2.
+- La sensibilidad de timeout en `internal/mcpserver` (`ListTools: context deadline exceeded`) no es un flake de Windows AV — es una suite MCP que ocasionalmente excede el deadline del cliente. Registrada en `docs/ADR-0002-MCP-LISTTOOLS-TIMEOUT.md` (status: Proposed) con el límite de investigación antes de Hito 2.
 

@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"agent-royo-learn/internal/testutil"
 )
 
 func TestRunExperienceInjectFixture(t *testing.T) {
-	root := t.TempDir()
+	root := testutil.TempDir(t)
 	if err := os.MkdirAll(filepath.Join(root, ".royo-learn"), 0o755); err != nil {
 		t.Fatal(err)
 	}

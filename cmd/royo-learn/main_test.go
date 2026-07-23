@@ -891,9 +891,9 @@ func setupApprovedLearning(t *testing.T, root string) string {
 	// t.TempDir's RemoveAll cleanup to fail with
 	// `directory is not empty`. Registering a t.Cleanup that explicitly
 	// closes the DB and waits briefly lets the AV scan complete and
-	// releases the file handles before t.TempDir cleanup runs. The cost
-	// on non-Windows is a no-op sleep that we still apply so cleanup
-	// behaviour stays identical across OSes.
+	// releases the file handles before t.TempDir cleanup runs. The 150 ms
+	// wait is Windows-only; on Unix the cleanup proceeds immediately after
+	// db.Close() without sleeping.
 	t.Cleanup(func() {
 		if cerr := db.Close(); cerr != nil {
 			t.Logf("close db during cleanup: %v", cerr)
