@@ -33,37 +33,6 @@ func TestAdapter_Name(t *testing.T) {
 	}
 }
 
-// TestAdapter_Health_StubReturnsTypedError verifies that the scaffold's
-// Health stub returns an error HealthResult with the documented error code.
-// Slice 2.2 will replace this with the real read-only check.
-func TestAdapter_Health_StubReturnsTypedError(t *testing.T) {
-	adapter := NewAdapter()
-	adapter.Now = func() time.Time { return time.Unix(0, 0).UTC() }
-
-	result := adapter.Health(context.Background(), SourceInstance{
-		Source:      domain.SourceOpenCode,
-		ProjectRoot: t.TempDir(),
-		DBPath:      "/tmp/opencode.db",
-		Schema:      SchemaTag,
-		Discovered:  time.Unix(0, 0).UTC(),
-	})
-	if result.Status != "error" {
-		t.Fatalf("Health Status = %q, want %q", result.Status, "error")
-	}
-	if result.Code != string(domain.ErrExperienceSchemaUnsupported) {
-		t.Fatalf("Health Code = %q, want %q", result.Code, domain.ErrExperienceSchemaUnsupported)
-	}
-	if result.DBPath != "/tmp/opencode.db" {
-		t.Fatalf("Health DBPath = %q, want %q", result.DBPath, "/tmp/opencode.db")
-	}
-	if result.CheckedAt.IsZero() {
-		t.Fatalf("Health CheckedAt is zero, want the configured clock value")
-	}
-	if result.Readable || result.SchemaOK {
-		t.Fatalf("Health flags readable=%v schemaOK=%v, want both false on stub", result.Readable, result.SchemaOK)
-	}
-}
-
 // TestAdapter_Scan_StubReturnsTypedError verifies that the scaffold's Scan
 // stub reports an unimplemented state via ScanResult.Code and does not
 // surface any partial envelopes. Slice 2.3 will replace this body with the

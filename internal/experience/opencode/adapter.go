@@ -2,7 +2,6 @@ package opencode
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"agent-royo-learn/internal/domain"
@@ -59,32 +58,11 @@ func NewAdapter() *Adapter {
 	return &Adapter{}
 }
 
-// Name returns domain.SourceOpenCode. This is the only method with real
-// behavior in the scaffold; the remaining four return typed errors until
-// slices 2.1-2.5 land.
+// Name returns domain.SourceOpenCode. The remaining four methods live in
+// dedicated files (discover.go, health.go, scan.go, resolve_trace.go) so
+// each slice stays focused and reviewable.
 func (a *Adapter) Name() domain.ExperienceSource {
 	return domain.SourceOpenCode
-}
-
-// Health is a stub. It returns an error HealthResult so callers can detect
-// the unimplemented state without panicking.
-func (a *Adapter) Health(ctx context.Context, instance SourceInstance) HealthResult {
-	if err := ctx.Err(); err != nil {
-		return HealthResult{
-			Status:    "error",
-			DBPath:    instance.DBPath,
-			Code:      string(domain.ErrTimeout),
-			Message:   err.Error(),
-			CheckedAt: a.now(),
-		}
-	}
-	return HealthResult{
-		Status:    "error",
-		DBPath:    instance.DBPath,
-		Code:      string(domain.ErrExperienceSchemaUnsupported),
-		Message:   fmt.Sprintf("opencode adapter Health is not implemented yet (schema=%s)", SchemaTag),
-		CheckedAt: a.now(),
-	}
 }
 
 // Scan is a stub. Slices 2.3-2.4 will replace this body with the real
