@@ -12,9 +12,10 @@ Orden de precedencia:
 2. `docs/01-PRD.md`
 3. `docs/02-ARCHITECTURE.md`
 4. contratos específicos de `docs/04` a `docs/10`
-5. `TASKS.md`
-6. este archivo
-7. README
+5. `docs/lessons.md` — patrones operacionales aprendidos en sesiones previas (shell detection, WSL bypass, review scope, PR base)
+6. `TASKS.md`
+7. este archivo
+8. README
 
 Cuando dos documentos parezcan incompatibles, detener la implementación de esa parte, registrar el conflicto en `docs/IMPLEMENTATION-NOTES.md` y escoger la opción más segura y reversible. No inventar capacidades.
 
