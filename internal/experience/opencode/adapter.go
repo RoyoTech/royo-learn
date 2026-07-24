@@ -66,17 +66,6 @@ func (a *Adapter) Name() domain.ExperienceSource {
 	return domain.SourceOpenCode
 }
 
-// Discover is a stub. It returns ErrExperienceSchemaUnsupported to signal
-// that the discovery path is not implemented yet. Slices 2.1 will replace
-// this body with the real path-security walk.
-func (a *Adapter) Discover(ctx context.Context, projectRoot string) ([]SourceInstance, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return nil, domain.NewValidationError(domain.ErrExperienceSchemaUnsupported,
-		"opencode adapter Discover is not implemented yet")
-}
-
 // Health is a stub. It returns an error HealthResult so callers can detect
 // the unimplemented state without panicking.
 func (a *Adapter) Health(ctx context.Context, instance SourceInstance) HealthResult {

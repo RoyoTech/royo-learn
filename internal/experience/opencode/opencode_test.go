@@ -33,26 +33,6 @@ func TestAdapter_Name(t *testing.T) {
 	}
 }
 
-// TestAdapter_Discover_StubReturnsTypedError verifies that the scaffold's
-// Discover stub signals an unimplemented state through the documented
-// ErrExperienceSchemaUnsupported error. Slice 2.1 will replace this body
-// with the real path-security walk; the error code will then become
-// ErrExperienceLocatorOutsideRoot or ErrExperienceSourceNotFound as
-// appropriate.
-func TestAdapter_Discover_StubReturnsTypedError(t *testing.T) {
-	adapter := NewAdapter()
-	instances, err := adapter.Discover(context.Background(), t.TempDir())
-	if err == nil {
-		t.Fatalf("Discover returned nil error and %d instances, want typed error", len(instances))
-	}
-	if len(instances) != 0 {
-		t.Fatalf("Discover returned %d instances on stub path, want 0", len(instances))
-	}
-	if domainCode(err) != domain.ErrExperienceSchemaUnsupported {
-		t.Fatalf("Discover error code = %v, want %q", err, domain.ErrExperienceSchemaUnsupported)
-	}
-}
-
 // TestAdapter_Health_StubReturnsTypedError verifies that the scaffold's
 // Health stub returns an error HealthResult with the documented error code.
 // Slice 2.2 will replace this with the real read-only check.
