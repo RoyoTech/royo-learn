@@ -65,21 +65,6 @@ func (a *Adapter) Name() domain.ExperienceSource {
 	return domain.SourceOpenCode
 }
 
-// ResolveTrace is a stub. Slice 2.5 will replace this body with the real
-// excerpt-and-redaction path.
-func (a *Adapter) ResolveTrace(ctx context.Context, locator domain.TranscriptLocator, bounds TraceBounds) TraceResult {
-	if err := ctx.Err(); err != nil {
-		return TraceResult{
-			Code:    string(domain.ErrTimeout),
-			Message: err.Error(),
-		}
-	}
-	return TraceResult{
-		Code:    string(domain.ErrExperienceSchemaUnsupported),
-		Message: "opencode adapter ResolveTrace is not implemented yet",
-	}
-}
-
 func (a *Adapter) now() time.Time {
 	if a.Now != nil {
 		return a.Now().UTC()
