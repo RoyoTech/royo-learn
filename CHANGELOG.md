@@ -6,11 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Local `main` is 21 commits ahead of `origin/main` (Hito 1 closure +
-housekeeping). None of this is shipped yet. The first tag that
-includes any of this work is the trigger-driven `v0.2.0-rc1` once
-Hito 1 + the documentation gap (PR #19) are merged on the remote
-side.
+Nothing yet. The next entries will be Hito 2 (OpenCode `--once`)
+work and any post-`v0.2.0-rc1` corrections.
+
+## [0.2.0-rc1] - 2026-07-24
+
+First release candidate that includes Hito 1 (experience discovery).
+Cut from `main` at `21c0944` after the local main was pushed to
+`origin/main` for the first time (21 commits ahead at the moment of
+push, synchronized with the previous `bc930b3` head via merge
+commit `21c0944`).
 
 ### Added
 
@@ -23,7 +28,7 @@ side.
   - CLI `experience inject` fixture command
     (`cmd/royo-learn/experience.go`).
   - 90% test coverage on `internal/experience`.
-- **Frozen contracts** (delivered via PR #19, not yet merged):
+- **Frozen contracts** (delivered via PR #19, merged 2026-07-24):
   - `PLAN-MAESTRO-MEMSEARCH-A-ROYO-LEARN.md`
   - `docs/20-EXPERIENCE-INGESTION-PRD.md`
   - `docs/21-EXPERIENCE-DOMAIN.md`
@@ -33,7 +38,8 @@ side.
   - `docs/25-EXPERIENCE-ACCEPTANCE-MATRIX.md`
   - `docs/26-IMPLEMENTATION-ROADMAP.md`
   - `docs/ADR-0001-NO-MEMSEARCH-RUNTIME.md`
-- **Operational patterns** for agents working in this repo:
+- **Operational patterns** for agents working in this repo (delivered
+  via PR #20, merged 2026-07-24):
   `docs/lessons.md` captures shell detection, WSL bypass for the
   harness lifecycle interceptor, `gentle_review` scope discipline,
   and PR-base rules. Referenced from `AGENTS.md` and a new
@@ -45,6 +51,12 @@ side.
   `ListTools: context deadline exceeded` observation is now a
   recorded investigation result (ADR-0002 §7) rather than an open
   question.
+
+### Notes
+
+- The Version ↔ Ola map (below) is ratified by the act of cutting
+  this tag. The mapping was proposed on 2026-07-23 alongside PR #19
+  and is now bound to a real release.
 
 ### Fixed
 
