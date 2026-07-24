@@ -1,7 +1,8 @@
 # ADR-0002 — MCP ListTools timeout requires bounded investigation before Hito 2
 
-- **Status:** Proposed
+- **Status:** Proposed (investigation 2026-07-23: not reproducible; see §7)
 - **Date:** 2026-07-22
+- **Investigation date:** 2026-07-23 (HEAD `b105e34`, Go 1.26.5 windows/amd64, Windows nativo)
 - **Decision context:** Repeated `internal/mcpserver` test failure observed during the
   Hito 1 closure gate on `feat/experience-hito1-1d`. Causality was not
   independently proven in the correction window; this ADR records the evidence
@@ -169,3 +170,56 @@ sentence is correct as written.
 - `internal/testutil/cleanup.go` (Windows cleanup mitigation, distinct cause).
 - `cmd/royo-learn/main_test.go` (Windows-only sleep in `setupApprovedLearning`).
 - `docs/ADR-0001-NO-MEMSEARCH-RUNTIME.md` (precedent for file-based ADR).
+
+## 7. Investigation result (2026-07-23)
+
+The follow-up boundary in §4 was executed with explicit authorization to use
+a detached worktree at the pre-flake-isolation base `4fe9774`. Result:
+negative — the failure documented in §3 does not reproduce in this
+environment.
+
+### 7.1 Reproduction attempts (Go 1.26.5 windows/amd64, native Windows)
+
+| Commit | Command | Result |
+|---|---|---|
+| `b105e34` (HEAD) | `go test -race -count=10 ./internal/mcpserver/` | PASS, 109.9s |
+| `b105e34` (HEAD) | `go test -race -count=20 ./internal/mcpserver/` | PASS, 214.8s |
+| `4fe9774` (base, detached worktree) | `go test -race -count=20 ./internal/mcpserver/` | PASS, 203.9s |
+
+Total: 30 iterations on HEAD plus 20 on base. Zero flakes. The reproduction
+documented in §3 (`feat/experience-hito1-1d`, Go 1.26.5) does not reproduce
+in this environment at the same Go version.
+
+### 7.2 Code parity between base and HEAD
+
+`git diff 4fe9774..b105e34 -- internal/mcpserver/` is empty. The MCP package
+source, fixtures, and test wiring are bit-identical between base and HEAD.
+Any behavior difference between the two commits in this run is environmental
+(load, scheduling, Go build cache), not code.
+
+### 7.3 §4.3 artifact coverage
+
+| §4.3 required artifact | Delivered |
+|---|---|
+| Failing test name and file:line | ✓ `TestMCP_Rollback_NotServedInReadOrAgent` at `internal/mcpserver/occurrence_status_rollback_test.go:231` |
+| Reproduction command (exact flags, count, package selector) | ✓ `go test -race -count={10,20} ./internal/mcpserver/` |
+| First failing iteration count out of N | N/A — 0 of 40 in this environment |
+| Profile (WSL2 / native Windows / Linux) and Go version | ✓ Windows native, Go 1.26.5 windows/amd64 |
+| Timeout observed outside the test (real `mcp-serve` subprocess) | ✗ — gap declared; not executed in this environment |
+| Concrete remediation proposal evaluated against §2.2 | N/A — no reproduction, no observed cause to mitigate |
+
+The two gaps are honest: the §4.3 repro on a hand-driven `mcp-serve`
+subprocess was not executed, and the remediation proposal is intentionally
+absent because there is no observed cause to mitigate.
+
+### 7.4 Status and follow-up
+
+Status remains `Proposed`. The negative result strengthens the §5 claim that
+the failure was test-local and timing-sensitive rather than a deterministic
+defect in shipped code.
+
+If `ListTools: context deadline exceeded` reappears in the Hito 2 gate or
+any subsequent CI run, re-open this ADR, re-execute §4.2 against the failing
+revision, and propose a remediation that satisfies §2.2. Do not modify
+`internal/mcpserver/` outside an explicit corrective review with a fresh
+receipt.

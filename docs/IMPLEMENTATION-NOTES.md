@@ -111,7 +111,7 @@ on supported GitHub-hosted runners.
 - T01 Task 1 is committed on local `master` as `7af28fb`.
 - The commit is pushed to `origin/master` on `RoyoTech/royo-learn`.
 - Branch `main` exists on the remote at the T00 commit (`f172143`).
-- PR #1 is open: https://github.com/RoyoTech/royo-learn/pull/1 (master → main).
+- PR #1 is open: <https://github.com/RoyoTech/royo-learn/pull/1> (master → main).
 - Native review receipt lineage `t01-config-project-v2` is approved and both
   `pre-commit` and `pre-PR` gates returned `allow`.
 
@@ -141,6 +141,7 @@ on supported GitHub-hosted runners.
 ### Resolved dependencies
 
 No new external dependencies. Uses standard library only:
+
 - `crypto/sha256` for path hashing
 - `os/exec` for Git command interaction
 - `path/filepath` for cross-platform path handling
@@ -195,6 +196,7 @@ No new external dependencies. Uses standard library only:
 Strict TDD cycle followed: tests written first → build failed (RED) → production
 code implemented → all tests pass (GREEN) → refactoring to remove dead code,
 simplify error handling, remove unused functions → all tests still pass.
+
 - **2026-07-11 rebuild scope**: Batch T02 rebuild repairs FTS transactionally from canonical SQLite tables; the broader `rebuild-index` CLI reconstruction from Markdown records remains deferred until a record parser exists.
 
 ## P2 — Explicit skill area in curate_learning
@@ -284,7 +286,7 @@ design.
 ### Also done this session
 
 - **padreseducadores.org MCP activated**: created `.royo-learn/config.yaml`
-  + `.royo-learn/.gitignore` in the padreseducadores.org repo. Committed as
+  - `.royo-learn/.gitignore` in the padreseducadores.org repo. Committed as
   `9f49b74` and pushed to `origin/main`. `royo-learn doctor --json` returns
   `ok: true`. The royo-learn MCP is registered globally in OpenCode's
   `opencode.json` (line 338), so tools are available in any OpenCode session;
@@ -414,7 +416,6 @@ the existing in-file pattern.
 3. Hito 1 closure gate: `-race`, `internal/experience` coverage,
    cross-build windows/linux/darwin, contracts verification.
 
-
 ## Slice 1.D — Experience fixture ingestion
 
 - `feat(config): add ExperienceConfig disabled by default` (`eeeb938`): added the contract-minimal opt-in flag and merge behavior.
@@ -463,5 +464,4 @@ Decisión técnica: el helper `testutil.RemoveAllWithRetry` ya existía y se pre
 Pendiente fuera de scope:
 
 - Las pruebas en `internal/project`, `internal/evidence`, `internal/integration`, `internal/publish`, `internal/record`, `internal/capture`, `internal/doctor` que aún usan `t.TempDir()` directamente. Recomendable migrar cuando aparezca el flake, siguiendo el mismo patrón.
-- La sensibilidad de timeout en `internal/mcpserver` (`ListTools: context deadline exceeded`) no es un flake de Windows AV — es una suite MCP que ocasionalmente excede el deadline del cliente. Registrada en `docs/ADR-0002-MCP-LISTTOOLS-TIMEOUT.md` (status: Proposed) con el límite de investigación antes de Hito 2.
-
+- La sensibilidad de timeout en `internal/mcpserver` (`ListTools: context deadline exceeded`) fue investigada bajo el §4 del ADR-0002 el 2026-07-23 (HEAD `b105e34`). Resultado: 0 de 40 iteraciones con `go test -race -count={10,20} ./internal/mcpserver/` reprodujeron la falla, ni en `4fe9774` (base, vía worktree efímero) ni en `b105e34`. El flake es intermitente y no reproducible en este ambiente; `internal/mcpserver/` es bit-identical entre ambos commits. ADR-0002 sigue `Proposed` con un §7 nuevo describiendo el resultado negativo; monitorear y reabrir si reaparece. Test real `mcp-serve` bajo stdio no fue ejecutado (gap declarado en §4.3 punto 5).
