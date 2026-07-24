@@ -65,21 +65,6 @@ func (a *Adapter) Name() domain.ExperienceSource {
 	return domain.SourceOpenCode
 }
 
-// Scan is a stub. Slices 2.3-2.4 will replace this body with the real
-// envelope construction and idempotent cursor handling.
-func (a *Adapter) Scan(ctx context.Context, req ScanRequest) (ScanResult, error) {
-	if err := ctx.Err(); err != nil {
-		return ScanResult{}, err
-	}
-	return ScanResult{
-		Instance:  req.Instance,
-		Status:    "error",
-		Code:      string(domain.ErrExperienceSchemaUnsupported),
-		Message:   "opencode adapter Scan is not implemented yet",
-		ScannedAt: a.now(),
-	}, nil
-}
-
 // ResolveTrace is a stub. Slice 2.5 will replace this body with the real
 // excerpt-and-redaction path.
 func (a *Adapter) ResolveTrace(ctx context.Context, locator domain.TranscriptLocator, bounds TraceBounds) TraceResult {

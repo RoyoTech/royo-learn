@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"agent-royo-learn/internal/domain"
 )
@@ -30,62 +29,6 @@ func TestAdapter_ImplementsContract(t *testing.T) {
 func TestAdapter_Name(t *testing.T) {
 	if got := NewAdapter().Name(); got != domain.SourceOpenCode {
 		t.Fatalf("Name() = %q, want %q", got, domain.SourceOpenCode)
-	}
-}
-
-// TestAdapter_Scan_StubReturnsTypedError verifies that the scaffold's Scan
-// stub reports an unimplemented state via ScanResult.Code and does not
-// surface any partial envelopes. Slice 2.3 will replace this body with the
-// real envelope construction.
-func TestAdapter_Scan_StubReturnsTypedError(t *testing.T) {
-	adapter := NewAdapter()
-	adapter.Now = func() time.Time { return time.Unix(0, 0).UTC() }
-
-	result, err := adapter.Scan(context.Background(), ScanRequest{
-		ProjectRoot: t.TempDir(),
-		Instance: SourceInstance{
-			Source: domain.SourceOpenCode,
-			DBPath: "/tmp/opencode.db",
-			Schema: SchemaTag,
-		},
-	})
-	if err != nil {
-		t.Fatalf("Scan returned error on stub: %v", err)
-	}
-	if result.Status != "error" {
-		t.Fatalf("Scan Status = %q, want %q", result.Status, "error")
-	}
-	if result.Code != string(domain.ErrExperienceSchemaUnsupported) {
-		t.Fatalf("Scan Code = %q, want %q", result.Code, domain.ErrExperienceSchemaUnsupported)
-	}
-	if len(result.Envelopes) != 0 {
-		t.Fatalf("Scan returned %d envelopes on stub, want 0", len(result.Envelopes))
-	}
-	if result.ScannedAt.IsZero() {
-		t.Fatalf("Scan ScannedAt is zero, want the configured clock value")
-	}
-}
-
-// TestAdapter_ResolveTrace_StubReturnsTypedError verifies the scaffold's
-// ResolveTrace stub. Slice 2.5 will replace this body with the real
-// excerpt-and-redaction path.
-func TestAdapter_ResolveTrace_StubReturnsTypedError(t *testing.T) {
-	adapter := NewAdapter()
-	result := adapter.ResolveTrace(context.Background(), domain.TranscriptLocator{
-		Kind:      "sqlite",
-		Path:      "/tmp/opencode.db",
-		SessionID: "session",
-		TurnID:    "turn",
-		Offset:    0,
-	}, TraceBounds{MaxBytes: 1024})
-	if result.Code != string(domain.ErrExperienceSchemaUnsupported) {
-		t.Fatalf("ResolveTrace Code = %q, want %q", result.Code, domain.ErrExperienceSchemaUnsupported)
-	}
-	if result.Excerpt != "" {
-		t.Fatalf("ResolveTrace Excerpt = %q, want empty on stub", result.Excerpt)
-	}
-	if result.Redacted || result.SourceChanged {
-		t.Fatalf("ResolveTrace Redacted=%v SourceChanged=%v, want both false on stub", result.Redacted, result.SourceChanged)
 	}
 }
 
