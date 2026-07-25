@@ -8,6 +8,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Hito 5: deterministic experience detectors** (PR #22, merge
+  commit `59d5e74` on local + remote main). Closes the slice 5
+  deliverable from `docs/26-IMPLEMENTATION-ROADMAP.md` PR #4. Eight
+  atomic commits on `feat/hito5-detectors` covering:
+  - `internal/experience/detectors/` package: `Detector` interface
+    (Kind, Version, Detect), `DetectInput`, `CandidateEvent`,
+    `Registry` (orchestrator-facing lookup), package doc with scope
+    and boundaries.
+  - `RetryDetector` — the first concrete detector, kind `retry`,
+    canonical #4 in `docs/23-PATTERN-MINING.md` §2.1. Threshold=3,
+    window=5min, pure event-driven, deterministic via the
+    `(Source, Session.ExternalID, Turn.ExternalID)` idempotency
+    contract.
+  - CLI `experience detect --kind <kind> --project-root <root>
+    [--input <file>] [--persist]` orchestrator. JSON in / JSON out
+    by default; `--persist` forwards every emitted event through
+    `detectors.Persist` and returns the canonical event_id +
+    fingerprint + duplicate flag per event.
+  - MCP tool `experience_detect_events` (agent + admin profile) with
+    the same surface as the CLI: detector kind, payload, optional
+    persist.
+  - Domain additions: `SourceDetector` accepted by
+    `isValidExperienceSource`; `detector` accepted by
+    `localLocatorKinds`. The detector-produced envelope uses these so
+    the synthetic locator is valid for v1.
+  - 90.1% test coverage on `internal/experience/detectors` (≥ 80%
+    threshold per AGENTS.md §Calidad mínima).
+  - Slice 5.4 acceptance test in `cmd/royo-learn/experience_detect_test.go`
+    covers the end-to-end persistence path: real project root, real
+    SQLite, retry detector at threshold, second run reports
+    `duplicate=true` with the same event_id (idempotency proof).
+
 - **Hito 2: OpenCode `--once` adapter** (PR #21, merge commit
   `ad269a7` on local + remote main). Closes the slice 2 deliverable
   from `docs/26-IMPLEMENTATION-ROADMAP.md` PR #3.
@@ -232,4 +264,22 @@ tag mean".
   `HANDOFF-HITO5-DETECTORS.md`.
 - The CHANGELOG [Unreleased] section now carries the Hito 2 entry.
   It will continue to accumulate until Ola 1 closes with Hito 4,
-  at which point `v0.2.0` is the natural cut.
+    at which point `v0.2.0` is the natural cut.
+
+### Status as of 2026-07-25 (post-Hito 5 merge)
+
+- `v0.2.0-rc1` is the last released tag. Per the trigger table, the
+  next tag (`v0.2.0`) fires when the last PR of Ola 1 (Hito 4) merges
+  to remote main. Hito 5 alone does not trigger it.
+- Hitos 0, 1, 2, and 5 are merged on `main`. `origin/main` and local
+  `main` are synchronized at `59d5e74`. PR #22 is closed.
+- The feature branches for those Hitos were deleted (local and
+  remote) after the merges (`feat/hito2-opencode-once`,
+  `feat/hito5-detectors`).
+- Ola 1 is now 4/7 Hitos in: Hito 0 ✅, Hito 1 ✅, Hito 2 ✅, Hito 5 ✅.
+  Hitos 6, 7, 4 remain. The next PR is Hito 6 (PR #5 in the roadmap:
+  patterns, clustering, qualification, dismissal), tracked in
+  `HANDOFF-HITO6-PATTERNS.md`.
+- The CHANGELOG [Unreleased] section now carries both the Hito 2 and
+  the Hito 5 entries. It will continue to accumulate until Ola 1
+  closes with Hito 4, at which point `v0.2.0` is the natural cut.
