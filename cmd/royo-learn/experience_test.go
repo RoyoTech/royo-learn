@@ -363,6 +363,99 @@ func TestRunExperienceOpencodeScanFixtureSymlinkRejected(t *testing.T) {
 	}
 }
 
+// makeOpencodeFixtureWithSecretTurn writes a fixture containing one complete
+// turn whose assistant content embeds a pattern that the core redacts (a
+// fake API key). Used by the security roundtrip test below.
+func makeOpencodeFixtureWithSecretTurn(t *testing.T, root string) string {
+	t.Helper()
+	dbPath := filepath.Join(root, fixtureSubdir, "opencode.db")
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeOpencodeFixture(t, dbPath, func(db *sql.DB) {
+		if _, err := db.Exec(
+			"INSERT INTO sessions(id, project_id, started_at, updated_at) VALUES(?, ?, ?, ?)",
+			"session-secret", "project-secret", int64(1700000000000), int64(1700000001000),
+		); err != nil {
+			t.Fatalf("insert session: %v", err)
+		}
+		if _, err := db.Exec(
+			"INSERT INTO messages(id, session_id, sequence, role, content, finish, created_at, complete, revision) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			"turn-secret", "session-secret", int64(1), "assistant", "export API_KEY=sk-abc123secretvalue", "stop", int64(1700000001000), 1, "rev-secret",
+		); err != nil {
+			t.Fatalf("insert message: %v", err)
+		}
+	})
+	return dbPath
+}
+
+// TestRunExperienceOpencodeScanFixtureOutsideRootRejected verifies that the
+// core service rejects envelopes whose locator path is outside the stored
+// project root. The fixture is created in a separate temp dir, so the scan
+// must produce envelopes whose locator is outside `root` and the service
+// must refuse to ingest them, surfacing the error to the CLI.
+func TestRunExperienceOpencodeScanFixtureOutsideRootRejected(t *testing.T) {
+	root := setupProjectRoot(t)
+	outside := makeOpencodeFixtureWithTurns(t, root)
+	// Move the fixture to a sibling temp dir that is NOT under `root` so the
+	// canonical locator falls outside the stored project root.
+	sibling := testutil.TempDir(t)
+	moved := filepath.Join(sibling, "opencode.db")
+	if err := os.Rename(outside, moved); err != nil {
+		t.Fatalf("move fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := runExperience([]string{"opencode", "scan", "--project-root", root, "--fixture", moved}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("exit = 0, want non-zero; stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+}
+
+// TestRunExperienceOpencodeScanFixtureSecretIdempotent verifies that a turn
+// whose content embeds a secret-like pattern is ingested on the first pass
+// and recognized as a duplicate on the second pass. The fingerprint must
+// remain stable across the redaction step in the core service, otherwise
+// idempotency would break for any turn that contains a secret.
+func TestRunExperienceOpencodeScanFixtureSecretIdempotent(t *testing.T) {
+	root := setupProjectRoot(t)
+	fixture := makeOpencodeFixtureWithSecretTurn(t, root)
+
+	var stdout1, stderr1 bytes.Buffer
+	code1 := runExperience([]string{"opencode", "scan", "--project-root", root, "--fixture", fixture}, &stdout1, &stderr1)
+	if code1 != 0 {
+		t.Fatalf("first run: exit=%d, stderr=%s, stdout=%s", code1, stderr1.String(), stdout1.String())
+	}
+	var out1 struct {
+		IngestedTurns int `json:"ingested_turns"`
+		Duplicates    int `json:"duplicates"`
+	}
+	if err := json.Unmarshal(stdout1.Bytes(), &out1); err != nil {
+		t.Fatalf("first stdout: %v (%s)", err, stdout1.String())
+	}
+	if out1.IngestedTurns != 1 {
+		t.Fatalf("first run ingested_turns = %d, want 1 (secret content)", out1.IngestedTurns)
+	}
+
+	var stdout2, stderr2 bytes.Buffer
+	code2 := runExperience([]string{"opencode", "scan", "--project-root", root, "--fixture", fixture}, &stdout2, &stderr2)
+	if code2 != 0 {
+		t.Fatalf("second run: exit=%d, stderr=%s, stdout=%s", code2, stderr2.String(), stdout2.String())
+	}
+	var out2 struct {
+		IngestedTurns int `json:"ingested_turns"`
+		Duplicates    int `json:"duplicates"`
+	}
+	if err := json.Unmarshal(stdout2.Bytes(), &out2); err != nil {
+		t.Fatalf("second stdout: %v (%s)", err, stdout2.String())
+	}
+	if out2.Duplicates != 1 {
+		t.Fatalf("second run duplicates = %d, want 1 (idempotent across redaction)", out2.Duplicates)
+	}
+	if out2.IngestedTurns != 0 {
+		t.Fatalf("second run ingested_turns = %d, want 0", out2.IngestedTurns)
+	}
+}
+
 func TestRunExperienceInjectFixture(t *testing.T) {
 	root := setupProjectRoot(t)
 	envelope := `{"schema_version":1,"source":"opencode","project_root":"` + filepath.ToSlash(root) + `","session":{"external_id":"session-cli","updated_at":"2026-07-21T10:00:00Z","locator":{"kind":"sqlite","path":"` + filepath.ToSlash(filepath.Join(root, "source.db")) + `","session_id":"native-session","turn_id":"native-turn"}},"turn":{"external_id":"turn-cli","sequence":1,"complete":true,"finish_reason":"stop","occurred_at":"2026-07-21T10:01:00Z","source_revision":"revision-1","user_text":"fix","assistant_text":"fixed"},"actor":{"kind":"agent","name":"test","model":"test","session_id":"actor"}}`
