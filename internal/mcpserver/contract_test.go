@@ -228,9 +228,9 @@ var pendingTools = map[string]string{}
 // contractExtensions are canonical tools that D1 adds on top of docs/05-MCP-SPEC.md
 // so that no registered tool is left without a canonical name.
 var contractExtensions = map[string]bool{
-	"learning_list_recurrences":  true,
-	"learning_compute_metrics":   true,
-	"experience_detect_events":   true,
+	"learning_list_recurrences": true,
+	"learning_compute_metrics":  true,
+	"experience_detect_events":  true,
 }
 
 func documentedTools(t *testing.T) map[string]bool {
