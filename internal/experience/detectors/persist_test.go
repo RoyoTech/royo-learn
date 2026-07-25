@@ -243,7 +243,7 @@ func TestBuildDetectorEnvelope_DeterministicTurnID(t *testing.T) {
 		Tool:    "npm test",
 		Problem: "same fingerprint failed 3 times",
 		Result:  "corrected",
-		Paths:   []string{"b", "a"},        // intentionally unsorted
+		Paths:   []string{"b", "a"},             // intentionally unsorted
 		Extra:   map[string]any{"y": 2, "x": 1}, // intentionally unsorted keys
 	}
 
