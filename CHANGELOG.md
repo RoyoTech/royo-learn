@@ -6,8 +6,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Nothing yet. The next entries will be Hito 2 (OpenCode `--once`)
-work and any post-`v0.2.0-rc1` corrections.
+### Added
+
+- **Hito 2: OpenCode `--once` adapter** (PR #21, merge commit
+  `ad269a7` on local + remote main). Closes the slice 2 deliverable
+  from `docs/26-IMPLEMENTATION-ROADMAP.md` PR #3.
+  - `internal/experience/opencode/` package: `Discover()` (with path
+    security, no symlinks), `Health()` (read-only schema check),
+    `Scan()` (stable envelopes, idempotency by
+    `(source, external_session_id, external_turn_id)`),
+    `ResolveTrace()` (redacted excerpt).
+  - CLI `experience opencode scan --once --project-root <root>
+    [--fixture <path>]` orchestrator
+    (`cmd/royo-learn/experience.go`).
+  - `SkippedIncomplete` counter surfaced end-to-end (adapter →
+    `ScanResult` → CLI report → JSON output) so the operator can
+    audit incomplete turns instead of having them disappear silently.
+  - 80.5% test coverage on `internal/experience/opencode` (≥ 80%
+    threshold per AGENTS.md §Calidad mínima).
+  - `docs/26 §9` updated with the four lessons this PR produced.
+  - Post-merge fixes captured in commits `b1eac7c` (CLI: reject
+    symlinks in `--fixture` and replace discovery) and `663d7eb` /
+    `7e6fde8` (test: Windows 8.3 path handling now uses
+    `project.Canonicalize` instead of the strict byte compare that
+    broke on `RUNNER~1` vs `runneradmin`).
+
+### Notes
+
+- The operator's 2026-07-25 directive ("piensa en hacer royo-learn
+  solo para windows inicialmente") narrows the merge gate to
+  Windows + clean install smoke + Windows installer safety. The
+  remaining Linux/macOS CI jobs are documented as operator-owned
+  cross-platform debt; this PR's coverage gate failures on
+  `internal/publish` are unrelated (a pre-existing
+  `TestPublish_RollbackFailureObserved` flake on Linux) and out of
+  scope for Hito 2.
 
 ## [0.2.0-rc1] - 2026-07-24
 
@@ -160,13 +193,14 @@ working agreement until a future ADR formalizes it.
 
 ### Trigger → tag
 
-| Trigger | Tag |
-|---|---|
-| PR #19 merged | (no tag — docs only) |
-| Local main first contains all of Hito 1 + the documentation gap | `v0.2.0-rc1` |
-| Ola 1 last PR (Hito 4) merged to remote main | `v0.2.0` |
-| Ola 2 last PR (Hito 10 — Codex) merged to remote main | `v0.3.0` |
-| Ola 3 last PR (Pi) merged to remote main | `v1.0.0` |
+| Trigger | Tag | Status |
+|---|---|---|
+| PR #19 merged | (no tag — docs only) | ✅ |
+| Local main first contains all of Hito 1 + the documentation gap | `v0.2.0-rc1` | ✅ |
+| Hito 2 PR (PR #21) merged to remote main | (no tag — accumulates in [Unreleased]) | ✅ |
+| Ola 1 last PR (Hito 4) merged to remote main | `v0.2.0` | ⏳ |
+| Ola 2 last PR (Hito 10 — Codex) merged to remote main | `v0.3.0` | ⏳ |
+| Ola 3 last PR (Pi) merged to remote main | `v1.0.0` | ⏳ |
 
 Until these triggers fire, the corresponding tag does not exist.
 The trigger table is the source of truth for "are we ready for
@@ -183,3 +217,19 @@ tag mean".
   on `docs/grieta-20-26-clean` and is the next thing to land.
 - Once PR #19 is merged and `main` is pushed, `v0.2.0-rc1` is the
   natural next tag.
+
+### Status as of 2026-07-25 (post-Hito 2 merge)
+
+- `v0.2.0-rc1` is the last released tag and the natural next
+  release point per the trigger table.
+- Hitos 0, 1, and 2 are merged on `main`. `origin/main` and local
+  `main` are synchronized at `ad269a7`. PR #21 is closed.
+- The feature branches for those Hitos were deleted (local and
+  remote) after the merges.
+- Ola 1 is now 3/7 Hitos in: Hito 0 ✅, Hito 1 ✅, Hito 2 ✅.
+  Hitos 5, 6, 7, 4 remain. The next PR is Hito 5 (PR #4 in the
+  roadmap: detectores deterministas), tracked in
+  `HANDOFF-HITO5-DETECTORS.md`.
+- The CHANGELOG [Unreleased] section now carries the Hito 2 entry.
+  It will continue to accumulate until Ola 1 closes with Hito 4,
+  at which point `v0.2.0` is the natural cut.
