@@ -68,6 +68,10 @@ const (
 	ErrPatternAlreadyPromoted     ErrorCode = "pattern_already_promoted"
 	ErrPatternFalseCluster        ErrorCode = "pattern_false_cluster"
 	ErrPatternInsufficientSources ErrorCode = "pattern_insufficient_sources"
+
+	// Experience promotion codes (Hito 7). See
+	// docs/23-PATTERN-MINING.md §8 and docs/17-ERROR-CODES.md.
+	ErrPromotionNotImplemented ErrorCode = "promotion_not_implemented"
 )
 
 // AllErrorCodes returns every stable error code modeled by the domain.
@@ -90,6 +94,7 @@ func AllErrorCodes() []ErrorCode {
 		ErrExperienceCommitUnknown,
 		ErrPatternNotFound, ErrPatternNotQualified, ErrPatternAlreadyPromoted,
 		ErrPatternFalseCluster, ErrPatternInsufficientSources,
+		ErrPromotionNotImplemented,
 	}
 }
 
