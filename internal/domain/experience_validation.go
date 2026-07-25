@@ -28,6 +28,7 @@ const (
 // first version (docs/21 §TranscriptLocator).
 var localLocatorKinds = map[string]bool{
 	"sqlite": true, "jsonl": true, "rollout": true, "file": true,
+	"detector": true,
 }
 
 // ValidateExperienceSession checks a session for required fields and enums.
@@ -212,7 +213,7 @@ func ValidateExperienceEvent(e *ExperienceEvent) error {
 
 func isValidExperienceSource(s ExperienceSource) bool {
 	switch s {
-	case SourceOpenCode, SourceClaudeCode, SourceCodex, SourcePi, SourceManual:
+	case SourceOpenCode, SourceClaudeCode, SourceCodex, SourcePi, SourceManual, SourceDetector:
 		return true
 	}
 	return false
