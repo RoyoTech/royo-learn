@@ -12,6 +12,8 @@ import (
 	"agent-royo-learn/internal/curate"
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/evidence"
+	"agent-royo-learn/internal/experience"
+	"agent-royo-learn/internal/experience/detectors"
 	"agent-royo-learn/internal/publish"
 	"agent-royo-learn/internal/recurrence"
 	"agent-royo-learn/internal/storage"
@@ -261,6 +263,18 @@ type statusInput struct {
 type rollbackInput struct {
 	PublicationID string     `json:"publication_id" jsonschema:"required,publication to roll back"`
 	Actor         actorInput `json:"actor,omitempty"`
+}
+
+// detectEventsInput is the schema for the experience_detect_events
+// tool. The payload's shape is detector-specific (RetryPayload for
+// the retry detector); the MCP tool passes it through unchanged.
+// Payload is declared as `any` rather than json.RawMessage because
+// the schema inference for RawMessage produces {"type": "array"}
+// which rejects object payloads at validation time.
+type detectEventsInput struct {
+	Kind    string `json:"kind" jsonschema:"required,detector kind to invoke (e.g. retry)"`
+	Payload any    `json:"payload" jsonschema:"required,detector-specific payload (RetryPayload for retry)"`
+	Persist bool   `json:"persist,omitempty" jsonschema:"when true, persist emitted events to the canonical experience store"`
 }
 
 // ---------------------------------------------------------------------------
@@ -837,6 +851,112 @@ func handleRollback(srv *Server) func(ctx context.Context, req *mcp.CallToolRequ
 			"publication_id": in.PublicationID,
 			"status":         "rolled_back",
 		})
+	}
+}
+
+// handleDetectEvents invokes a registered detector over a JSON
+// payload and returns the emitted CandidateEvents. When Persist is
+// true, the events are also forwarded to the canonical experience
+// store via detectors.Persist; the result then includes per-event
+// metadata (event_id, fingerprint, duplicate) so the caller can
+// audit the write and the idempotency outcome.
+//
+// The detector registry is built in-process; for slice 5.4 only the
+// retry detector is registered. Adding a new detector requires (a)
+// registering it in this handler and (b) extending the
+// decodeDetectorPayload switch; both are type-checked so the
+// compiler catches a missing branch.
+func handleDetectEvents(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in detectEventsInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in detectEventsInput) (*mcp.CallToolResult, any, error) {
+		if in.Kind == "" {
+			return toolError("invalid_argument", "kind is required")
+		}
+		if in.Payload == nil {
+			return toolError("invalid_argument", "payload is required")
+		}
+
+		reg := detectors.NewRegistry()
+		retryDet, err := detectors.NewRetryDetector(3, 5*time.Minute)
+		if err != nil {
+			return toolDomainError(err, "detector_init_failed")
+		}
+		if err := reg.Register(retryDet); err != nil {
+			return toolDomainError(err, "detector_register_failed")
+		}
+
+		det, ok := reg.Get(in.Kind)
+		if !ok {
+			return toolError("not_found",
+				fmt.Sprintf("no detector registered for kind %q (registered: %v)", in.Kind, reg.Kinds()))
+		}
+
+		payloadValue, err := decodeDetectorPayload(in.Kind, in.Payload)
+		if err != nil {
+			return toolError("invalid_argument", err.Error())
+		}
+
+		detectIn := detectors.DetectInput{
+			Source:      "mcp",
+			ProjectRoot: srv.projectRoot,
+			Payload:     payloadValue,
+			Timestamp:   time.Now().UTC(),
+		}
+		events, err := det.Detect(ctx, detectIn)
+		if err != nil {
+			return toolDomainError(err, "detector_failed")
+		}
+
+		out := map[string]any{
+			"kind":            det.Kind(),
+			"version":         det.Version(),
+			"status":          "ok",
+			"detected_events": events,
+			"total_events":    len(events),
+		}
+
+		if in.Persist {
+			svc := experience.NewService(srv.db)
+			persisted := make([]map[string]any, 0, len(events))
+			for _, ev := range events {
+				result, err := detectors.Persist(ctx, svc, srv.projectID, srv.projectRoot, ev, time.Now().UTC())
+				if err != nil {
+					return toolDomainError(err, "persist_failed")
+				}
+				persisted = append(persisted, map[string]any{
+					"event_id":    string(result.Turn.ID),
+					"fingerprint": result.Turn.Fingerprint,
+					"duplicate":   !result.Created,
+				})
+			}
+			out["persisted_count"] = len(persisted)
+			out["persisted"] = persisted
+		}
+
+		return toolResultJSON(out)
+	}
+}
+
+// decodeDetectorPayload maps a detector Kind to its concrete payload
+// type and unmarshals the supplied Go value (already JSON-decoded
+// by the MCP framework) into it. Centralising the dispatch here
+// keeps handleDetectEvents linear and the test surface small.
+func decodeDetectorPayload(kind string, value any) (any, error) {
+	switch kind {
+	case "retry":
+		// Re-marshal through JSON so the strongly-typed RetryPayload
+		// gets the same shape whether the caller sent a Go map (CLI
+		// tests) or a JSON object (MCP clients).
+		b, err := json.Marshal(value)
+		if err != nil {
+			return nil, fmt.Errorf("cannot encode payload: %v", err)
+		}
+		var p detectors.RetryPayload
+		if err := json.Unmarshal(b, &p); err != nil {
+			return nil, fmt.Errorf("cannot decode retry payload: %v", err)
+		}
+		return p, nil
+	default:
+		return nil, fmt.Errorf("no decoder registered for kind %q", kind)
 	}
 }
 

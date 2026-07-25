@@ -404,6 +404,237 @@ func TestCallTool_CaptureLearning_MissingRequiredFields(t *testing.T) {
 	}
 }
 
+// -----------------------------------------------------------------------
+// experience_detect_events (Hito 5 slice 5.4 MCP tool)
+// -----------------------------------------------------------------------
+
+// retryPayloadForMCP returns a JSON RetryPayload with the current
+// observation at now and `recent` prior observations at the supplied
+// offsets from now. All observations share the same fingerprint and
+// result="fail" so the retry detector emits one event when the count
+// crosses the threshold of 3.
+func retryPayloadForMCP(now time.Time, recentOffsets []time.Duration) map[string]any {
+	current := map[string]any{
+		"fingerprint": "fp-cmd-fail-001",
+		"tool":        "npm test",
+		"result":      "fail",
+		"timestamp":   now.Format(time.RFC3339Nano),
+	}
+	recent := make([]map[string]any, 0, len(recentOffsets))
+	for _, off := range recentOffsets {
+		recent = append(recent, map[string]any{
+			"fingerprint": "fp-cmd-fail-001",
+			"tool":        "npm test",
+			"result":      "fail",
+			"timestamp":   now.Add(off).Format(time.RFC3339Nano),
+		})
+	}
+	return map[string]any{
+		"current": current,
+		"recent":  recent,
+	}
+}
+
+func TestCallTool_ExperienceDetectEvents_RetryAtThreshold(t *testing.T) {
+	t.Parallel()
+	ts := newTestServer(t, "agent")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, err := ts.callTool(ctx, "experience_detect_events", map[string]any{
+		"kind":    "retry",
+		"payload": retryPayloadForMCP(time.Now().UTC(), []time.Duration{-1 * time.Minute, -3 * time.Minute}),
+	})
+	if err != nil {
+		t.Fatalf("transport error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected IsError=false, got true; result=%+v", result)
+	}
+
+	data := mustDecodeMap(t, result)
+	if got := data["status"]; got != "ok" {
+		t.Errorf("status = %v, want %q", got, "ok")
+	}
+	if got := data["kind"]; got != "retry" {
+		t.Errorf("kind = %v, want %q", got, "retry")
+	}
+	if got, _ := data["total_events"].(float64); got != 1 {
+		t.Errorf("total_events = %v, want 1", data["total_events"])
+	}
+}
+
+func TestCallTool_ExperienceDetectEvents_MissingKind(t *testing.T) {
+	t.Parallel()
+	ts := newTestServer(t, "agent")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, err := ts.callTool(ctx, "experience_detect_events", map[string]any{
+		"payload": retryPayloadForMCP(time.Now().UTC(), nil),
+	})
+	if err != nil {
+		t.Fatalf("transport error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected IsError=true, got false")
+	}
+}
+
+func TestCallTool_ExperienceDetectEvents_MissingPayload(t *testing.T) {
+	t.Parallel()
+	ts := newTestServer(t, "agent")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, err := ts.callTool(ctx, "experience_detect_events", map[string]any{
+		"kind": "retry",
+	})
+	if err != nil {
+		t.Fatalf("transport error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected IsError=true, got false")
+	}
+}
+
+func TestCallTool_ExperienceDetectEvents_UnknownKind(t *testing.T) {
+	t.Parallel()
+	ts := newTestServer(t, "agent")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, err := ts.callTool(ctx, "experience_detect_events", map[string]any{
+		"kind":    "not_a_real_detector",
+		"payload": map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("transport error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected IsError=true, got false")
+	}
+}
+
+func TestCallTool_ExperienceDetectEvents_InvalidPayload(t *testing.T) {
+	t.Parallel()
+	ts := newTestServer(t, "agent")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, err := ts.callTool(ctx, "experience_detect_events", map[string]any{
+		"kind":    "retry",
+		"payload": "not-a-json-object",
+	})
+	if err != nil {
+		t.Fatalf("transport error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected IsError=true, got false")
+	}
+}
+
+func TestCallTool_ExperienceDetectEvents_PersistIdempotent(t *testing.T) {
+	t.Parallel()
+	ts := newTestServer(t, "agent")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	args := map[string]any{
+		"kind": "retry",
+		"payload": retryPayloadForMCP(time.Now().UTC(), []time.Duration{
+			-1 * time.Minute, -3 * time.Minute,
+		}),
+		"persist": true,
+	}
+
+	// First call: writes the row, duplicate=false.
+	first, err := ts.callTool(ctx, "experience_detect_events", args)
+	if err != nil {
+		t.Fatalf("first transport error: %v", err)
+	}
+	if first.IsError {
+		t.Fatalf("first IsError=true; result=%+v", first)
+	}
+	firstData := mustDecodeMap(t, first)
+	if got, _ := firstData["persisted_count"].(float64); got != 1 {
+		t.Fatalf("first persisted_count = %v, want 1", firstData["persisted_count"])
+	}
+	persisted1, ok := firstData["persisted"].([]any)
+	if !ok || len(persisted1) != 1 {
+		t.Fatalf("first persisted = %+v, want one entry", firstData["persisted"])
+	}
+	entry1, ok := persisted1[0].(map[string]any)
+	if !ok {
+		t.Fatalf("first persisted[0] is not a map: %T", persisted1[0])
+	}
+	if dup, _ := entry1["duplicate"].(bool); dup {
+		t.Error("first call duplicate = true, want false")
+	}
+	eventID1, _ := entry1["event_id"].(string)
+	if eventID1 == "" {
+		t.Error("first event_id is empty")
+	}
+	fingerprint1, _ := entry1["fingerprint"].(string)
+	if fingerprint1 == "" {
+		t.Error("first fingerprint is empty")
+	}
+
+	// Second call with identical payload: hits the
+	// (session_id, external_turn_id) uniqueness constraint and
+	// reports duplicate=true with the same event_id and fingerprint.
+	second, err := ts.callTool(ctx, "experience_detect_events", args)
+	if err != nil {
+		t.Fatalf("second transport error: %v", err)
+	}
+	if second.IsError {
+		t.Fatalf("second IsError=true; result=%+v", second)
+	}
+	secondData := mustDecodeMap(t, second)
+	persisted2, ok := secondData["persisted"].([]any)
+	if !ok || len(persisted2) != 1 {
+		t.Fatalf("second persisted = %+v, want one entry", secondData["persisted"])
+	}
+	entry2, ok := persisted2[0].(map[string]any)
+	if !ok {
+		t.Fatalf("second persisted[0] is not a map: %T", persisted2[0])
+	}
+	if dup, _ := entry2["duplicate"].(bool); !dup {
+		t.Errorf("second duplicate = false, want true (idempotency proof)")
+	}
+	if got, _ := entry2["event_id"].(string); got != eventID1 {
+		t.Errorf("second event_id = %q, want %q (same row)", got, eventID1)
+	}
+	if got, _ := entry2["fingerprint"].(string); got != fingerprint1 {
+		t.Errorf("second fingerprint = %q, want %q (deterministic)", got, fingerprint1)
+	}
+}
+
+// mustDecodeMap extracts the first text content of a successful
+// tool result and decodes it as a JSON object. It fails the test
+// fatally on any decode error so the call sites stay short.
+func mustDecodeMap(t *testing.T, result *mcp.CallToolResult) map[string]any {
+	t.Helper()
+	if len(result.Content) == 0 {
+		t.Fatalf("result has no content")
+	}
+	tc, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("result content is not TextContent: %T", result.Content[0])
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(tc.Text), &m); err != nil {
+		t.Fatalf("decode result: %v (text=%q)", err, tc.Text)
+	}
+	return m
+}
+
 // ---------------------------------------------------------------------------
 // RED — doctor tool test
 // ---------------------------------------------------------------------------
