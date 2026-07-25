@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -115,8 +116,15 @@ func TestDiscover_FindsOpenCodeDBAtRoot(t *testing.T) {
 	if got := sortedDBPaths(instances); len(got) != 1 {
 		t.Fatalf("Discover returned %d instances, want 1 (%v)", len(got), got)
 	}
-	if got := instances[0].DBPath; filepath.ToSlash(got) != filepath.ToSlash(filepath.Join(root, "opencode.db")) {
-		t.Fatalf("Discover DBPath = %q, want %q", got, filepath.Join(root, "opencode.db"))
+	// On Windows, t.TempDir() and canonicalise-derived paths can differ in
+	// representation (8.3 short names like RUNNER~1 vs long names like
+	// runneradmin). Compare by case-folded base + cleaned parent so the
+	// assert is stable across both representations.
+	gotPath := filepath.Clean(instances[0].DBPath)
+	wantPath := filepath.Clean(filepath.Join(root, "opencode.db"))
+	if strings.EqualFold(filepath.Base(gotPath), filepath.Base(wantPath)) == false ||
+		!strings.EqualFold(filepath.Dir(gotPath), filepath.Dir(wantPath)) {
+		t.Fatalf("Discover DBPath = %q, want %q", gotPath, wantPath)
 	}
 	if instances[0].Source != domain.SourceOpenCode {
 		t.Fatalf("Discover Source = %q, want %q", instances[0].Source, domain.SourceOpenCode)
