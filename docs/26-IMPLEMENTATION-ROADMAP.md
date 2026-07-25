@@ -96,5 +96,43 @@ de publicación existente.
 ## 8. Estado actual
 
 - **Hito 0: COMPLETO** (este árbol, solo `.md`).
-- **Próximo: Hito 1** — dominio y almacenamiento de experiencia, migración 004,
-  bajo TDD. Es el primer PR con código y valida los contratos congelados.
+- **Hito 1: COMPLETO** — mergeado en `main` como `b105e34`; corrección
+  post-review en `f989579`; dominio experiencia, migración 004, servicio
+  ingestión, CLI `experience inject`. Cobertura `internal/experience` 90%.
+  v0.2.0-rc1 taggeado.
+- **Hito 2: COMPLETO** (PR #3, rama `feat/hito2-opencode-once`) —
+  adaptador OpenCode read-only (`--once`), sub-slice 2.0 scaffold →
+  2.7 acceptance. Cobertura `internal/experience/opencode` 80.5%.
+  CLI `experience opencode scan` con `--project-root` y `--fixture`.
+  Idempotencia por `(source, external_session_id, external_turn_id)`.
+  Sin `--watch` todavía (queda para Ola 2 / PR #10).
+- **Próximo: Hito 5** — detectores deterministas, PR #4.
+
+## 9. Lecciones aprendidas en Hito 2 (para PR #3 y siguientes)
+
+- **`SkippedIncomplete` debe ser visible al operador.** El adapter
+  originalmente descartaba turnos con `complete=0` en silencio. Mientras
+  los tests del adapter los cubrían como "no se ingestaron", el CLI no
+  podía reportar la pérdida al usuario. La métrica se agregó al
+  `ScanResult` (`SkippedIncomplete int`) y se propagó al reporte JSON.
+  Lección: cualquier drop silencioso del adaptador necesita un contador
+  expuesto al caller.
+- **Los fixtures de tests deben vivir dentro del `projectRoot`.** El
+  validador de envelopes rechaza locators fuera del project root
+  canónico (`experience_locator_outside_root`). El primer corte de
+  tests del CLI creaba el fixture en un `t.TempDir()` separado y el
+  scan fallaba al ingestar. Solución: el fixture va en
+  `root/.opencode-fixture/opencode.db`. Aplica a cualquier test que
+  use `--fixture` o discovery automático.
+- **El CLI necesita su propia capa de tests, no solo la del adapter.**
+  El adapter tenía cobertura completa de Discover/Health/Scan/
+  ResolveTrace, pero el subcomando `experience opencode scan` no
+  tenía tests hasta slice 2.6. La cobertura del adapter mide
+  unidades, no la orquestación. Patrón: una vez que un método del
+  adapter se enchufa a un comando CLI, ese comando necesita su
+  tabla de tests propia.
+- **`cursorCheckpoint` debe aceptar los 4 tipos numéricos.** El
+  decoder depende de cómo se construyó el mapa: nativo Go, JSON
+  round-trip, sub-agentes externos. El test cubre `int64`/`int`/
+  `float64`/`int32` explícitamente; un futuro refactor que asuma
+  un solo tipo lo rompería.
