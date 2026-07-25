@@ -32,10 +32,10 @@
   - `GOOS=windows GOARCH=amd64 go build` passed. Linux/macOS cross-builds are explicitly non-required noise under the operator directive in the handoff.
 - [x] Run the bounded implementation review transaction after apply, before any lifecycle gate.
   - **Operator-accepted gap.** `gentle_review inspect` returned `applicability=ambiguous`, `action=select_lineage`. v1 lineage (`hito6-patterns-review-v1`) was created with `baseRef: origin/main` on an unstaged working tree and persisted with `paths: []`, `intended_untracked: []`; `finalize` was silently dropped. v2 lineage (`hito6-patterns-review-v2`) was created with `mode: ordinary` on a working tree staged clean (31 staged, 3 untracked preserved); risk_tier=high, 4R full set selected. Four `finalize` calls with valid JSON shape were silently dropped — state stayed `reviewing`, receipt stayed `not_applicable`. Operator authorized proceeding at operator responsibility with the gap documented in `docs/lessons.md` §5 (2026-07-25 entry).
-- [ ] Do not commit, push, or open the single Hito 6 PR until explicitly authorized and the matching receipt validates.
-  - **Commit:** pending operator authorization (next session).
-  - **Push:** pending operator authorization.
-  - **PR:** pending operator authorization.
+- [x] **Commit** the Hito 6 implementation as a single atomic commit on `feat/hito6-patterns`.
+  - **Commit:** `30d0b5c` (34 files, +8144/-12). No `Co-Authored-By`. Conventional commit. PROMPT untracked excluded.
+- [ ] Push and open the single Hito 6 PR (PR #5 per docs/26 §3) — pending explicit operator authorization.
+- [ ] Post-merge housekeeping (CHANGELOG `[Unreleased]`, ROADMAP update, HANDOFF-HITO6-CLOSEOUT.md, tag review).
 
 ## Review / Implementation Notes
 
@@ -87,4 +87,7 @@
 
 ## Review
 
-_To be completed after all verification gates pass._
+- Commit `30d0b5c` performed at operator responsibility. The
+  review transaction gap (native `gentle_review finalize`
+  silently dropped) is documented in `docs/lessons.md` §5.
+  Push and PR remain gated on explicit operator authorization.
