@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strings"
 	"testing"
 	"time"
 
 	"agent-royo-learn/internal/domain"
+	"agent-royo-learn/internal/project"
 )
 
 // fixtureTree builds a directory tree from the description and returns its
@@ -116,14 +116,21 @@ func TestDiscover_FindsOpenCodeDBAtRoot(t *testing.T) {
 	if got := sortedDBPaths(instances); len(got) != 1 {
 		t.Fatalf("Discover returned %d instances, want 1 (%v)", len(got), got)
 	}
-	// On Windows, t.TempDir() and canonicalise-derived paths can differ in
-	// representation (8.3 short names like RUNNER~1 vs long names like
-	// runneradmin). Compare by case-folded base + cleaned parent so the
-	// assert is stable across both representations.
-	gotPath := filepath.Clean(instances[0].DBPath)
-	wantPath := filepath.Clean(filepath.Join(root, "opencode.db"))
-	if strings.EqualFold(filepath.Base(gotPath), filepath.Base(wantPath)) == false ||
-		!strings.EqualFold(filepath.Dir(gotPath), filepath.Dir(wantPath)) {
+	// On Windows, t.TempDir() can return a path using the 8.3 short form
+	// (e.g. C:\\Users\\RUNNER~1\\...) while canonicalise-derived paths use
+	// the long form (C:\\Users\\runneradmin\\...). The two strings are not
+	// equal even under case folding, so compare both sides via
+	// project.Canonicalize, which normalises symlinks and short names to
+	// the same long-form absolute path.
+	gotPath, gotErr := project.Canonicalize(instances[0].DBPath)
+	if gotErr != nil {
+		t.Fatalf("canonicalise discovered DBPath: %v", gotErr)
+	}
+	wantPath, wantErr := project.Canonicalize(filepath.Join(root, "opencode.db"))
+	if wantErr != nil {
+		t.Fatalf("canonicalise expected DBPath: %v", wantErr)
+	}
+	if gotPath != wantPath {
 		t.Fatalf("Discover DBPath = %q, want %q", gotPath, wantPath)
 	}
 	if instances[0].Source != domain.SourceOpenCode {
