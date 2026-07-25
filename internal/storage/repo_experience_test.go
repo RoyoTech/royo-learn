@@ -92,12 +92,12 @@ func TestExperienceMigrationSchema(t *testing.T) {
 	if migrationName != "004_experience_ingestion" {
 		t.Fatalf("migration 004 name = %q, want %q", migrationName, "004_experience_ingestion")
 	}
-	var futureMigrationCount int
-	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE version = 5`).Scan(&futureMigrationCount); err != nil {
-		t.Fatalf("query reserved migration 005: %v", err)
+	var migration005Count int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE version = 5`).Scan(&migration005Count); err != nil {
+		t.Fatalf("query migration 005: %v", err)
 	}
-	if futureMigrationCount != 0 {
-		t.Fatalf("reserved migration 005 rows = %d, want 0", futureMigrationCount)
+	if migration005Count != 1 {
+		t.Fatalf("migration 005 rows = %d, want 1 (pattern mining landed in Hito 6)", migration005Count)
 	}
 
 	if err := Migrate(db); err != nil {

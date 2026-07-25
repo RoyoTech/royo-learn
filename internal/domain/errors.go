@@ -60,6 +60,14 @@ const (
 	ErrExperienceRevisionConflict   ErrorCode = "experience_revision_conflict"
 	ErrExperienceCursorConflict     ErrorCode = "experience_cursor_conflict"
 	ErrExperienceCommitUnknown      ErrorCode = "experience_commit_unknown"
+
+	// Experience pattern-mining codes (Hito 6). See
+	// docs/23-PATTERN-MINING.md §8 and docs/17-ERROR-CODES.md.
+	ErrPatternNotFound            ErrorCode = "pattern_not_found"
+	ErrPatternNotQualified        ErrorCode = "pattern_not_qualified"
+	ErrPatternAlreadyPromoted     ErrorCode = "pattern_already_promoted"
+	ErrPatternFalseCluster        ErrorCode = "pattern_false_cluster"
+	ErrPatternInsufficientSources ErrorCode = "pattern_insufficient_sources"
 )
 
 // AllErrorCodes returns every stable error code modeled by the domain.
@@ -80,6 +88,8 @@ func AllErrorCodes() []ErrorCode {
 		ErrExperienceLocatorOutsideRoot, ErrExperiencePayloadTooLarge,
 		ErrExperienceRevisionConflict, ErrExperienceCursorConflict,
 		ErrExperienceCommitUnknown,
+		ErrPatternNotFound, ErrPatternNotQualified, ErrPatternAlreadyPromoted,
+		ErrPatternFalseCluster, ErrPatternInsufficientSources,
 	}
 }
 
@@ -87,13 +97,15 @@ func AllErrorCodes() []ErrorCode {
 func (c ErrorCode) ExitCode() int {
 	switch c {
 	case ErrInvalidArgument, ErrEvidenceMissing, ErrEvidenceTooLarge, ErrPayloadTooLarge,
-		ErrExperienceTurnIncomplete, ErrExperienceLocatorInvalid, ErrExperiencePayloadTooLarge:
+		ErrExperienceTurnIncomplete, ErrExperienceLocatorInvalid, ErrExperiencePayloadTooLarge,
+		ErrPatternNotQualified, ErrPatternInsufficientSources:
 		return 2
 	case ErrInvalidConfig, ErrExperienceSchemaUnsupported:
 		return 3
 	case ErrProjectNotFound, ErrAmbiguousProject, ErrUnknownProject:
 		return 4
-	case ErrLearningNotFound, ErrPreviewNotFound, ErrExperienceSourceNotFound:
+	case ErrLearningNotFound, ErrPreviewNotFound, ErrExperienceSourceNotFound,
+		ErrPatternNotFound:
 		return 5
 	case ErrInvalidTransition:
 		return 6
@@ -101,7 +113,8 @@ func (c ErrorCode) ExitCode() int {
 		return 7
 	case ErrDuplicateLearning, ErrTargetAmbiguous, ErrTargetChanged, ErrDirtyTarget,
 		ErrPublicationConflict, ErrPreviewHashMismatch, ErrRollbackConflict,
-		ErrExperienceRevisionConflict, ErrExperienceCursorConflict:
+		ErrExperienceRevisionConflict, ErrExperienceCursorConflict,
+		ErrPatternAlreadyPromoted, ErrPatternFalseCluster:
 		return 8
 	case ErrVerificationFailed:
 		return 9

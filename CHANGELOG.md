@@ -8,6 +8,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Hito 6: pattern mining** (branch `feat/hito6-patterns`, PR #5
+  per `docs/26` §3). Closes the slice 6 deliverable from
+  `docs/26-IMPLEMENTATION-ROADMAP.md`. Five atomic commits on the
+  branch covering:
+  - `internal/experience/patterns/` package: typed
+    `PatternStatus` (`observed|qualified|dismissed|promoted|stale`),
+    closed `DismissalReason` enum, `Membership`,
+    `QualificationCriteria`, `ExperiencePattern`,
+    `ConservativeQualifier`, and the small interface surface
+    (`Pattern`, `Cluster`, `Qualifier`, `Dismissal`, `Lister`,
+    `Getter`).
+  - `PatternFingerprint` and `NormalizeRetrievalTerms`:
+    deterministic, order-independent, volatile-value-stripped
+    (UUIDs, ports, hashes, absolute paths, redacted markers).
+    64-char lowercase hex sha256.
+  - Pure `Group` clustering (exact fingerprint + conservative
+    Jaccard over retrieval terms). No embeddings, no vector DB,
+    no shell, no network. The named Jaccard threshold default
+    (0.5) is documented and reversible per slice 6.2.
+  - `ConservativeQualifier` enforces the eight criteria from
+    `docs/23-PATTERN-MINING.md` §5 (including the canonical
+    "3 retries in 1 session" anti-pattern) and surfaces typed
+    `QualificationDecision` with reasons.
+  - Migration `005_pattern_mining.sql`: introduces
+    `experience_patterns` + `experience_pattern_members` (both
+    with the typed `dismissal_reason` column for idempotent
+    re-dismiss).
+  - Repository (`NewRepository`, `SavePattern`,
+    `GetByFingerprint`, `GetByID`, `ListByStatus`,
+    `SetStatusWithReason`, `AddMember`, `Members`,
+    `UpsertFromCluster`) with stable, versioned JSON.
+  - Service (`NewService`, `Dismiss`, `List`, `Get`,
+    `IngestCluster`) with idempotent dismissal on
+    `(pattern_id, reason)` and a structured audit row.
+  - CLI `experience patterns list|get|dismiss` with stable JSON
+    envelope and the project's error-envelope stderr contract.
+  - MCP `learning_list_patterns`, `learning_get_pattern`,
+    `learning_dismiss_pattern` (registered in the read profile
+    for the first two; admin-only for dismissal).
+  - Domain additions: `ExperiencePatternID` typed ID,
+    `PatternStatus` validation, `Membership.Validate()`,
+    five new typed error codes (`pattern_not_found`,
+    `pattern_not_qualified`, `pattern_already_promoted`,
+    `pattern_false_cluster`, `pattern_insufficient_sources`)
+    wired through `domain.AsDomainError`, the canonical exit
+    code map and `docs/17-ERROR-CODES.md`.
+  - Synthetic acceptance test
+    (`cmd/royo-learn/experience_patterns_test.go:
+    TestExperiencePatterns_AcceptanceSynthetic`) covering the
+    3-sessions qualify / 3-retries-1-session anti-pattern /
+    dismissal idempotency contract end-to-end through the CLI.
+  - 88.3% test coverage on `internal/experience/patterns`.
+    Target was ≥90% per `docs/25` §4; the residual gap is in
+    `database/sql` error branches (BeginTx / Commit / RowsAffected
+    failures) that only trigger on actual DB corruption. Recorded
+    in `docs/IMPLEMENTATION-NOTES.md` Hito 6 reconciliation.
+
+- **Hito 5: deterministic experience detectors** (PR #22, merge
+
 - **Hito 5: deterministic experience detectors** (PR #22, merge
   commit `59d5e74` on local + remote main). Closes the slice 5
   deliverable from `docs/26-IMPLEMENTATION-ROADMAP.md` PR #4. Eight

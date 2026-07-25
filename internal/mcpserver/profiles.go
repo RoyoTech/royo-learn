@@ -339,4 +339,31 @@ var allTools = []profileTool{
 			bind(ms, t, handleDetectEvents(srv))
 		},
 	},
+	{
+		name:        "learning_list_patterns",
+		description: "List experience patterns filtered by status (defaults to observed), event kind and an optional limit. Patterns are returned in stable order (last_seen_at DESC, id ASC).",
+		access:      accessRead,
+		profiles:    map[string]bool{profileRead: true, profileAgent: true, profileAdmin: true},
+		register: func(ms *mcp.Server, srv *Server, t profileTool) {
+			bind(ms, t, handleListPatterns(srv))
+		},
+	},
+	{
+		name:        "learning_get_pattern",
+		description: "Fetch one experience pattern by id, optionally including its membership rows.",
+		access:      accessRead,
+		profiles:    map[string]bool{profileRead: true, profileAgent: true, profileAdmin: true},
+		register: func(ms *mcp.Server, srv *Server, t profileTool) {
+			bind(ms, t, handleGetPattern(srv))
+		},
+	},
+	{
+		name:        "learning_dismiss_pattern",
+		description: "Dismiss an experience pattern by id with a typed reason. The call is idempotent on the same reason; a different reason on an already-dismissed pattern is rejected. Requires the admin profile.",
+		access:      accessWrite,
+		profiles:    map[string]bool{profileAdmin: true},
+		register: func(ms *mcp.Server, srv *Server, t profileTool) {
+			bind(ms, t, handleDismissPattern(srv))
+		},
+	},
 }

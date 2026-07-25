@@ -231,6 +231,9 @@ var contractExtensions = map[string]bool{
 	"learning_list_recurrences": true,
 	"learning_compute_metrics":  true,
 	"experience_detect_events":  true,
+	"learning_list_patterns":    true,
+	"learning_get_pattern":      true,
+	"learning_dismiss_pattern":  true,
 }
 
 func documentedTools(t *testing.T) map[string]bool {

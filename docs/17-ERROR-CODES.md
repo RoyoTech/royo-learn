@@ -61,6 +61,11 @@ experience_payload_too_large
 experience_revision_conflict
 experience_cursor_conflict
 experience_commit_unknown
+pattern_not_found
+pattern_not_qualified
+pattern_already_promoted
+pattern_false_cluster
+pattern_insufficient_sources
 ```
 
 Todos deben mapear a CLI exit code y MCP envelope.
