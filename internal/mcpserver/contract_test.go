@@ -230,6 +230,7 @@ var pendingTools = map[string]string{}
 var contractExtensions = map[string]bool{
 	"learning_list_recurrences": true,
 	"learning_compute_metrics":  true,
+	"experience_detect_events":  true,
 }
 
 func documentedTools(t *testing.T) map[string]bool {

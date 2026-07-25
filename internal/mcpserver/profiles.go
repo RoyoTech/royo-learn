@@ -330,4 +330,13 @@ var allTools = []profileTool{
 			bind(ms, t, handleRollback(srv))
 		},
 	},
+	{
+		name:        "experience_detect_events",
+		description: "Run a registered detector over a payload and return the emitted CandidateEvents. When persist=true the events are also forwarded to the canonical experience store via the existing ingestion pipeline (idempotent; deterministic turn id).",
+		access:      accessWrite,
+		profiles:    map[string]bool{profileAgent: true, profileAdmin: true},
+		register: func(ms *mcp.Server, srv *Server, t profileTool) {
+			bind(ms, t, handleDetectEvents(srv))
+		},
+	},
 }

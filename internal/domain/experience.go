@@ -29,6 +29,7 @@ const (
 	SourceCodex      ExperienceSource = "codex"
 	SourcePi         ExperienceSource = "pi"
 	SourceManual     ExperienceSource = "manual"
+	SourceDetector   ExperienceSource = "detector"
 )
 
 // TurnStatus is the lifecycle state of an ingested turn.
