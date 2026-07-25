@@ -193,9 +193,9 @@ func TestRunExperienceOpencodeScanFixture(t *testing.T) {
 		t.Fatalf("exit = %d, stderr=%s, stdout=%s", code, stderr.String(), stdout.String())
 	}
 	var out struct {
-		Source         string `json:"source"`
-		Status         string `json:"status"`
-		Instances      []struct {
+		Source    string `json:"source"`
+		Status    string `json:"status"`
+		Instances []struct {
 			DBPath         string `json:"db_path"`
 			Status         string `json:"status"`
 			IngestedTurns  int    `json:"ingested_turns"`

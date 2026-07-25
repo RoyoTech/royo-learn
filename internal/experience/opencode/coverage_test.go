@@ -14,10 +14,10 @@ import (
 // and int32 cases so future refactors cannot regress cursor decoding.
 func TestCursorCheckpoint_NumericVariants(t *testing.T) {
 	cases := []struct {
-		name      string
-		value     any
-		wantSeq   int64
-		wantOK    bool
+		name    string
+		value   any
+		wantSeq int64
+		wantOK  bool
 	}{
 		{"int64", int64(7), 7, true},
 		{"int", int(8), 8, true},
