@@ -13,6 +13,7 @@ import (
 	"agent-royo-learn/internal/experience"
 	"agent-royo-learn/internal/experience/opencode"
 	"agent-royo-learn/internal/logging"
+	"agent-royo-learn/internal/project"
 )
 
 type experienceInjectOutput struct {
@@ -175,15 +176,25 @@ func runExperienceOpencodeScan(args []string, stdout, stderr io.Writer) int {
 	adapter := opencode.NewAdapter()
 	ctx := context.Background()
 
-	instances, discoverErr := adapter.Discover(ctx, *projectRoot)
-	if discoverErr != nil {
-		if code := writeExperienceDomainError(stderr, discoverErr); code != exitSuccess {
-			return code
-		}
-	}
-
+	var instances []opencode.SourceInstance
 	if *fixture != "" {
-		instances = appendFixtureInstance(instances, *projectRoot, *fixture)
+		// --fixture replaces discovery. The test-and-demo path is explicit
+		// and the core locator validation already constrains the fixture to
+		// be inside projectRoot. Validate the path here so a symlinked
+		// fixture cannot bypass the same symlink guard discover() applies.
+		extra, err := buildFixtureInstance(*projectRoot, *fixture)
+		if err != nil {
+			return writeExperienceDomainError(stderr, err)
+		}
+		instances = []opencode.SourceInstance{extra}
+	} else {
+		discovered, discoverErr := adapter.Discover(ctx, *projectRoot)
+		if discoverErr != nil {
+			if code := writeExperienceDomainError(stderr, discoverErr); code != exitSuccess {
+				return code
+			}
+		}
+		instances = discovered
 	}
 
 	if len(instances) == 0 {
@@ -268,20 +279,38 @@ func runExperienceOpencodeScan(args []string, stdout, stderr io.Writer) int {
 	return encodeExperienceOpencodeOutput(stdout, total)
 }
 
-// appendFixtureInstance appends an instance for --fixture, deduplicating
-// any DBPath that Discovery already returned.
-func appendFixtureInstance(instances []opencode.SourceInstance, projectRoot, fixturePath string) []opencode.SourceInstance {
-	for _, inst := range instances {
-		if inst.DBPath == fixturePath {
-			return instances
-		}
+// buildFixtureInstance validates a --fixture path and returns a single
+// SourceInstance for it. Rejects symlinks (ErrSymlinkEscape) and paths
+// outside the canonical project root (ErrPathOutsideRoot). Mirrors the
+// security checks discover.go applies, so --fixture cannot bypass the
+// guard just because it skips the directory walk.
+func buildFixtureInstance(projectRoot, fixturePath string) (opencode.SourceInstance, error) {
+	canonicalRoot, err := project.Canonicalize(projectRoot)
+	if err != nil {
+		return opencode.SourceInstance{}, err
 	}
-	return append(instances, opencode.SourceInstance{
+	info, err := os.Lstat(fixturePath)
+	if err != nil {
+		return opencode.SourceInstance{}, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return opencode.SourceInstance{}, domain.NewValidationError(domain.ErrSymlinkEscape,
+			"experience opencode scan: --fixture is a symlink")
+	}
+	canonicalPath, err := project.Canonicalize(fixturePath)
+	if err != nil {
+		return opencode.SourceInstance{}, err
+	}
+	if !project.IsInsideRoot(canonicalPath, canonicalRoot) {
+		return opencode.SourceInstance{}, domain.NewValidationError(domain.ErrPathOutsideRoot,
+			"experience opencode scan: --fixture is outside the project root")
+	}
+	return opencode.SourceInstance{
 		Source:      domain.SourceOpenCode,
-		ProjectRoot: projectRoot,
-		DBPath:      fixturePath,
+		ProjectRoot: canonicalRoot,
+		DBPath:      canonicalPath,
 		Schema:      opencode.SchemaTag,
-	})
+	}, nil
 }
 
 func encodeExperienceOpencodeOutput(stdout io.Writer, output experienceOpencodeScanOutput) int {
