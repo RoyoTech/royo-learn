@@ -122,7 +122,7 @@ func (a *Adapter) Scan(ctx context.Context, req ScanRequest) (ScanResult, error)
 		}, nil
 	}
 
-	envelopes, validationMessages, err := a.collectEnvelopes(ctx, db, instance, fileHash, req.Cursor)
+	envelopes, validationMessages, skippedIncomplete, err := a.collectEnvelopes(ctx, db, instance, fileHash, req.Cursor)
 	if err != nil {
 		// Context cancellation reaches here as a normal scan error; bubble it
 		// up so the caller can distinguish cancellation from source failure.
@@ -157,30 +157,32 @@ func (a *Adapter) Scan(ctx context.Context, req ScanRequest) (ScanResult, error)
 	message := boundedMessage(validationMessages)
 
 	return ScanResult{
-		Instance:   instance,
-		Envelopes:  envelopes,
-		NextCursor: nextCursor,
-		Status:     status,
-		Code:       "",
-		Message:    message,
-		Degraded:   degraded,
-		ScannedAt:  now,
+		Instance:          instance,
+		Envelopes:         envelopes,
+		NextCursor:        nextCursor,
+		Status:            status,
+		Code:              "",
+		Message:           message,
+		Degraded:          degraded,
+		SkippedIncomplete: skippedIncomplete,
+		ScannedAt:         now,
 	}, nil
 }
 
 // collectEnvelopes reads sessions and messages, skipping incomplete turns and
 // any envelope that fails validation. The returned validationMessages is the
 // bounded list of validation errors; the caller decides whether to surface
-// them as a degraded status.
+// them as a degraded status. The fourth return value is the count of turns
+// dropped because complete=0, surfaced to callers so they can report the gap.
 func (a *Adapter) collectEnvelopes(
 	ctx context.Context,
 	db *sql.DB,
 	instance SourceInstance,
 	fileHash string,
 	cursor map[string]any,
-) ([]experience.ExperienceEnvelope, []string, error) {
+) ([]experience.ExperienceEnvelope, []string, int, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 
 	cursorSession, cursorSeq, hasCursor := cursorCheckpoint(cursor)
@@ -189,9 +191,9 @@ func (a *Adapter) collectEnvelopes(
 		"SELECT id, started_at, updated_at, closed_at FROM sessions ORDER BY started_at ASC, id ASC")
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil, nil, ctx.Err()
+			return nil, nil, 0, ctx.Err()
 		}
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	defer rows.Close()
 
@@ -205,24 +207,25 @@ func (a *Adapter) collectEnvelopes(
 	for rows.Next() {
 		var s sessionRow
 		if err := rows.Scan(&s.id, &s.startedAt, &s.updatedAt, &s.closedAt); err != nil {
-			return nil, nil, err
+			return nil, nil, 0, err
 		}
 		sessions = append(sessions, s)
 	}
 	if err := rows.Err(); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil, nil, ctx.Err()
+			return nil, nil, 0, ctx.Err()
 		}
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	rows.Close()
 
 	var envelopes []experience.ExperienceEnvelope
 	var validation []string
+	var skippedIncomplete int
 
 	for _, session := range sessions {
 		if err := ctx.Err(); err != nil {
-			return nil, nil, err
+			return nil, nil, 0, err
 		}
 
 		msgRows, err := db.QueryContext(ctx,
@@ -230,15 +233,15 @@ func (a *Adapter) collectEnvelopes(
 			session.id)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return nil, nil, ctx.Err()
+				return nil, nil, 0, ctx.Err()
 			}
-			return nil, nil, err
+			return nil, nil, 0, err
 		}
 
 		for msgRows.Next() {
 			if err := ctx.Err(); err != nil {
 				_ = msgRows.Close()
-				return nil, nil, err
+				return nil, nil, 0, err
 			}
 			var (
 				id        string
@@ -252,13 +255,16 @@ func (a *Adapter) collectEnvelopes(
 			)
 			if err := msgRows.Scan(&id, &sequence, &role, &content, &finish, &createdAt, &complete, &revision); err != nil {
 				_ = msgRows.Close()
-				return nil, nil, err
+				return nil, nil, 0, err
 			}
 
 			// Skip incomplete turns. The contract rule is "no incomplete
 			// turns" — a turn with complete=0 has not yet been emitted by the
-			// source and would force the service into an unstable state.
+			// source and would force the service into an unstable state. The
+			// counter is surfaced through ScanResult.SkippedIncomplete so the
+			// caller can report the gap.
 			if complete == 0 {
+				skippedIncomplete++
 				continue
 			}
 
@@ -277,17 +283,17 @@ func (a *Adapter) collectEnvelopes(
 			envelopes = append(envelopes, envelope)
 		}
 		if err := msgRows.Close(); err != nil {
-			return nil, nil, err
+			return nil, nil, 0, err
 		}
 		if err := msgRows.Err(); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return nil, nil, ctx.Err()
+				return nil, nil, 0, ctx.Err()
 			}
-			return nil, nil, err
+			return nil, nil, 0, err
 		}
 	}
 
-	return envelopes, validation, nil
+	return envelopes, validation, skippedIncomplete, nil
 }
 
 // buildEnvelope converts one (session, message) pair into an ExperienceEnvelope.

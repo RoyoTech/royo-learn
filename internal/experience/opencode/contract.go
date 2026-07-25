@@ -61,6 +61,11 @@ type ScanResult struct {
 	Message string
 	// Degraded reports whether the source was partially readable.
 	Degraded bool
+	// SkippedIncomplete counts turns the adapter dropped because complete=0.
+	// These turns are intentionally not forwarded; the contract rule is "no
+	// incomplete turns". Surfacing the count lets callers (and the CLI)
+	// report the gap explicitly.
+	SkippedIncomplete int
 	// ScannedAt records the wall-clock time the scan finished.
 	ScannedAt time.Time
 }
