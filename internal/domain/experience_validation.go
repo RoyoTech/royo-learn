@@ -271,3 +271,16 @@ func validateExperienceField(field, value string, max int) error {
 // interfaces validate their input against this rather than defining their own
 // list.
 func IsValidExperienceSource(s ExperienceSource) bool { return isValidExperienceSource(s) }
+
+// IsValidExperienceEventKind reports whether k is a known event kind.
+// Exposed so the patterns repository can validate input against the
+// canonical list without duplicating the switch.
+func IsValidExperienceEventKind(k ExperienceEventKind) bool {
+	return isValidExperienceEventKind(k)
+}
+
+// IsValidExperienceEventKindString is the same as IsValidExperienceEventKind
+// but accepts a plain string for callers that hold the JSON-decoded value.
+func IsValidExperienceEventKindString(s string) bool {
+	return isValidExperienceEventKind(ExperienceEventKind(s))
+}

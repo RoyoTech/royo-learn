@@ -14,6 +14,7 @@ import (
 	"agent-royo-learn/internal/evidence"
 	"agent-royo-learn/internal/experience"
 	"agent-royo-learn/internal/experience/detectors"
+	"agent-royo-learn/internal/experience/patterns"
 	"agent-royo-learn/internal/publish"
 	"agent-royo-learn/internal/recurrence"
 	"agent-royo-learn/internal/storage"
@@ -275,6 +276,30 @@ type detectEventsInput struct {
 	Kind    string `json:"kind" jsonschema:"required,detector kind to invoke (e.g. retry)"`
 	Payload any    `json:"payload" jsonschema:"required,detector-specific payload (RetryPayload for retry)"`
 	Persist bool   `json:"persist,omitempty" jsonschema:"when true, persist emitted events to the canonical experience store"`
+}
+
+// listPatternsInput is the schema for learning_list_patterns. It
+// mirrors the CLI surface so MCP and CLI consumers can rely on the
+// same JSON shape.
+type listPatternsInput struct {
+	Status string `json:"status,omitempty" jsonschema:"status filter (observed|qualified|dismissed|promoted|stale); defaults to observed"`
+	Kind   string `json:"kind,omitempty" jsonschema:"event-kind filter"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"maximum number of patterns to return (0 = no limit)"`
+}
+
+// getPatternInput is the schema for learning_get_pattern.
+type getPatternInput struct {
+	PatternID   string `json:"pattern_id" jsonschema:"required,pattern ID"`
+	WithMembers bool   `json:"with_members,omitempty" jsonschema:"include the membership list in the response"`
+}
+
+// dismissPatternInput is the schema for learning_dismiss_pattern.
+// The actor JSON is optional; defaults to {kind:system,name:mcp}.
+type dismissPatternInput struct {
+	PatternID string `json:"pattern_id" jsonschema:"required,pattern ID"`
+	Reason    string `json:"reason" jsonschema:"required,dismissal reason (one_off|not_reusable|already_covered|contradicted|insufficient_evidence|private_or_sensitive|false_cluster)"`
+	Note      string `json:"note,omitempty" jsonschema:"optional reviewer note (bounded)"`
+	Actor     any    `json:"actor,omitempty" jsonschema:"optional actor JSON; defaults to system"`
 }
 
 // ---------------------------------------------------------------------------
@@ -1000,5 +1025,158 @@ func learningToMap(l *domain.Learning) map[string]any {
 		m["retrieval_terms"] = l.RetrievalTerms
 	}
 
+	return m
+}
+
+// ---------------------------------------------------------------------------
+// Hito 6 pattern-mining MCP tools (slice 6.4).
+//
+// The three tools expose the patterns layer through the MCP contract.
+// They are read-by-default with one destructive tool (dismiss). The
+// schemas mirror the CLI surface so consumers gating on field names
+// can rely on the same shape across both.
+// ---------------------------------------------------------------------------
+
+// handleListPatterns lists patterns filtered by status/kind/limit.
+// The default status is "observed" so a bare call returns the
+// candidates that have not yet been qualified, dismissed, promoted
+// or marked stale.
+func handleListPatterns(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in listPatternsInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in listPatternsInput) (*mcp.CallToolResult, any, error) {
+		svc := patterns.NewService(srv.db)
+		status := patterns.PatternObserved
+		if in.Status != "" {
+			status = patterns.PatternStatus(in.Status)
+		}
+		filter := patterns.ListerFilter{
+			Project: srv.projectID,
+			Status:  status,
+			Kind:    domain.ExperienceEventKind(in.Kind),
+			Limit:   in.Limit,
+		}
+		out, err := svc.List(ctx, filter)
+		if err != nil {
+			return toolDomainError(err, "list_patterns_failed")
+		}
+		mapped := make([]map[string]any, 0, len(out))
+		for _, p := range out {
+			mapped = append(mapped, patternToMap(p))
+		}
+		return toolResultJSON(map[string]any{
+			"status":   "ok",
+			"patterns": mapped,
+			"total":    len(mapped),
+		})
+	}
+}
+
+// handleGetPattern returns one pattern by id, optionally with its
+// membership rows.
+func handleGetPattern(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in getPatternInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in getPatternInput) (*mcp.CallToolResult, any, error) {
+		if in.PatternID == "" {
+			return toolError("invalid_argument", "pattern_id is required")
+		}
+		svc := patterns.NewService(srv.db)
+		got, err := svc.Get(ctx, domain.ExperiencePatternID(in.PatternID))
+		if err != nil {
+			return toolDomainError(err, "get_pattern_failed")
+		}
+		out := map[string]any{"pattern": patternToMap(*got)}
+		if in.WithMembers {
+			repo := patterns.NewRepository(srv.db)
+			members, mErr := repo.Members(ctx, got.ID)
+			if mErr != nil {
+				return toolDomainError(mErr, "list_members_failed")
+			}
+			mapped := make([]map[string]any, 0, len(members))
+			for _, m := range members {
+				mapped = append(mapped, map[string]any{
+					"event_id":         string(m.EventID),
+					"similarity_kind":  m.SimilarityKind,
+					"similarity_score": m.SimilarityScore,
+					"added_at":         m.AddedAt.UTC().Format(time.RFC3339),
+				})
+			}
+			out["members"] = mapped
+		}
+		return toolResultJSON(out)
+	}
+}
+
+// handleDismissPattern dismisses a pattern by id with a typed
+// reason. The call is idempotent on the same reason; a different
+// reason on an already-dismissed pattern is rejected.
+func handleDismissPattern(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in dismissPatternInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in dismissPatternInput) (*mcp.CallToolResult, any, error) {
+		if in.PatternID == "" {
+			return toolError("invalid_argument", "pattern_id is required")
+		}
+		if in.Reason == "" {
+			return toolError("invalid_argument", "reason is required")
+		}
+		actor := domain.Actor{Kind: "system", Name: "mcp"}
+		if in.Actor != nil {
+			encoded, mErr := json.Marshal(in.Actor)
+			if mErr != nil {
+				return toolError("invalid_argument", "actor is not JSON serializable: "+mErr.Error())
+			}
+			if uErr := json.Unmarshal(encoded, &actor); uErr != nil {
+				return toolError("invalid_argument", "actor is not JSON serializable: "+uErr.Error())
+			}
+		}
+		svc := patterns.NewService(srv.db)
+		if err := svc.Dismiss(ctx,
+			domain.ExperiencePatternID(in.PatternID),
+			patterns.DismissalReason(in.Reason),
+			patterns.DismissalDetails{
+				Reason: patterns.DismissalReason(in.Reason),
+				Note:   in.Note,
+				Actor:  actor,
+			},
+		); err != nil {
+			return toolDomainError(err, "dismiss_pattern_failed")
+		}
+		got, gErr := svc.Get(ctx, domain.ExperiencePatternID(in.PatternID))
+		if gErr != nil {
+			return toolDomainError(gErr, "dismiss_pattern_failed")
+		}
+		return toolResultJSON(map[string]any{
+			"status":  "ok",
+			"pattern": patternToMap(*got),
+		})
+	}
+}
+
+// patternToMap converts an ExperiencePattern into the stable JSON
+// shape MCP consumers depend on. Field names are the same as the
+// CLI surface (camelCase, snake-free) so cross-tool consumers can
+// share decoders.
+func patternToMap(p patterns.ExperiencePattern) map[string]any {
+	m := map[string]any{
+		"id":                string(p.ID),
+		"project_id":        string(p.ProjectID),
+		"status":            string(p.Status),
+		"kind":              string(p.Kind),
+		"fingerprint":       p.Fingerprint,
+		"title":             p.Title,
+		"summary":           p.Summary,
+		"distinct_sessions": p.DistinctSessions,
+		"distinct_days":     p.DistinctDays,
+		"occurrence_count":  p.OccurrenceCount,
+		"first_seen_at":     p.FirstSeenAt.UTC().Format(time.RFC3339),
+		"last_seen_at":      p.LastSeenAt.UTC().Format(time.RFC3339),
+		"detector_version":  p.DetectorVersion,
+		"input_digest":      p.InputDigest,
+		"created_at":        p.CreatedAt.UTC().Format(time.RFC3339),
+		"updated_at":        p.UpdatedAt.UTC().Format(time.RFC3339),
+		"revision":          p.Revision,
+	}
+	if p.ProposedLearningID != nil {
+		m["proposed_learning_id"] = string(*p.ProposedLearningID)
+	}
+	if p.DismissalReason != "" {
+		m["dismissal_reason"] = string(p.DismissalReason)
+	}
 	return m
 }

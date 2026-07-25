@@ -18,6 +18,11 @@ type ExperienceTurnID string
 // ExperienceEventID is a typed string ID for an ExperienceEvent.
 type ExperienceEventID string
 
+// ExperiencePatternID is a typed string ID for an ExperiencePattern
+// (Hito 6). It is unrelated to the Learning promotion ID and remains
+// in the experience-discovery layer until Hito 7 promotes a pattern.
+type ExperiencePatternID string
+
 // --- Enums ----------------------------------------------------
 
 // ExperienceSource identifies the platform that produced a session.

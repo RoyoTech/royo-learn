@@ -271,7 +271,128 @@ design.
   non-skill decisions leave area empty (internal/curate/curate_test.go)
 - All existing publish tests pass unchanged (delegation preserves behavior)
 
-## Session handoff — 2026-07-13
+## Hito 6 — pattern mining reconciliation
+
+### Authoritative contract
+
+`HANDOFF-HITO6-PATTERNS.md` lines 113-114 and 202 require
+`internal/experience/patterns/ >= 80%`. `docs/25-EXPERIENCE-ACCEPTANCE-MATRIX.md`
+still references `internal/patterns >= 90%`, a path that does not
+exist. The handoff path and threshold are authoritative for Hito 6.
+
+### Coverage
+
+`internal/experience/patterns` reaches **87.0%** after the slice
+6.4 tests. The remaining gap is concentrated in three surfaces:
+
+- **`storage.Tx` error branches** in the repository (`BeginTx`,
+  `Commit`, `ExecContext`, `RowsAffected`, `QueryRowContext.Scan`).
+  These only fire on actual DB corruption (full disk, closed
+  connection, malformed SQL). Driving them deterministically
+  requires either a mock driver or a fault injector; both are out
+  of scope for the slice 6.4 work.
+- **CAS contention paths** (`SetStatusWithReason`, `SetStatus`,
+  `updatePatternOnResaveTx`) when the optimistic-locking
+  `RowsAffected` differs from 1. They are reachable only through a
+  racing writer; covering them deterministically would require a
+  mock clock or a third goroutine harness that is out of scope here.
+- **Helper formatting** in `repository.go` (`formatTime`, `parseTime`)
+  is unreachable through the canonical storage layer because the
+  test fixtures write/read via the same code path.
+
+Pushing coverage higher would require either removing defensive
+error wrapping (which the rest of the project relies on) or adding
+assertion-free coverage padding, both of which are explicitly out of
+scope per the handoff. The 87.0% figure is therefore the
+conservative target.
+
+The Hito 6 implementation notes (slices 6.0–6.4) follow.
+
+### Slice 6.0 — Contract surface
+
+The contract file (`internal/experience/patterns/patterns.go`)
+ships only types, interfaces and the documented closed enums.
+No mining logic yet. RED first: `contract_test.go` declares
+the surface; the production file closes it. The contract pins
+`PatternStatus`, `DismissalReason`, `Membership.Validate()`,
+`QualificationCriteria.Validate()`, `Config.Validate()`, and
+the typed errors (`ErrPatternNotFound`,
+`ErrPatternNotQualified`, `ErrPatternAlreadyPromoted`,
+`ErrPatternFalseCluster`, `ErrPatternInsufficientSources`).
+
+### Slice 6.1 — Pattern fingerprint
+
+`PatternFingerprint` extends the per-event fingerprint
+(`internal/experience/detectors/persist.go:EventFingerprint`)
+into the pattern-level identity the clustering algorithm uses.
+The contract follows `docs/23` §3: kind, problem tokens, tool,
+result, retrieval terms; **no** timestamps, UUIDs, ports,
+hashes, absolute paths, session IDs. The `volatileValuePattern`
+regex strips the "eliminate" categories plus redacted markers;
+`sensitiveKeywordPattern` rejects `secret`/`password`/`token`
+to defend against an adapter that smuggles redacted content
+back into a term set.
+
+`NormalizeRetrievalTerms` first splits each input on
+whitespace (so `secret\nvalue` is broken before the volatile
+check) then lowercases, trims, sorts and deduplicates. The
+output is the canonical set the Jaccard comparison shares.
+
+### Slice 6.2 — Pure v1 clustering
+
+`Group(candidates, cfg)` is the pure algorithm. It partitions
+candidates by `(kind, fingerprint)` so the same fingerprint
+under different kinds cannot accidentally merge (the v1
+algorithm does not accept cross-kind confusion).
+
+The Jaccard fallback merges buckets when the fingerprint
+differs but the retrieval-term overlap meets `cfg.MinRetrievalJaccard`
+(default 0.5; named, configurable, reversible). The choice of
+0.5 is documented in `cluster.go` and in the slice 6.0 contract:
+it is conservative enough that borderline Jaccard values do
+not silently merge, yet permissive enough that two observations
+of the same real-world pattern converge.
+
+`cfg.MaxClusterMembers` (default 100) caps each cluster so a
+single cluster cannot starve review attention. The v1 cap
+split is deterministic: when a bucket is at the cap, the next
+candidate with the same fingerprint starts a new bucket.
+
+### Slice 6.3 — Qualification
+
+`ConservativeQualifier.Qualify` enforces the eight criteria
+from `docs/23` §5. The canonical "3 retries in 1 session" anti-
+pattern is encoded as a dedicated `single_session_retries`
+reason so a future refactor that loosens criterion F fails
+loudly (`TestQualify_ThreeDaysInOneSessionDoesNotQualify`).
+The OR semantics of criterion A (≥ 3 sessions OR ≥ 3 days)
+are pinned separately (`TestQualify_ThreeSessionsOneDayQualifies`).
+
+The default criteria are named and configurable. The
+`PolicyVersion = "v1.0.0"` constant identifies the ruleset
+in audit and tests so future migrations can bump it without
+hunting the code.
+
+### Slice 6.4 — Persistence, dismissal, CLI/MCP
+
+- Migration `005_pattern_mining.sql` introduces
+  `experience_patterns` + `experience_pattern_members` with
+  the typed `dismissal_reason` column. The existing
+  `TestExperienceMigrationSchema` was updated to assert the
+  005 row is present (the previous assertion expected 0).
+- The repository (`repository.go`) owns the unique-key rule
+  `(project_id, fingerprint)` and the optimistic-locking CAS
+  guard on revision. Membership rows are unique on
+  `(pattern_id, event_id)` via `INSERT OR IGNORE`.
+- `Service.Dismiss` is idempotent on `(pattern_id, reason)`.
+  A different reason on an already-dismissed pattern is
+  rejected with `ErrPatternInsufficientSources` so the
+  operator must explicitly clarify the previous dismissal.
+  A promoted pattern cannot be dismissed
+  (`ErrPatternAlreadyPromoted`).
+- CLI/MCP surface mirrors the JSON shape so consumers can
+  share decoders. The `dismissal_reason` field is emitted
+  verbatim and the `status` field carries the typed transition.
 
 ### State
 
