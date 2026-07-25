@@ -133,6 +133,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `TestPublish_RollbackFailureObserved` flake on Linux) and out of
   scope for Hito 2.
 
+### Status as of 2026-07-25 (post-Hito 6 merge)
+
+- `v0.2.0-rc1` is the last released tag. Per the trigger table, the
+  next tag (`v0.2.0`) fires when the last PR of Ola 1 (Hito 4) merges
+  to remote main. Hito 6 alone does not trigger it.
+- Hitos 0, 1, 2, 5, and 6 are merged on `main`. `origin/main` and
+  local `main` are synchronized at `55ef635`. PR #23 is closed.
+- The feature branches for those Hitos were deleted (local and
+  remote) after the merges (`feat/hito2-opencode-once`,
+  `feat/hito5-detectors`, `feat/hito6-patterns`).
+- Ola 1 is now 5/7 Hitos in: Hito 0 ✅, Hito 1 ✅, Hito 2 ✅,
+  Hito 5 ✅, Hito 6 ✅. Hitos 7 and 4 remain. The next PR is
+  Hito 7 (PR #6 in the roadmap: promotion via `capture.Service`),
+  tracked in `HANDOFF-HITO6-CLOSEOUT.md`.
+- Hito 6 coverage reported by the merged commit is **87.0%** on
+  `internal/experience/patterns` (gate ≥80% per the Hito 6 handoff
+  met; `docs/25` references `internal/patterns ≥90%` with a
+  different path, reconciled in `docs/IMPLEMENTATION-NOTES.md`).
+- The Hito 6 PR was merged under an operator-accepted review gap:
+  `gentle_review finalize` was silently dropped across four
+  attempts on the native v2 lineage; receipt stayed
+  `not_applicable`. Documented in `docs/lessons.md` §5. The
+  operator accepted the gap at operator responsibility rather than
+  rolling back the work.
+
 ## [0.2.0-rc1] - 2026-07-24
 
 First release candidate that includes Hito 1 (experience discovery).

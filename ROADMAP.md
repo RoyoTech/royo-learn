@@ -7,8 +7,8 @@
 ## Dónde estamos
 
 - **Ola actual:** Ola 1 (v0.2.0)
-- **Último hito cerrado:** Hito 2 — OpenCode `--once` mergeado a `main`
-  como PR #21 (squash commit `ad269a7`).
+- **Último hito cerrado:** Hito 6 — pattern mining mergeado a `main`
+  como PR #23 (squash commit `55ef635`).
 - **Próximo tag candidate:** `v0.2.0` cuando mergee el PR de Hito 4
   (último de Ola 1) a `main` remoto.
 
@@ -25,8 +25,8 @@ trazar."* (PLAN-MAESTRO §37)
 | 0 | Contratos docs/20-26 + ADR-0001 | #19 | ✅ merged | `docs/grieta-20-26-clean` |
 | 1 | Experience discovery | #17 | ✅ merged en `b105e34` | `feat/experience-hito1-1d` |
 | 2 | OpenCode `--once` (adaptador read-only) | #21 | ✅ merged en `ad269a7` | `feat/hito2-opencode-once` (squashed, rama borrada) |
-| 5 | Detectores deterministas | TBD | ⏳ | — |
-| 6 | Patrones + clustering + migración 005 | TBD | ⏳ | — |
+| 5 | Detectores deterministas | #22 | ✅ merged en `59d5e74` | `feat/hito5-detectors` (squashed, rama borrada) |
+| 6 | Patrones + clustering + migración 005 | #23 | ✅ merged en `55ef635` | `feat/hito6-patterns` (squashed, rama borrada) |
 | 7 | Promoción vía `capture.Service` | TBD | ⏳ | — |
 | 4 | Trace progresivo (requiere 1 + 7) | TBD | ⏳ | — |
 
