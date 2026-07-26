@@ -748,14 +748,17 @@ func TestPromote_PromotionFingerprint_StableAcrossCalls(t *testing.T) {
 // sequential: only the race test creates it, and that test runs
 // single-goroutine.
 type stubPatternsLookup struct {
-	lookupStatus     patterns.PatternStatus
-	lookupLearningID *domain.LearningID
-	lookupErr        error
-	pattern          *patterns.ExperiencePattern
-	getErr           error
-	promoteErr       error
-	promoteCalls     int
-	promoteAuditID   domain.AuditEventID
+	lookupStatus       patterns.PatternStatus
+	lookupLearningID   *domain.LearningID
+	lookupErr          error
+	pattern            *patterns.ExperiencePattern
+	getErr             error
+	promoteErr         error
+	promoteCalls       int
+	promoteAuditID     domain.AuditEventID
+	stubRedaction      evidence.RedactionReport
+	stubRedactionFound bool
+	stubRedactionErr   error
 }
 
 func (s *stubPatternsLookup) Get(ctx context.Context, id domain.ExperiencePatternID) (*patterns.ExperiencePattern, error) {
@@ -780,6 +783,13 @@ func (s *stubPatternsLookup) LookupPromotionAuditID(ctx context.Context, id doma
 		return "", false, nil
 	}
 	return s.promoteAuditID, true, nil
+}
+
+func (s *stubPatternsLookup) LookupPromotionRedaction(ctx context.Context, id domain.ExperiencePatternID) (evidence.RedactionReport, bool, error) {
+	if s.stubRedactionErr != nil {
+		return evidence.RedactionReport{}, false, s.stubRedactionErr
+	}
+	return s.stubRedaction, s.stubRedactionFound, nil
 }
 
 func (s *stubPatternsLookup) PromoteAtomic(
@@ -879,6 +889,17 @@ func TestPromote_SecondCall_ReturnsExistingLearning(t *testing.T) {
 	}
 	if second.AuditID != first.AuditID {
 		t.Fatalf("second.AuditID = %q, want %q", second.AuditID, first.AuditID)
+	}
+	// The idempotent path must surface the original RedactionSummary
+	// from the first promotion's audit row, not an empty one (post-merge
+	// fix for the slice 7.4 CRITICAL).
+	if second.RedactionSummary.AnyRedacted != first.RedactionSummary.AnyRedacted {
+		t.Fatalf("second.RedactionSummary.AnyRedacted = %v, want %v", second.RedactionSummary.AnyRedacted, first.RedactionSummary.AnyRedacted)
+	}
+	if len(second.RedactionSummary.RedactedFields) != len(first.RedactionSummary.RedactedFields) {
+		t.Fatalf("second.RedactionSummary.RedactedFields = %v (len %d), want same as first: %v (len %d)",
+			second.RedactionSummary.RedactedFields, len(second.RedactionSummary.RedactedFields),
+			first.RedactionSummary.RedactedFields, len(first.RedactionSummary.RedactedFields))
 	}
 }
 

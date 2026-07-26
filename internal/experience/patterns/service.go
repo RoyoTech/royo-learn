@@ -187,6 +187,17 @@ func (s *Service) LookupPromotionAuditID(ctx context.Context, patternID domain.E
 	return s.repo.LookupPromotionAuditID(ctx, patternID)
 }
 
+// LookupPromotionRedaction returns the RedactionReport from the earliest
+// promotion audit row for the pattern, or (zero-value, false, nil) when
+// no such row exists. The idempotent Promote path uses this to surface
+// the original redaction summary instead of an empty one.
+func (s *Service) LookupPromotionRedaction(ctx context.Context, patternID domain.ExperiencePatternID) (evidence.RedactionReport, bool, error) {
+	if s == nil || s.repo == nil {
+		return evidence.RedactionReport{}, false, domain.NewValidationError(domain.ErrInvalidArgument, "patterns: service is not initialised")
+	}
+	return s.repo.LookupPromotionRedaction(ctx, patternID)
+}
+
 // PromoteAtomic delegates to the repository so the promotion package
 // can record the CAS UPDATE on experience_patterns and the matching
 // experience_pattern_promoted audit row in a single SQLite

@@ -353,6 +353,51 @@ func (r *Repository) LookupPromotionAuditID(ctx context.Context, patternID domai
 	return domain.AuditEventID(auditID), true, nil
 }
 
+// LookupPromotionRedaction returns the RedactionReport that was stored
+// in the earliest experience_pattern_promoted audit row for the pattern,
+// or (zero-value, false, nil) when no such row exists. The lookup reads
+// the details JSON column and extracts the nested "redaction" object so
+// the idempotent Promote path can surface the original redaction summary
+// instead of returning an empty RedactionSummary to the caller (Hito 7
+// slice 7.4 post-merge fix).
+func (r *Repository) LookupPromotionRedaction(ctx context.Context, patternID domain.ExperiencePatternID) (evidence.RedactionReport, bool, error) {
+	if patternID == "" {
+		return evidence.RedactionReport{}, false, domain.NewValidationError(domain.ErrInvalidArgument, "patterns: id is required")
+	}
+	tx, err := r.resolveTx(ctx, false)
+	if err != nil {
+		return evidence.RedactionReport{}, false, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	var detailsJSON sql.NullString
+	row := tx.QueryRowContext(ctx, "SELECT details FROM audit_events WHERE entity_id = ? AND operation = ? ORDER BY sequence ASC LIMIT 1",
+		string(patternID), "experience_pattern_promoted")
+	if err := row.Scan(&detailsJSON); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return evidence.RedactionReport{}, false, nil
+		}
+		return evidence.RedactionReport{}, false, fmt.Errorf("patterns: lookup promotion redaction: %w", err)
+	}
+	if !detailsJSON.Valid || detailsJSON.String == "" {
+		return evidence.RedactionReport{}, false, nil
+	}
+
+	var details struct {
+		Redaction struct {
+			AnyRedacted    bool     `json:"any_redacted"`
+			RedactedFields []string `json:"redacted_fields"`
+		} `json:"redaction"`
+	}
+	if err := json.Unmarshal([]byte(detailsJSON.String), &details); err != nil {
+		return evidence.RedactionReport{}, true, fmt.Errorf("patterns: unmarshal promotion redaction: %w", err)
+	}
+	return evidence.RedactionReport{
+		AnyRedacted:    details.Redaction.AnyRedacted,
+		RedactedFields: details.Redaction.RedactedFields,
+	}, true, nil
+}
+
 // GetByFingerprint returns the pattern with the supplied
 // (project_id, fingerprint), or ErrPatternNotFound.
 func (r *Repository) GetByFingerprint(ctx context.Context, projectID domain.ProjectID, fingerprint string) (*ExperiencePattern, error) {

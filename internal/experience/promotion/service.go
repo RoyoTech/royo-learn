@@ -53,6 +53,7 @@ type patternsFacade interface {
 	Get(ctx context.Context, id domain.ExperiencePatternID) (*patterns.ExperiencePattern, error)
 	LookupPromotionState(ctx context.Context, id domain.ExperiencePatternID) (patterns.PatternStatus, *domain.LearningID, error)
 	LookupPromotionAuditID(ctx context.Context, id domain.ExperiencePatternID) (domain.AuditEventID, bool, error)
+	LookupPromotionRedaction(ctx context.Context, id domain.ExperiencePatternID) (evidence.RedactionReport, bool, error)
 	PromoteAtomic(
 		ctx context.Context,
 		patternID domain.ExperiencePatternID,
@@ -160,12 +161,20 @@ func (s *Service) Promote(ctx context.Context, projectID domain.ProjectID, input
 	// orphan-promoted state).
 	if status == patterns.PatternPromoted && existingLearningID != nil {
 		auditID, _, _ := s.patterns.LookupPromotionAuditID(ctx, input.PatternID)
+		redactionReport, found, rErr := s.patterns.LookupPromotionRedaction(ctx, input.PatternID)
+		var redactionSummary RedactionSummary
+		if found && rErr == nil {
+			redactionSummary = RedactionSummary{
+				AnyRedacted:    redactionReport.AnyRedacted,
+				RedactedFields: redactionReport.RedactedFields,
+			}
+		}
 		return &PromotionResult{
 			PatternID:        input.PatternID,
 			LearningID:       *existingLearningID,
 			WasNew:           false,
 			AuditID:          auditID,
-			RedactionSummary: RedactionSummary{},
+			RedactionSummary: redactionSummary,
 		}, nil
 	}
 
