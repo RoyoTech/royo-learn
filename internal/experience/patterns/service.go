@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"agent-royo-learn/internal/domain"
+	"agent-royo-learn/internal/evidence"
 	"agent-royo-learn/internal/storage"
 )
 
@@ -161,6 +162,32 @@ func (s *Service) List(ctx context.Context, filter ListerFilter) ([]ExperiencePa
 // Get returns a single pattern by id.
 func (s *Service) Get(ctx context.Context, id domain.ExperiencePatternID) (*ExperiencePattern, error) {
 	return s.repo.GetByID(ctx, id)
+}
+
+// PromoteAtomic delegates to the repository so the promotion package
+// can record the CAS UPDATE on experience_patterns and the matching
+// experience_pattern_promoted audit row in a single SQLite
+// transaction. The wrapper mirrors the Get / List / Dismiss
+// pattern so the only surface that needs to learn about the
+// promotion pipeline is promotion.Service.
+//
+// Only the typed-error surface is surfaced here: callers that need
+// the canonical domain code should compare via the documented
+// package-level sentinels.
+func (s *Service) PromoteAtomic(
+	ctx context.Context,
+	patternID domain.ExperiencePatternID,
+	learningID domain.LearningID,
+	normalizedHash string,
+	actor domain.Actor,
+	redactionReport evidence.RedactionReport,
+	note string,
+	promotionFingerprint string,
+) (domain.AuditEventID, error) {
+	if s == nil || s.repo == nil {
+		return "", domain.NewValidationError(domain.ErrInvalidArgument, "patterns: service is not initialised")
+	}
+	return s.repo.PromoteAtomic(ctx, patternID, learningID, normalizedHash, actor, redactionReport, note, promotionFingerprint)
 }
 
 // IngestCluster is the slice 6.4 entry point the orchestrator uses:

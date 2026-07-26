@@ -156,14 +156,6 @@ var (
 	// errors.Is without depending on the canonical domain code.
 	ErrPromotionInvalidArgument = domain.NewValidationError(domain.ErrInvalidArgument,
 		"promotion: invalid argument")
-
-	// ErrPromotionNotImplemented is returned by the slice 7.0 stub
-	// when the pattern is eligible but the atomic pipeline has not
-	// landed yet. It is removed by slice 7.2; the contract tests pin
-	// it so callers learn the typed error surface even before the
-	// happy path is wired up.
-	ErrPromotionNotImplemented = domain.NewValidationError(domain.ErrPromotionNotImplemented,
-		"promotion: happy path not implemented in slice 7.0")
 )
 
 // errorIs exposes the package-level typed errors so callers and

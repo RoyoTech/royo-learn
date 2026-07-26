@@ -42,12 +42,20 @@ type CaptureInput struct {
 }
 
 // CaptureResult is the output of a Capture operation.
+//
+// NormalizedHash is the hex SHA-256 fingerprint capture.Service
+// computed over the canonicalised redacted Learning. The promotion
+// bridge (Hito 7 slice 7.2) reuses it to stamp the audit row without
+// re-computing the hash and without a second read of the Learning.
+// Slice 7.2 adds the field; existing callers keep their zero value on
+// idempotent retries that did not produce a fresh write.
 type CaptureResult struct {
-	LearningID  domain.LearningID
-	Status      domain.LearningStatus
-	New         bool // false if deduplicated or an idempotent retry
-	EvidenceIDs []domain.EvidenceID
-	Redacted    bool
+	LearningID     domain.LearningID
+	Status         domain.LearningStatus
+	New            bool // false if deduplicated or an idempotent retry
+	EvidenceIDs    []domain.EvidenceID
+	Redacted       bool
+	NormalizedHash string
 }
 
 // Service provides the capture operation.
@@ -165,9 +173,10 @@ func (s *Service) Capture(ctx context.Context, projectID domain.ProjectID, input
 		}
 		if existing != nil {
 			return &CaptureResult{
-				LearningID: existing.ID,
-				Status:     existing.Status,
-				New:        false,
+				LearningID:     existing.ID,
+				Status:         existing.Status,
+				New:            false,
+				NormalizedHash: existing.NormalizedHash,
 			}, nil
 		}
 	}
@@ -188,9 +197,10 @@ func (s *Service) Capture(ctx context.Context, projectID domain.ProjectID, input
 	}
 	if existing != nil {
 		return &CaptureResult{
-			LearningID: existing.ID,
-			Status:     existing.Status,
-			New:        false,
+			LearningID:     existing.ID,
+			Status:         existing.Status,
+			New:            false,
+			NormalizedHash: existing.NormalizedHash,
 		}, nil
 	}
 
@@ -248,11 +258,12 @@ func (s *Service) Capture(ctx context.Context, projectID domain.ProjectID, input
 	}
 
 	return &CaptureResult{
-		LearningID:  learning.ID,
-		Status:      learning.Status,
-		New:         true,
-		EvidenceIDs: evidence.IDs(records),
-		Redacted:    evidence.AnyRedacted(records),
+		LearningID:     learning.ID,
+		Status:         learning.Status,
+		New:            true,
+		EvidenceIDs:    evidence.IDs(records),
+		Redacted:       evidence.AnyRedacted(records),
+		NormalizedHash: hash,
 	}, nil
 }
 

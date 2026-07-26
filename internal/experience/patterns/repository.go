@@ -40,6 +40,7 @@ import (
 	"time"
 
 	"agent-royo-learn/internal/domain"
+	"agent-royo-learn/internal/evidence"
 	"agent-royo-learn/internal/storage"
 	"github.com/google/uuid"
 )
@@ -367,6 +368,117 @@ func (r *Repository) ListByStatus(ctx context.Context, projectID domain.ProjectI
 // ErrPatternInsufficientSources depending on the failure mode.
 func (r *Repository) SetStatus(ctx context.Context, id domain.ExperiencePatternID, status PatternStatus) (*ExperiencePattern, error) {
 	return r.SetStatusWithReason(ctx, id, status, "")
+}
+
+// PromoteAtomic transitions a qualified ExperiencePattern to the
+// promoted state and records the experience_pattern_promoted audit
+// row in a single SQLite transaction. The CAS guard on revision
+// means a concurrent transition (e.g. another promoter or a dismissal)
+// either wins outright and forces the caller to retry, or returns
+// ErrPatternInsufficientSources; the audit row never lands without
+// the matching status change.
+//
+// The normalizedHash parameter is the hex SHA-256 fingerprint
+// capture.Service computed over the persisted Learning; it lands in
+// the audit row's payload_sha256 so the audit evidence is the same
+// hash reviewers can recompute from the stored Learning. The
+// promotionFingerprint is the "what Promotion saw" digest the
+// promotion pipeline computed over the redacted bag before the
+// Capture call; the audit row stores it in details.promotion_fingerprint
+// so reviewers can reproduce the byte-for-byte inputs Promotion saw.
+//
+// Only the Service.Promote path calls this; raw callers should go
+// through PromotionService so the redaction pipeline cannot be
+// bypassed.
+func (r *Repository) PromoteAtomic(
+	ctx context.Context,
+	patternID domain.ExperiencePatternID,
+	learningID domain.LearningID,
+	normalizedHash string,
+	actor domain.Actor,
+	redactionReport evidence.RedactionReport,
+	note string,
+	promotionFingerprint string,
+) (domain.AuditEventID, error) {
+	if patternID == "" {
+		return "", domain.NewValidationError(domain.ErrInvalidArgument, "patterns: PromoteAtomic pattern id is required")
+	}
+	if learningID == "" {
+		return "", domain.NewValidationError(domain.ErrInvalidArgument, "patterns: PromoteAtomic learning id is required")
+	}
+
+	tx, err := r.resolveTx(ctx, true)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	var currentRevision int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT revision FROM experience_patterns WHERE id = ?`,
+		string(patternID)).Scan(&currentRevision); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrPatternNotFound
+		}
+		return "", fmt.Errorf("patterns: lookup revision: %w", err)
+	}
+
+	now := time.Now().UTC()
+	learningIDStr := string(learningID)
+	result, err := tx.ExecContext(ctx, `
+		UPDATE experience_patterns
+		SET status = ?, proposed_learning_id = ?, updated_at = ?, revision = revision + 1
+		WHERE id = ? AND revision = ?
+	`, string(PatternPromoted), learningIDStr, formatTime(now), string(patternID), currentRevision)
+	if err != nil {
+		return "", fmt.Errorf("patterns: update promote: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return "", fmt.Errorf("patterns: rows affected: %w", err)
+	}
+	if rows != 1 {
+		return "", ErrPatternInsufficientSources
+	}
+
+	// Audit row in the SAME transaction so the status change and the
+	// evidence commit or roll back together. The details map captures
+	// every fact the reviewer needs to reproduce the decision:
+	// learning_id (the persisted artefact), source (always
+	// pattern_mining for v1), prior_status (the qualified state the
+	// pattern was in), promotion_fingerprint (the redacted-bag
+	// digest), redaction (any_redacted + redacted_fields), note
+	// (bounded reviewer comment).
+	details := map[string]any{
+		"learning_id":           learningIDStr,
+		"source":                "pattern_mining",
+		"prior_status":          string(PatternQualified),
+		"promotion_fingerprint": promotionFingerprint,
+		"redaction": map[string]any{
+			"any_redacted":    redactionReport.AnyRedacted,
+			"redacted_fields": redactionReport.RedactedFields,
+		},
+		"note": note,
+	}
+	event := &domain.AuditEvent{
+		ID:            domain.AuditEventID(uuid.Must(uuid.NewV7()).String()),
+		OccurredAt:    now,
+		Actor:         actor,
+		Operation:     "experience_pattern_promoted",
+		EntityType:    "experience_pattern",
+		EntityID:      string(patternID),
+		PayloadSHA256: normalizedHash,
+		Result:        "success",
+		Details:       details,
+	}
+	if err := storage.RecordEventTx(ctx, tx, event); err != nil {
+		return "", err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("patterns: commit promote: %w", err)
+	}
+	return event.ID, nil
 }
 
 // DismissAtomic combines the status update and the audit row into a

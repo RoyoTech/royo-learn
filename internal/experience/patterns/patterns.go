@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"agent-royo-learn/internal/domain"
+	"agent-royo-learn/internal/evidence"
 )
 
 // PatternStatus is the closed enum that governs the lifecycle of an
@@ -47,6 +48,38 @@ const (
 	PatternPromoted  PatternStatus = "promoted"
 	PatternStale     PatternStatus = "stale"
 )
+
+// ToPromotionFields converts an ExperiencePattern into the structural
+// PromotionFields bag the promotion pipeline redacts and hashes
+// before persisting a Learning. The mapping is deterministic so the
+// same pattern always produces the same redacted bag and therefore
+// the same promotion fingerprint:
+//
+//	Title          <- pattern.Title
+//	Context        <- pattern.Summary
+//	Observation    <- "<pattern_kind>:<fingerprint_prefix_16>"
+//	ReusableLesson <- ""
+//	Limits         <- ""
+//	Recommended    <- nil
+//	RetrievalTerms <- []string{string(pattern.Kind), pattern.Fingerprint}
+//
+// The Observation is derived rather than copied verbatim so a secret
+// that happens to live in the raw pattern title cannot leak through
+// the persisted Learning; the prefix length (16) matches the
+// safePrefix helper the patterns.Service.IngestCluster uses so the
+// two derivations stay aligned.
+func (p ExperiencePattern) ToPromotionFields() evidence.PromotionFields {
+	fingerprintPrefix := safePrefix(p.Fingerprint, 16)
+	return evidence.PromotionFields{
+		Title:          p.Title,
+		Context:        p.Summary,
+		Observation:    string(p.Kind) + ":" + fingerprintPrefix,
+		ReusableLesson: "",
+		Limits:         "",
+		Recommended:    nil,
+		RetrievalTerms: []string{string(p.Kind), p.Fingerprint},
+	}
+}
 
 // DismissalReason is the closed enum of typed reasons used by
 // Dismissal. Adding a new reason requires editing this table and

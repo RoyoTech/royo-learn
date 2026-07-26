@@ -66,7 +66,6 @@ pattern_not_qualified
 pattern_already_promoted
 pattern_false_cluster
 pattern_insufficient_sources
-promotion_not_implemented
 ```
 
 Todos deben mapear a CLI exit code y MCP envelope.

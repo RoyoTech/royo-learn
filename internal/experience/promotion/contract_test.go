@@ -206,7 +206,6 @@ func TestTypedErrors_AreDistinct(t *testing.T) {
 		{"ErrPromotionNotEligible", ErrPromotionNotEligible},
 		{"ErrPromotionAlreadyPromoted", ErrPromotionAlreadyPromoted},
 		{"ErrPromotionInvalidArgument", ErrPromotionInvalidArgument},
-		{"ErrPromotionNotImplemented", ErrPromotionNotImplemented},
 	}
 	seen := make(map[string]string, len(cases))
 	for _, tc := range cases {
