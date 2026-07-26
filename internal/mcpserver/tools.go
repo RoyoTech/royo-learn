@@ -15,6 +15,7 @@ import (
 	"agent-royo-learn/internal/experience"
 	"agent-royo-learn/internal/experience/detectors"
 	"agent-royo-learn/internal/experience/patterns"
+	"agent-royo-learn/internal/experience/trace"
 	"agent-royo-learn/internal/publish"
 	"agent-royo-learn/internal/recurrence"
 	"agent-royo-learn/internal/storage"
@@ -316,6 +317,13 @@ type promotePatternInput struct {
 	PatternID string `json:"pattern_id" jsonschema:"required,pattern ID"`
 	Note      string `json:"note,omitempty" jsonschema:"optional reviewer note (bounded to MaxPromotionNoteBytes)"`
 	Actor     any    `json:"actor,omitempty" jsonschema:"optional actor JSON; defaults to system"`
+}
+
+// traceInput is the schema for learning_trace (Hito 4 slice 4.3).
+type traceInput struct {
+	LearningID      string `json:"learning_id" jsonschema:"required,learning ID to trace"`
+	IncludeExcerpt  bool   `json:"include_excerpt,omitempty" jsonschema:"include redacted excerpt (default false)"`
+	MaxExcerptBytes int    `json:"max_excerpt_bytes,omitempty" jsonschema:"cap excerpt bytes per event (default 1024)"`
 }
 
 // ---------------------------------------------------------------------------
@@ -1256,4 +1264,30 @@ func patternToMap(p patterns.ExperiencePattern) map[string]any {
 		m["dismissal_reason"] = string(p.DismissalReason)
 	}
 	return m
+}
+
+// handleTrace resolves a Learning back to its source events (Hito 4 slice 4.3).
+func handleTrace(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in traceInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in traceInput) (*mcp.CallToolResult, any, error) {
+		if in.LearningID == "" {
+			return toolError("invalid_argument", "learning_id is required")
+		}
+		maxBytes := in.MaxExcerptBytes
+		if maxBytes <= 0 {
+			maxBytes = 1024
+		}
+		svc := trace.NewService(srv.db.DB)
+		bounds := trace.TraceBounds{
+			IncludeExcerpt:  in.IncludeExcerpt,
+			MaxExcerptBytes: maxBytes,
+		}
+		result, err := svc.Trace(ctx, domain.LearningID(in.LearningID), bounds)
+		if err != nil {
+			return toolDomainError(err, "trace_failed")
+		}
+		return toolResultJSON(map[string]any{
+			"status": "ok",
+			"result": result,
+		})
+	}
 }
