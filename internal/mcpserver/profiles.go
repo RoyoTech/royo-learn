@@ -366,4 +366,13 @@ var allTools = []profileTool{
 			bind(ms, t, handleDismissPattern(srv))
 		},
 	},
+	{
+		name:        "learning_trace",
+		description: "Trace a Learning back to its source ExperienceEvents. Returns event metadata by default; set include_excerpt=true for redacted excerpts bounded to max_excerpt_bytes. The call is idempotent and read-only.",
+		access:      accessRead,
+		profiles:    map[string]bool{profileRead: true, profileAgent: true, profileAdmin: true},
+		register: func(ms *mcp.Server, srv *Server, t profileTool) {
+			bind(ms, t, handleTrace(srv))
+		},
+	},
 }
