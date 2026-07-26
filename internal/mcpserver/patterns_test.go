@@ -264,3 +264,283 @@ func errorText(t *testing.T, result *mcp.CallToolResult) string {
 	}
 	return ""
 }
+
+// =========================================================================
+// Slice 7.4 — learning_promote_pattern (Hito 7).
+//
+// The promote tool is the MCP surface over promotion.Service.Promote.
+// It must:
+//
+//   - be available on the admin profile only (D2: nothing destructive
+//     in read or agent);
+//   - reject promoted patterns with pattern_not_qualified only when
+//     the pattern is in the observed state;
+//   - return the promote result with status=ok + pattern (status=promoted
+//     + proposed_learning_id) + result envelope;
+//   - be idempotent on a second call: WasNew=false, same LearningID,
+//     same AuditID;
+//   - reject missing pattern_id with invalid_argument.
+// =========================================================================
+
+// TestCallTool_LearningPromotePattern_Success verifies the happy path:
+// an admin call on a qualified pattern returns the promotion result
+// with the pattern re-fetched in the promoted state.
+func TestCallTool_LearningPromotePattern_Success(t *testing.T) {
+	t.Parallel()
+	ts := newTestServer(t, "admin")
+	patternID := seedPattern(t, ts)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, err := ts.callTool(ctx, "learning_promote_pattern", map[string]any{
+		"pattern_id": string(patternID),
+		"note":       "ready for production",
+	})
+	if err != nil {
+		t.Fatalf("transport error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected IsError=false, got true; result=%+v", result)
+	}
+	data := mustDecodeMap(t, result)
+	if got := data["status"]; got != "ok" {
+		t.Fatalf("status = %v, want ok", got)
+	}
+	pattern, _ := data["pattern"].(map[string]any)
+	if pattern == nil {
+		t.Fatalf("pattern is nil; data=%+v", data)
+	}
+	if pattern["status"] != "promoted" {
+		t.Fatalf("pattern.status = %v, want promoted", pattern["status"])
+	}
+	if pattern["proposed_learning_id"] == "" || pattern["proposed_learning_id"] == nil {
+		t.Fatalf("pattern.proposed_learning_id = %v, want populated", pattern["proposed_learning_id"])
+	}
+	res, ok := data["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("result is not a map: %T", data["result"])
+	}
+	if got, _ := res["was_new"].(bool); !got {
+		t.Fatalf("result.was_new = %v, want true", res["was_new"])
+	}
+	if res["learning_id"] == "" || res["learning_id"] == nil {
+		t.Fatalf("result.learning_id is empty")
+	}
+	if res["audit_id"] == "" || res["audit_id"] == nil {
+		t.Fatalf("result.audit_id is empty")
+	}
+	if res["learning_id"] != pattern["proposed_learning_id"] {
+		t.Fatalf("result.learning_id = %v, pattern.proposed_learning_id = %v (must match)",
+			res["learning_id"], pattern["proposed_learning_id"])
+	}
+}
+
+// TestCallTool_LearningPromotePattern_NotAdmin verifies the tool is
+// guarded by the admin profile. Calling it from the read profile must
+// surface an unknown-tool or access-denied error envelope.
+func TestCallTool_LearningPromotePattern_NotAdmin(t *testing.T) {
+	t.Parallel()
+	ts := newTestServer(t, "read")
+	patternID := seedPattern(t, ts)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, err := ts.callTool(ctx, "learning_promote_pattern", map[string]any{
+		"pattern_id": string(patternID),
+	})
+	if err != nil {
+		// Transport-level "tool not found" surfaces as a Go error from
+		// the SDK; that's the expected guard for read-only profiles.
+		return
+	}
+	if !result.IsError {
+		t.Fatalf("promote on read profile: IsError=false, want true; result=%+v", result)
+	}
+	text := errorText(t, result)
+	if !strings.Contains(text, "access_denied") &&
+		!strings.Contains(text, "unknown_tool") &&
+		!strings.Contains(text, "tool_not_found") &&
+		!strings.Contains(text, "method_not_found") {
+		t.Fatalf("error text = %q, want access_denied|unknown_tool|tool_not_found|method_not_found", text)
+	}
+}
+
+// TestCallTool_LearningPromotePattern_Idempotent verifies the second
+// call against an already-promoted pattern returns WasNew=false with
+// the same LearningID and AuditID.
+func TestCallTool_LearningPromotePattern_Idempotent(t *testing.T) {
+	t.Parallel()
+	ts := newTestServer(t, "admin")
+	patternID := seedPattern(t, ts)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	first, err := ts.callTool(ctx, "learning_promote_pattern", map[string]any{
+		"pattern_id": string(patternID),
+		"note":       "first call",
+	})
+	if err != nil {
+		t.Fatalf("first call transport error: %v", err)
+	}
+	if first.IsError {
+		t.Fatalf("first call: IsError=true, want false; result=%+v", first)
+	}
+	firstData := mustDecodeMap(t, first)
+	firstResult, _ := firstData["result"].(map[string]any)
+	firstLearningID := firstResult["learning_id"]
+	firstAuditID := firstResult["audit_id"]
+
+	second, err := ts.callTool(ctx, "learning_promote_pattern", map[string]any{
+		"pattern_id": string(patternID),
+		"note":       "second call",
+	})
+	if err != nil {
+		t.Fatalf("second call transport error: %v", err)
+	}
+	if second.IsError {
+		t.Fatalf("second call: IsError=true, want false; result=%+v", second)
+	}
+	secondData := mustDecodeMap(t, second)
+	secondResult, _ := secondData["result"].(map[string]any)
+	if got, _ := secondResult["was_new"].(bool); got {
+		t.Fatalf("second call was_new = true, want false (idempotent)")
+	}
+	if secondResult["learning_id"] != firstLearningID {
+		t.Fatalf("second learning_id = %v, want %v (same as first)",
+			secondResult["learning_id"], firstLearningID)
+	}
+	if secondResult["audit_id"] != firstAuditID {
+		t.Fatalf("second audit_id = %v, want %v (same as first)",
+			secondResult["audit_id"], firstAuditID)
+	}
+}
+
+// TestCallTool_LearningPromotePattern_NotQualified verifies the tool
+// refuses a pattern that is still in the observed state. The error
+// envelope must carry the canonical pattern_not_qualified code.
+func TestCallTool_LearningPromotePattern_NotQualified(t *testing.T) {
+	t.Parallel()
+	ts := newTestServer(t, "admin")
+	// Seed an observed (not qualified) pattern.
+	patternID := seedObservedPattern(t, ts)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, err := ts.callTool(ctx, "learning_promote_pattern", map[string]any{
+		"pattern_id": string(patternID),
+	})
+	if err != nil {
+		t.Fatalf("transport error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("promote on observed pattern: IsError=false, want true; result=%+v", result)
+	}
+	if !strings.Contains(errorText(t, result), "pattern_not_qualified") {
+		t.Fatalf("error text = %q, want pattern_not_qualified", errorText(t, result))
+	}
+}
+
+// TestCallTool_LearningPromotePattern_InvalidInput verifies the input
+// validation guard: an empty pattern_id surfaces an invalid_argument
+// error envelope. The schema-level `required` validation rejects a
+// missing key entirely, so we exercise the handler-level guard by
+// sending an empty string. Both paths must surface invalid_argument.
+func TestCallTool_LearningPromotePattern_InvalidInput(t *testing.T) {
+	t.Parallel()
+	ts := newTestServer(t, "admin")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, err := ts.callTool(ctx, "learning_promote_pattern", map[string]any{
+		"pattern_id": "",
+	})
+	if err != nil {
+		t.Fatalf("transport error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("promote with empty pattern_id: IsError=false, want true; result=%+v", result)
+	}
+	if !strings.Contains(errorText(t, result), "invalid_argument") {
+		t.Fatalf("error text = %q, want invalid_argument", errorText(t, result))
+	}
+}
+
+// seedObservedPattern seeds a pattern in the observed state so the
+// promote-not-qualified tests can target a pattern that is not
+// eligible for promotion. The fixture mirrors seedPattern but
+// overrides the qualification decision so the persisted pattern stays
+// in PatternObserved.
+func seedObservedPattern(t *testing.T, ts *testServer) domain.ExperiencePatternID {
+	t.Helper()
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	memberIDs := []domain.ExperienceEventID{"obs-evt-1", "obs-evt-2", "obs-evt-3"}
+	if err := storage.WithTx(context.Background(), ts.db, func(tx *sql.Tx) error {
+		turnID := domain.ExperienceTurnID("obs-pattern-turn-1")
+		sessionID := domain.ExperienceSessionID("obs-pattern-session-1")
+		occurredAt := now
+		session := &domain.ExperienceSession{
+			ID: sessionID, ProjectID: ts.projectID, Source: domain.SourceOpenCode,
+			ExternalSessionID: "obs-pattern-external-session",
+			Locator:           domain.TranscriptLocator{Kind: "sqlite", Path: "C:/safe/obs-pattern-sessions.db", SessionID: string(sessionID)},
+			StartedAt:         &occurredAt, UpdatedAt: occurredAt, ClosedAt: &occurredAt,
+			MetadataSHA256: "obs-pattern-session-digest", CreatedAt: occurredAt,
+		}
+		if err := storage.SaveExperienceSession(context.Background(), tx, session); err != nil {
+			return err
+		}
+		turn := &domain.ExperienceTurn{
+			ID: turnID, SessionID: sessionID, ExternalTurnID: "obs-pattern-external-turn",
+			Sequence: 1, Status: domain.TurnIngested, Fingerprint: "obs-pattern-turn-fingerprint",
+			UserDigest: "user-digest", AssistantDigest: "assistant-digest", ToolCallsDigest: "tool-digest",
+			SafeSummary: "Synthetic observed pattern fixture.", OccurredAt: occurredAt, StableAt: &occurredAt,
+			IngestedAt: occurredAt, SourceRevision: "revision-1", Redacted: true,
+		}
+		if err := storage.SaveExperienceTurn(context.Background(), tx, turn); err != nil {
+			return err
+		}
+		for i, eventID := range memberIDs {
+			event := &domain.ExperienceEvent{
+				ID: eventID, ProjectID: ts.projectID, TurnID: turnID, Kind: domain.EventTestFailure,
+				Summary: "Synthetic observed pattern event.", Observation: "1-session, 1-day cluster.",
+				Outcome: "success", Fingerprint: fmt.Sprintf("obs-pattern-event-fingerprint-%d", i+1),
+				EvidenceJSON: `[{"kind":"test"}]`,
+				Detector:     domain.DetectorIdentity{Kind: "deterministic", Name: "obs-pattern-fixture", Version: "1.0.0"},
+				Confidence:   domain.ConfidenceMedium, CreatedAt: now.Add(time.Duration(i) * time.Minute),
+			}
+			if err := storage.SaveExperienceEvent(context.Background(), tx, event); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("seed observed pattern events: %v", err)
+	}
+	svc := patterns.NewService(ts.db)
+	cluster := patterns.ClusterRecord{
+		Fingerprint:        "fp-mcp-obs-1",
+		Kind:               domain.EventTestFailure,
+		Members:            memberIDs,
+		Sessions:           map[string]struct{}{"sess-1": {}},
+		Days:               map[string]struct{}{"2026-07-25": {}},
+		DistinctSessions:   1,
+		DistinctDays:       1,
+		OccurrenceCount:    1,
+		SuccessfulOutcomes: 0,
+		FirstSeenAt:        now,
+		LastSeenAt:         now,
+		RetrievalTerms:     []string{"observed"},
+	}
+	saved, err := svc.IngestCluster(context.Background(), ts.projectID, cluster, patterns.QualificationDecision{Status: patterns.PatternObserved})
+	if err != nil {
+		t.Fatalf("IngestCluster(observed): %v", err)
+	}
+	if saved.Status != patterns.PatternObserved {
+		t.Fatalf("seeded pattern status = %s, want observed", saved.Status)
+	}
+	return saved.ID
+}

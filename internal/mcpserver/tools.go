@@ -19,6 +19,8 @@ import (
 	"agent-royo-learn/internal/recurrence"
 	"agent-royo-learn/internal/storage"
 
+	"agent-royo-learn/internal/experience/promotion"
+
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -299,6 +301,20 @@ type dismissPatternInput struct {
 	PatternID string `json:"pattern_id" jsonschema:"required,pattern ID"`
 	Reason    string `json:"reason" jsonschema:"required,dismissal reason (one_off|not_reusable|already_covered|contradicted|insufficient_evidence|private_or_sensitive|false_cluster)"`
 	Note      string `json:"note,omitempty" jsonschema:"optional reviewer note (bounded)"`
+	Actor     any    `json:"actor,omitempty" jsonschema:"optional actor JSON; defaults to system"`
+}
+
+// promotePatternInput is the schema for learning_promote_pattern
+// (Hito 7 slice 7.4). The advertise step mirrors the dismiss surface
+// and the CLI surface; the same JSON shape is reused so cross-tool
+// consumers can share their decoders.
+//
+// The Actor field is intentionally typed as `any` (per docs/lessons.md):
+// json.RawMessage would force callers to wrap the actor in a string,
+// and the field is open-ended (Kind + Name + optional Model/SessionID).
+type promotePatternInput struct {
+	PatternID string `json:"pattern_id" jsonschema:"required,pattern ID"`
+	Note      string `json:"note,omitempty" jsonschema:"optional reviewer note (bounded to MaxPromotionNoteBytes)"`
 	Actor     any    `json:"actor,omitempty" jsonschema:"optional actor JSON; defaults to system"`
 }
 
@@ -1144,6 +1160,67 @@ func handleDismissPattern(srv *Server) func(ctx context.Context, req *mcp.CallTo
 		return toolResultJSON(map[string]any{
 			"status":  "ok",
 			"pattern": patternToMap(*got),
+		})
+	}
+}
+
+// promotionResultToMap converts a promotion.PromotionResult into the
+// stable JSON shape MCP consumers depend on. The fields are spelled
+// the same way the CLI surface emits them so a single decoder can
+// consume both surfaces (snake_case, no shorthand).
+func promotionResultToMap(r promotion.PromotionResult) map[string]any {
+	return map[string]any{
+		"pattern_id":        string(r.PatternID),
+		"learning_id":       string(r.LearningID),
+		"was_new":           r.WasNew,
+		"audit_id":          string(r.AuditID),
+		"redaction_summary": r.RedactionSummary,
+	}
+}
+
+// handlePromotePattern promotes a qualified pattern by id. The tool is
+// admin-only (D2: nothing destructive in read or agent). The slice
+// 7.3 idempotency lookup makes the call a no-op on a second
+// invocation: the existing LearningID is returned with WasNew=false
+// and no duplicate audit row is written.
+func handlePromotePattern(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in promotePatternInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in promotePatternInput) (*mcp.CallToolResult, any, error) {
+		if in.PatternID == "" {
+			return toolError("invalid_argument", "pattern_id is required")
+		}
+		actor := domain.Actor{Kind: "system", Name: "mcp"}
+		if in.Actor != nil {
+			encoded, mErr := json.Marshal(in.Actor)
+			if mErr != nil {
+				return toolError("invalid_argument", "actor is not JSON serializable: "+mErr.Error())
+			}
+			if uErr := json.Unmarshal(encoded, &actor); uErr != nil {
+				return toolError("invalid_argument", "actor is not JSON serializable: "+uErr.Error())
+			}
+		}
+		captureSvc := srv.capSvc.service()
+		patternSvc := patterns.NewService(srv.db)
+		promotionSvc, err := promotion.NewService(captureSvc, patternSvc, srv.db)
+		if err != nil {
+			return toolDomainError(err, "promote_pattern_failed")
+		}
+		input := &promotion.PromotionInput{
+			PatternID: domain.ExperiencePatternID(in.PatternID),
+			Actor:     actor,
+			Note:      in.Note,
+		}
+		result, err := promotionSvc.Promote(ctx, srv.projectID, input)
+		if err != nil {
+			return toolDomainError(err, "promote_pattern_failed")
+		}
+		got, gErr := patternSvc.Get(ctx, domain.ExperiencePatternID(in.PatternID))
+		if gErr != nil {
+			return toolDomainError(gErr, "promote_pattern_failed")
+		}
+		return toolResultJSON(map[string]any{
+			"status":  "ok",
+			"pattern": patternToMap(*got),
+			"result":  promotionResultToMap(*result),
 		})
 	}
 }

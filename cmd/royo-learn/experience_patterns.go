@@ -1,10 +1,17 @@
-// experience patterns — Hito 6 slice 6.4.
+// experience patterns — Hito 6 slice 6.4 + Hito 7 slice 7.4.
 //
-// Slice 6.4 adds three subcommands to `experience patterns`:
+// Slice 6.4 added three subcommands:
 //
 //   - list   — list patterns filtered by status / kind / limit.
 //   - get    — fetch one pattern by id, including membership.
 //   - dismiss — dismiss a pattern by id with a typed reason.
+//
+// Slice 7.4 adds the admin wrap that bridges a qualified pattern to a
+// persisted Learning via promotion.Service.Promote:
+//
+//   - promote — promote a qualified pattern, idempotent on the
+//     (pattern_id, fingerprint) idempotency key. Admin-only in MCP;
+//     the CLI is the operator escape hatch for the same flow.
 //
 // Flags:
 //
@@ -12,7 +19,7 @@
 //	--status <status>       one of observed|qualified|dismissed|promoted|stale
 //	--kind <kind>           filter by event kind
 //	--limit <n>             cap the list response
-//	--id <pattern-id>       pattern id for get / dismiss
+//	--id <pattern-id>       pattern id for get / dismiss / promote
 //	--reason <reason>       dismissal reason (one_off|not_reusable|...)
 //	--note <text>           optional reviewer note (bounded)
 //	--actor <json>          optional actor JSON (defaults to system)
@@ -28,14 +35,21 @@ import (
 	"encoding/json"
 	"flag"
 	"io"
+	"path/filepath"
 
+	"agent-royo-learn/internal/capture"
 	"agent-royo-learn/internal/domain"
+	"agent-royo-learn/internal/evidence"
 	"agent-royo-learn/internal/experience/patterns"
+	"agent-royo-learn/internal/experience/promotion"
 )
 
 // experiencePatternsOutput is the top-level JSON shape produced by
 // the patterns subcommands. Schema is pinned by Hito 6 slice 6.4;
-// consumers should only update on a versioned contract change.
+// consumers should only update on a versioned contract change. Slice
+// 7.4 adds the optional Result envelope so the `promote` subcommand
+// can surface the canonical promotion.PromotionResult without breaking
+// the existing typed shape of the list/get/dismiss envelopes.
 type experiencePatternsOutput struct {
 	Operation string                       `json:"operation"`
 	Status    string                       `json:"status"`
@@ -43,6 +57,7 @@ type experiencePatternsOutput struct {
 	Pattern   *patterns.ExperiencePattern  `json:"pattern,omitempty"`
 	Members   []patterns.Membership        `json:"members,omitempty"`
 	Total     int                          `json:"total"`
+	Result    *promotion.PromotionResult   `json:"result,omitempty"`
 }
 
 // runExperiencePatterns dispatches the `experience patterns`
@@ -50,7 +65,7 @@ type experiencePatternsOutput struct {
 func runExperiencePatterns(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		return writeExperienceError(stderr, "invalid_argument",
-			"experience patterns: a subcommand is required: list, get, dismiss")
+			"experience patterns: a subcommand is required: list, get, dismiss, promote")
 	}
 	switch args[0] {
 	case "list":
@@ -59,9 +74,11 @@ func runExperiencePatterns(args []string, stdout, stderr io.Writer) int {
 		return runExperiencePatternsGet(args[1:], stdout, stderr)
 	case "dismiss":
 		return runExperiencePatternsDismiss(args[1:], stdout, stderr)
+	case "promote":
+		return runExperiencePatternsPromote(args[1:], stdout, stderr)
 	default:
 		return writeExperienceError(stderr, "invalid_argument",
-			"experience patterns: unknown subcommand %q: must be list, get, or dismiss", args[0])
+			"experience patterns: unknown subcommand %q: must be list, get, dismiss, or promote", args[0])
 	}
 }
 
@@ -214,6 +231,108 @@ func runExperiencePatternsDismiss(args []string, stdout, stderr io.Writer) int {
 		Operation: "dismiss",
 		Status:    "ok",
 		Pattern:   got,
+		Total:     1,
+	}
+	return encodeExperiencePatternsOutput(stdout, output)
+}
+
+// runExperiencePatternsPromote implements `experience patterns promote`.
+// Hito 7 slice 7.4. The flag surface mirrors the dismiss subcommand so
+// operators can rely on the same JSON envelope from the CLI:
+//
+//	--project-root <path>   project root (required)
+//	--id <pattern-id>       pattern id (required)
+//	--note <text>           optional reviewer note (bounded to MaxPromotionNoteBytes)
+//	--actor <json>          optional actor JSON; defaults to {kind:system,name:cli}
+//
+// The handler runs the slice 7.3 idempotent pipeline end-to-end:
+// patterns.Service.LookupPromotionState gates the well-known
+// "already-promoted" case before capture.Service.Capture runs, the
+// two-phase Promote pipeline runs the rest, and the updated pattern is
+// re-fetched so the response includes the new status, revision and
+// proposed_learning_id. The PromotionResult envelope is the canonical
+// shape the audit row promised in docs/23-PATTERN-MINING.md §8.
+func runExperiencePatternsPromote(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("experience patterns promote", flag.ContinueOnError)
+	projectRoot := fs.String("project-root", "", "project root to scope the promotion (required)")
+	id := fs.String("id", "", "pattern id (required)")
+	note := fs.String("note", "", "optional reviewer note (bounded to MaxPromotionNoteBytes)")
+	actorJSON := fs.String("actor", "", "optional actor JSON; defaults to {kind:system,name:cli}")
+	if err := fs.Parse(args); err != nil {
+		return writeExperienceError(stderr, "invalid_argument", "experience patterns promote: %v", err)
+	}
+	if *projectRoot == "" {
+		return writeExperienceError(stderr, "invalid_argument",
+			"experience patterns promote: --project-root is required")
+	}
+	if *id == "" {
+		return writeExperienceError(stderr, "invalid_argument",
+			"experience patterns promote: --id is required")
+	}
+	// Reject oversized notes at the CLI surface so the operator gets a
+	// typed error before the service runs. The same cap is enforced by
+	// promotion.PromotionInput.Validate, but failing fast here yields a
+	// more actionable message.
+	if len(*note) > promotion.MaxPromotionNoteBytes {
+		return writeExperienceError(stderr, "invalid_argument",
+			"experience patterns promote: --note exceeds the permitted byte limit")
+	}
+
+	resolvedRoot, db, projectID, exitCode := resolvePublishContext(*projectRoot, stderr)
+	if exitCode != exitSuccess {
+		return exitCode
+	}
+	defer db.Close()
+
+	actor := domain.Actor{Kind: "system", Name: "cli"}
+	if *actorJSON != "" {
+		if err := json.Unmarshal([]byte(*actorJSON), &actor); err != nil {
+			return writeExperienceError(stderr, "invalid_argument",
+				"experience patterns promote: --actor is not valid JSON: %v", err)
+		}
+	}
+
+	// Wire the capture service the same way the rest of the CLI does
+	// (cmd/royo-learn/main.go: runCapture). The promotion pipeline
+	// cross-references the capture pipeline, so the evidence layer must
+	// be wired too. We tolerate the evidence init failure with a typed
+	// error so the operator gets a clear message instead of a panic.
+	recordsDir := filepath.Join(resolvedRoot, ".royo-learn", "records")
+	evidenceSvc, err := evidence.NewService(resolvedRoot, nil)
+	if err != nil {
+		return writeExperienceError(stderr, "invalid_argument",
+			"experience patterns promote: init evidence: %v", err)
+	}
+	captureSvc := capture.NewServiceWithEvidence(db, recordsDir, evidenceSvc)
+	patternSvc := patterns.NewService(db)
+	promotionSvc, err := promotion.NewService(captureSvc, patternSvc, db)
+	if err != nil {
+		return writeExperienceError(stderr, "invalid_argument",
+			"experience patterns promote: init promotion service: %v", err)
+	}
+
+	input := &promotion.PromotionInput{
+		PatternID: domain.ExperiencePatternID(*id),
+		Actor:     actor,
+		Note:      *note,
+	}
+	result, err := promotionSvc.Promote(context.Background(), projectID, input)
+	if err != nil {
+		return writeExperienceDomainError(stderr, err)
+	}
+
+	// Re-fetch so the caller sees the updated status, revision and
+	// proposed_learning_id. The Get is cheap and is the only way the
+	// caller can confirm the two-phase pipeline committed Phase 2.
+	got, gErr := patternSvc.Get(context.Background(), domain.ExperiencePatternID(*id))
+	if gErr != nil {
+		return writeExperienceDomainError(stderr, gErr)
+	}
+	output := experiencePatternsOutput{
+		Operation: "promote",
+		Status:    "ok",
+		Pattern:   got,
+		Result:    result,
 		Total:     1,
 	}
 	return encodeExperiencePatternsOutput(stdout, output)

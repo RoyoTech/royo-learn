@@ -366,4 +366,13 @@ var allTools = []profileTool{
 			bind(ms, t, handleDismissPattern(srv))
 		},
 	},
+	{
+		name:        "learning_promote_pattern",
+		description: "Promote an experience pattern by id, creating a captured Learning through the promotion pipeline. Idempotent: a second call returns the existing Learning with was_new=false. Requires the admin profile.",
+		access:      accessWrite,
+		profiles:    map[string]bool{profileAdmin: true},
+		register: func(ms *mcp.Server, srv *Server, t profileTool) {
+			bind(ms, t, handlePromotePattern(srv))
+		},
+	},
 }

@@ -30,6 +30,7 @@ import (
 
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/experience/patterns"
+	"agent-royo-learn/internal/experience/promotion"
 	"agent-royo-learn/internal/storage"
 	"agent-royo-learn/internal/testutil"
 )
@@ -389,5 +390,316 @@ func TestExperiencePatterns_AcceptanceSynthetic(t *testing.T) {
 	}
 	if !strings.Contains(last, `"status":"dismissed"`) {
 		t.Fatalf("encoded output missing status dismissed: %s", last)
+	}
+}
+
+// =========================================================================
+// Slice 7.4 — CLI `experience patterns promote` (Hito 7).
+//
+// The promote subcommand is the admin wrap around
+// promotion.Service.Promote. It must:
+//   - require --id;
+//   - reject oversized notes (--note > MaxPromotionNoteBytes);
+//   - reject patterns that are not qualified with a typed error;
+//   - reject non-existent patterns with pattern_not_found;
+//   - return the PromotionResult envelope on success with an updated
+//     pattern (status=promoted, proposed_learning_id set);
+//   - be idempotent on a second call against an already-promoted
+//     pattern (WasNew=false, same LearningID).
+// =========================================================================
+
+// promoteCLIQualifiedPattern seeds a fresh qualified pattern on top
+// of the project's CLI fixture. The pattern's fingerprint is unique
+// per call so concurrent tests do not collide on the idempotency key.
+func promoteCLIQualifiedPattern(t *testing.T, root string, projectID domain.ProjectID, fingerprint string) domain.ExperiencePatternID {
+	t.Helper()
+	dbPath := filepath.Join(root, ".royo-learn", "royo-learn.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	svc := patterns.NewService(db)
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	memberIDs := []domain.ExperienceEventID{
+		domain.ExperienceEventID(fingerprint + "-evt-1"),
+		domain.ExperienceEventID(fingerprint + "-evt-2"),
+		domain.ExperienceEventID(fingerprint + "-evt-3"),
+	}
+	seedPatternExperienceEvents(t, db, projectID, "promote-"+fingerprint, memberIDs, now)
+	cluster := patterns.ClusterRecord{
+		Fingerprint:        fingerprint,
+		Kind:               domain.EventTestFailure,
+		Members:            memberIDs,
+		Sessions:           map[string]struct{}{"sess-a": {}, "sess-b": {}, "sess-c": {}},
+		Days:               map[string]struct{}{"2026-07-25": {}, "2026-07-26": {}, "2026-07-27": {}},
+		DistinctSessions:   3,
+		DistinctDays:       3,
+		OccurrenceCount:    3,
+		SuccessfulOutcomes: 3,
+		FirstSeenAt:        now,
+		LastSeenAt:         now,
+		RetrievalTerms:     []string{"compile", "missing", "header"},
+	}
+	saved, err := svc.IngestCluster(ctx, projectID, cluster, patterns.QualificationDecision{Status: patterns.PatternQualified})
+	if err != nil {
+		t.Fatalf("IngestCluster(qualified): %v", err)
+	}
+	if saved.Status != patterns.PatternQualified {
+		t.Fatalf("seeded pattern status = %s, want qualified", saved.Status)
+	}
+	return saved.ID
+}
+
+// TestRunExperiencePatternsPromote_RequiresID verifies the CLI
+// rejects a --project-root only invocation with an invalid_argument
+// envelope.
+func TestRunExperiencePatternsPromote_RequiresID(t *testing.T) {
+	t.Parallel()
+
+	root, db, _, _ := patternsCLIFixture(t)
+	defer db.Close()
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	code := runExperiencePatternsPromote([]string{
+		"--project-root", root,
+	}, stdout, stderr)
+	if code == exitSuccess {
+		t.Fatalf("promote without --id = success, want error")
+	}
+	if !strings.Contains(stderr.String(), "invalid_argument") {
+		t.Fatalf("stderr = %q, want invalid_argument", stderr.String())
+	}
+}
+
+// TestRunExperiencePatternsPromote_Success verifies the happy path
+// through the CLI. A qualified pattern is promoted, the pattern is
+// re-fetched with status=promoted + proposed_learning_id, and the
+// PromotionResult envelope is returned on stdout.
+func TestRunExperiencePatternsPromote_Success(t *testing.T) {
+	t.Parallel()
+
+	root, db, projectID, _ := patternsCLIFixture(t)
+	defer db.Close()
+
+	patternID := promoteCLIQualifiedPattern(t, root, projectID, "fp-promote-success")
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	code := runExperiencePatternsPromote([]string{
+		"--project-root", root,
+		"--id", string(patternID),
+		"--note", "ready for production",
+	}, stdout, stderr)
+	if code != exitSuccess {
+		t.Fatalf("runExperiencePatternsPromote = %d, stderr=%s", code, stderr.String())
+	}
+
+	var out experiencePatternsOutput
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("Unmarshal: %v\nraw=%s", err, stdout.String())
+	}
+	if out.Operation != "promote" {
+		t.Fatalf("Operation = %s, want promote", out.Operation)
+	}
+	if out.Status != "ok" {
+		t.Fatalf("Status = %s, want ok", out.Status)
+	}
+	if out.Pattern == nil {
+		t.Fatalf("Pattern is nil")
+	}
+	if out.Pattern.Status != patterns.PatternPromoted {
+		t.Fatalf("Pattern.Status = %s, want promoted", out.Pattern.Status)
+	}
+	if out.Pattern.ProposedLearningID == nil {
+		t.Fatalf("Pattern.ProposedLearningID is nil, want populated")
+	}
+	if out.Result == nil {
+		t.Fatalf("Result is nil")
+	}
+	if !out.Result.WasNew {
+		t.Fatalf("Result.WasNew = false, want true")
+	}
+	if out.Result.LearningID == "" {
+		t.Fatalf("Result.LearningID is empty")
+	}
+	if out.Result.AuditID == "" {
+		t.Fatalf("Result.AuditID is empty")
+	}
+	if string(out.Result.LearningID) != string(*out.Pattern.ProposedLearningID) {
+		t.Fatalf("Result.LearningID = %s, Pattern.ProposedLearningID = %s", out.Result.LearningID, *out.Pattern.ProposedLearningID)
+	}
+}
+
+// TestRunExperiencePatternsPromote_NotQualified verifies the
+// pattern_not_qualified envelope when the operator targets a pattern
+// that is still in the observed state.
+func TestRunExperiencePatternsPromote_NotQualified(t *testing.T) {
+	t.Parallel()
+
+	root, db, projectID, _ := patternsCLIFixture(t)
+	defer db.Close()
+
+	// Seed an observed (not qualified) pattern.
+	dbPath := filepath.Join(root, ".royo-learn", "royo-learn.db")
+	db2, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db2.Close()
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	observedIDs := []domain.ExperienceEventID{"obs-1", "obs-2", "obs-3"}
+	seedPatternExperienceEvents(t, db2, projectID, "observed", observedIDs, now)
+	cluster := patterns.ClusterRecord{
+		Fingerprint:        "fp-promote-observed",
+		Kind:               domain.EventTestFailure,
+		Members:            observedIDs,
+		Sessions:           map[string]struct{}{"sess-1": {}},
+		Days:               map[string]struct{}{"2026-07-25": {}},
+		DistinctSessions:   1,
+		DistinctDays:       1,
+		OccurrenceCount:    1,
+		SuccessfulOutcomes: 0,
+		FirstSeenAt:        now,
+		LastSeenAt:         now,
+		RetrievalTerms:     []string{"observed"},
+	}
+	saved, err := patterns.NewService(db2).IngestCluster(context.Background(), projectID, cluster, patterns.QualificationDecision{Status: patterns.PatternObserved})
+	if err != nil {
+		t.Fatalf("IngestCluster(observed): %v", err)
+	}
+	if saved.Status != patterns.PatternObserved {
+		t.Fatalf("seeded pattern status = %s, want observed", saved.Status)
+	}
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	code := runExperiencePatternsPromote([]string{
+		"--project-root", root,
+		"--id", string(saved.ID),
+	}, stdout, stderr)
+	if code == exitSuccess {
+		t.Fatalf("promote on observed pattern = success, want error")
+	}
+	if !strings.Contains(stderr.String(), "pattern_not_qualified") {
+		t.Fatalf("stderr = %q, want pattern_not_qualified", stderr.String())
+	}
+}
+
+// TestRunExperiencePatternsPromote_NotFound verifies the
+// pattern_not_found envelope when the operator passes a non-existent
+// pattern id.
+func TestRunExperiencePatternsPromote_NotFound(t *testing.T) {
+	t.Parallel()
+
+	root, db, _, _ := patternsCLIFixture(t)
+	defer db.Close()
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	code := runExperiencePatternsPromote([]string{
+		"--project-root", root,
+		"--id", "non-existent-pattern-id",
+	}, stdout, stderr)
+	if code == exitSuccess {
+		t.Fatalf("promote on non-existent pattern = success, want error")
+	}
+	if !strings.Contains(stderr.String(), "pattern_not_found") {
+		t.Fatalf("stderr = %q, want pattern_not_found", stderr.String())
+	}
+}
+
+// TestRunExperiencePatternsPromote_AlreadyPromoted_Idempotent
+// verifies the CLI surface is idempotent: a second call against an
+// already-promoted pattern returns the same LearningID with
+// WasNew=false and no duplicate audit row.
+func TestRunExperiencePatternsPromote_AlreadyPromoted_Idempotent(t *testing.T) {
+	t.Parallel()
+
+	root, db, projectID, _ := patternsCLIFixture(t)
+	defer db.Close()
+
+	patternID := promoteCLIQualifiedPattern(t, root, projectID, "fp-promote-idem")
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	args := []string{
+		"--project-root", root,
+		"--id", string(patternID),
+		"--note", "first call",
+	}
+	first := runExperiencePatternsPromote(args, stdout, stderr)
+	if first != exitSuccess {
+		t.Fatalf("first promote = %d, stderr=%s", first, stderr.String())
+	}
+	firstLines := strings.Split(strings.TrimRight(stdout.String(), "\n"), "\n")
+	firstJSON := firstLines[len(firstLines)-1]
+	var firstOut experiencePatternsOutput
+	if err := json.Unmarshal([]byte(firstJSON), &firstOut); err != nil {
+		t.Fatalf("Unmarshal first: %v\nraw=%s", err, firstJSON)
+	}
+	if firstOut.Result == nil || firstOut.Result.LearningID == "" {
+		t.Fatalf("first Result.LearningID is empty")
+	}
+	firstLearningID := firstOut.Result.LearningID
+	firstAuditID := firstOut.Result.AuditID
+
+	// Second call: stdout/stderr are reused buffers so the marshalled
+	// output stacks. We capture the second invocation in fresh
+	// buffers to keep the assertions tight.
+	stdout2 := &bytes.Buffer{}
+	stderr2 := &bytes.Buffer{}
+	second := runExperiencePatternsPromote(args, stdout2, stderr2)
+	if second != exitSuccess {
+		t.Fatalf("second promote (idempotent) = %d, stderr=%s", second, stderr2.String())
+	}
+	var secondOut experiencePatternsOutput
+	if err := json.Unmarshal(stdout2.Bytes(), &secondOut); err != nil {
+		t.Fatalf("Unmarshal second: %v\nraw=%s", err, stdout2.String())
+	}
+	if secondOut.Result == nil {
+		t.Fatalf("second Result is nil")
+	}
+	if secondOut.Result.WasNew {
+		t.Fatalf("second Result.WasNew = true, want false (idempotent)")
+	}
+	if secondOut.Result.LearningID != firstLearningID {
+		t.Fatalf("second Result.LearningID = %s, want %s (same as first)", secondOut.Result.LearningID, firstLearningID)
+	}
+	if secondOut.Result.AuditID != firstAuditID {
+		t.Fatalf("second Result.AuditID = %s, want %s (same as first)", secondOut.Result.AuditID, firstAuditID)
+	}
+}
+
+// TestRunExperiencePatternsPromote_NoteTooLarge verifies the
+// invalid_argument envelope when --note exceeds
+// promotion.MaxPromotionNoteBytes.
+func TestRunExperiencePatternsPromote_NoteTooLarge(t *testing.T) {
+	t.Parallel()
+
+	root, db, projectID, _ := patternsCLIFixture(t)
+	defer db.Close()
+
+	patternID := promoteCLIQualifiedPattern(t, root, projectID, "fp-promote-too-large")
+
+	hugeNote := make([]byte, promotion.MaxPromotionNoteBytes+1)
+	for i := range hugeNote {
+		hugeNote[i] = 'n'
+	}
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	code := runExperiencePatternsPromote([]string{
+		"--project-root", root,
+		"--id", string(patternID),
+		"--note", string(hugeNote),
+	}, stdout, stderr)
+	if code == exitSuccess {
+		t.Fatalf("promote with oversized --note = success, want error")
+	}
+	if !strings.Contains(stderr.String(), "invalid_argument") {
+		t.Fatalf("stderr = %q, want invalid_argument", stderr.String())
 	}
 }
