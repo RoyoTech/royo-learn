@@ -1,0 +1,98 @@
+[
+  {
+    "id": "es-001",
+    "lang": "es",
+    "text": "inyeccion FTS",
+    "expected_ids": ["L-es-002", "L-es-005"],
+    "relevance": "high",
+    "note": "Two learnings directly cover FTS5 injection. Both should rank top by BM25; L-es-005 also matches on retrieval_terms."
+  },
+  {
+    "id": "es-002",
+    "lang": "es",
+    "text": "path traversal",
+    "expected_ids": ["L-es-003"],
+    "relevance": "high",
+    "note": "Single high-relevance match. title_exact boosts it; no false positives expected."
+  },
+  {
+    "id": "es-003",
+    "lang": "es",
+    "text": "decay recencia ranking",
+    "expected_ids": ["L-es-004"],
+    "relevance": "high",
+    "note": "Single high-relevance match on the recency-decay learning."
+  },
+  {
+    "id": "es-004",
+    "lang": "es",
+    "text": "AND operator",
+    "expected_ids": [],
+    "relevance": "n/a",
+    "note": "After sanitization both 'AND' and 'operator' survive; the FTS5 phrase query returns no rows because no learning mentions 'AND operator' verbatim."
+  },
+  {
+    "id": "es-005",
+    "lang": "es",
+    "text": "../etc/passwd",
+    "expected_ids": [],
+    "relevance": "low",
+    "note": "Sanitization drops '..' but 'etc' and 'passwd' survive. No learning contains both, so result is empty."
+  },
+  {
+    "id": "es-006",
+    "lang": "es",
+    "text": "score cli",
+    "expected_ids": ["L-es-014"],
+    "relevance": "high",
+    "note": "Direct hit on the user-visible-score learning."
+  },
+  {
+    "id": "en-001",
+    "lang": "en",
+    "text": "FTS5 injection",
+    "expected_ids": ["L-en-002", "L-en-005"],
+    "relevance": "high",
+    "note": "Two direct matches on FTS5 injection in English."
+  },
+  {
+    "id": "en-002",
+    "lang": "en",
+    "text": "path traversal",
+    "expected_ids": ["L-en-003"],
+    "relevance": "high",
+    "note": "Single high-relevance match on the path-traversal learning."
+  },
+  {
+    "id": "en-003",
+    "lang": "en",
+    "text": "tiebreaker ranking",
+    "expected_ids": ["L-en-006"],
+    "relevance": "high",
+    "note": "Single direct match on the tiebreaker learning."
+  },
+  {
+    "id": "en-004",
+    "lang": "en",
+    "text": "stemmer unicode",
+    "expected_ids": ["L-en-012", "L-en-001"],
+    "relevance": "medium",
+    "note": "L-en-012 is the canonical stemmer/unicode note; L-en-001 also mentions unicode."
+  },
+  {
+    "id": "en-005",
+    "lang": "en",
+    "text": "score visible",
+    "expected_ids": ["L-en-014"],
+    "relevance": "high",
+    "note": "Direct hit on the user-visible-score learning."
+  },
+  {
+    "id": "en-006",
+    "lang": "en",
+    "text": "no_match_xyzzy_12345",
+    "expected_ids": [],
+    "relevance": "n/a",
+    "note": "Sanitization yields a single term; no learning contains it; result is empty (exit 0)."
+  }
+]

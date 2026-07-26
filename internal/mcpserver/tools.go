@@ -19,6 +19,7 @@ import (
 	"agent-royo-learn/internal/experience/trace"
 	"agent-royo-learn/internal/publish"
 	"agent-royo-learn/internal/recurrence"
+	"agent-royo-learn/internal/retrieval"
 	"agent-royo-learn/internal/storage"
 
 	"agent-royo-learn/internal/experience/promotion"
@@ -190,9 +191,10 @@ type actorInput struct {
 }
 
 type searchLearningsInput struct {
-	Query  string `json:"query" jsonschema:"required,search query"`
-	Limit  int    `json:"limit,omitempty"`
-	Offset int    `json:"offset,omitempty"`
+	Query             string `json:"query" jsonschema:"required,search query"`
+	Limit             int    `json:"limit,omitempty"`
+	Offset            int    `json:"offset,omitempty"`
+	IncludeComponents bool   `json:"include_components,omitempty" jsonschema:"include score_components per hit (default false to preserve existing clients)"`
 }
 
 type curateLearningInput struct {
@@ -484,18 +486,30 @@ func handleSearchLearnings(srv *Server) func(ctx context.Context, req *mcp.CallT
 			return toolError("invalid_argument", "query is required")
 		}
 
-		results, err := storage.Search(ctx, srv.db, srv.projectID, in.Query)
+		svc := retrieval.NewService(retrieval.NewRepository(srv.db), retrieval.DefaultWeights())
+		res, err := svc.Search(ctx, retrieval.Query{
+			Text:      in.Query,
+			ProjectID: srv.projectID,
+			Limit:     in.Limit,
+		})
 		if err != nil {
 			return toolDomainError(err, "search_failed")
 		}
 
-		if in.Limit > 0 && in.Limit < len(results) {
-			results = results[:in.Limit]
-		}
-
-		items := make([]map[string]any, 0, len(results))
-		for _, l := range results {
-			items = append(items, learningToMap(l))
+		items := make([]map[string]any, 0, len(res.Hits))
+		for _, h := range res.Hits {
+			m := learningToMap(h.Learning)
+			m["score"] = h.Score
+			if in.IncludeComponents {
+				m["score_components"] = map[string]float64{
+					"bm25":            h.Components.BM25,
+					"retrieval_terms": h.Components.RetrievalTerms,
+					"title_exact":     h.Components.TitleExact,
+					"evidence_level":  h.Components.EvidenceLevel,
+					"recency":         h.Components.Recency,
+				}
+			}
+			items = append(items, m)
 		}
 		return toolResultJSON(items)
 	}

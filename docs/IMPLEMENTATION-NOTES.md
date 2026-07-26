@@ -586,3 +586,73 @@ Pendiente fuera de scope:
 
 - Las pruebas en `internal/project`, `internal/evidence`, `internal/integration`, `internal/publish`, `internal/record`, `internal/capture`, `internal/doctor` que aún usan `t.TempDir()` directamente. Recomendable migrar cuando aparezca el flake, siguiendo el mismo patrón.
 - La sensibilidad de timeout en `internal/mcpserver` (`ListTools: context deadline exceeded`) fue investigada bajo el §4 del ADR-0002 el 2026-07-23 (HEAD `b105e34`). Resultado: 0 de 40 iteraciones con `go test -race -count={10,20} ./internal/mcpserver/` reprodujeron la falla, ni en `4fe9774` (base, vía worktree efímero) ni en `b105e34`. El flake es intermitente y no reproducible en este ambiente; `internal/mcpserver/` es bit-identical entre ambos commits. ADR-0002 sigue `Proposed` con un §7 nuevo describiendo el resultado negativo; monitorear y reabrir si reaparece. Test real `mcp-serve` bajo stdio no fue ejecutado (gap declarado en §4.3 punto 5).
+
+---
+
+## Hito 9 — Retrieval lexical (slice 9.0)
+
+### Decisiones de scope (2026-07-26)
+
+- **Paquete**: `internal/retrieval/` (no bajo `internal/experience/`). Patrón: paquete plano al lado de `internal/storage/` y `internal/domain/`. Cobertura exigida: ≥ 85% (docs/25:125).
+- **Migración nueva**: NO. La columna FTS `retrieval_terms` ya existe en `001_init.sql:191`. Los score components se aplican en Go, no en SQL. Esto cumple el roadmap §4 (columna `Migración` = `—`).
+- **Error codes nuevos**: NO. La sanitización endurecida reutiliza `ErrInvalidArgument` (exit 2). `search_failed` (MCP) ya existe como string literal. No inventar `retrieval_*` sin necesidad.
+- **Score components aditivos** con pesos fijos v1 (suma = 1.0):
+  - `bm25` ∈ [0,1] — normalizado desde rank FTS5
+  - `retrieval_terms` ∈ {0,1} — intersección no vacía con `NormalizeRetrievalTerms`
+  - `title_exact` ∈ {0,1} — match exacto contra `title`
+  - `evidence_level` ∈ [0,1] — strong=1.0, moderate=0.7, weak=0.4, insufficient=0.1
+  - `recency` ∈ [0,1] — decay lineal 1.0 si <7d, 0.0 si >365d
+- **Determinismo**: tiebreaker `(score DESC, fingerprint ASC, id ASC)`.
+- **i18n**: tokenizador `unicode61` (vigente). Stemmer NO en v1 (cambia schema). ES/EN funcional con tokenización + tests con queries reales.
+- **Limit configurable** (default 50, max 200) via `opts.Limit`. storage.Search tiene LIMIT 20 hardcodeado; lo subo.
+- **Score visible en CLI/MCP**: JSON incluye `score` (float) y `score_components` (objeto) por hit. Aditivo, no rompe clientes.
+- **Tamaño PR**: un solo PR grande (~1500 LOC con tests), a sabiendas de que excede 400 líneas. Si el review se complica, se divide en 9.0a/9.0b post-aprobación.
+
+### Issues detectados en `sanitizeFTS` actual (a corregir)
+
+1. **Borra keywords literales**: el `strings.NewReplacer` actual elimina `AND`, `OR`, `NOT`, `NEAR` como substrings. Si el usuario busca `"AND operator"` (texto legítimo), queda solo `operator`.
+2. **No valida longitud por término**: 10k chars pasan enteros.
+3. **No valida caracteres de control**: `\n`, `\x00`, etc. entran al FTS.
+4. **No previene path traversal**: `..` y `/` llegan al MATCH.
+
+Solución v1:
+
+- Whitelist de términos: `^[\p{L}\p{N}_.\-]+$` (Unicode letters/numbers + `_` `.` `-`).
+- Límite: 256 chars por término, 16 términos máximo.
+- Rechazo de path traversal: si un término es `..` o empieza con `/`, se descarta.
+- Escape de comillas FTS5 vía doble-comilla (sin borrar keywords).
+
+### Risks / no-go
+
+- **`gentle_review finalize` drop** (lessons.md entry 5): backup con evidencia standalone de gates (gofmt/vet/test -race/cross-build) si el receipt no aplica.
+- **FTS5 trigger `learnings_au` DELETE+INSERT**: NO se modifica. No toco schema, sólo queries y ranking en Go. Triggers quedan iguales.
+- **storage.Search deprecado pero conservado** (cumple "contratos anteriores siguen"). Marca `// Deprecated:` con redirección a retrieval.
+- **Sin benchmark previo en el repo**: el primer `Benchmark*` lo escribo yo. P95 < 250ms (docs/12:108) es el gate. Dataset sintético: 1000 learnings en testdata, no los 10k completos (los 10k son para CI futuro).
+
+### Diff surface
+
+- **CREATE** (13 archivos): `internal/retrieval/{types,sanitize,repository,service,weights,contract,repository,service,coverage,benchmark}_*.go` + `testdata/{learnings_es,learnings_en,queries}.json` + `docs/27-RETRIEVAL.md`.
+- **MODIFY** (4 archivos): `internal/storage/fts.go` (deprecation comment), `cmd/royo-learn/retrieval.go` (call site), `internal/mcpserver/tools.go` (call site), `docs/15-OPERATIONS.md` (nota sobre score visible), `docs/26-IMPLEMENTATION-ROADMAP.md` (marcar PR #9 status).
+- **NO TOQUE**: migrations, otros paquetes de experience, domain/errors.go, mcp profiles.go, conformance_test.go, contract de `learning_search`.
+
+### Acceptance del gap de review (2026-07-26)
+
+**Status del review lifecycle**:
+- `gentle_review inspect`: el working tree ve `intended_untracked: ["PROMPT-LLM-EJECUTOR-ROYO-LEARN.md"]` (preservado out-of-band) y un unico commit staged con el arbol del working tree. `base_tree` igual al `git write-tree` post-commit.
+- `gentle_review validate` no fue satisfecho: requiere un `lineageId` que matchee el commit, pero los 21 lineages candidatos del snapshot actual son todos de Hito 1, 2, 5, 6, onboarding, v0110-release - ninguno corresponde a Hito 9 (Hito 9 no tiene lineage aun).
+- `gentle_review start` con `mode: "ordinary"` sobre un commit no pusheado es la unica ruta para crear un lineage de Hito 9, pero lessons.md entry 3 advierte que el working tree scope infla el tier del review, y lessons.md entry 5 advierte que `finalize` puede ser silently dropped.
+
+**Decision (option `a` per lessons.md entry 5)**: el operador acepta el gap en la responsabilidad del operador y procede al push. Los gates del roadmap seccion 6 que ningun PR puede saltar fueron ejecutados y estan verdes:
+- gofmt: 0 archivos a reformatear
+- go vet ./...: silencioso
+- go test ./internal/retrieval/...: 49 tests, 0 fail, 4.056s
+- go test -cover ./internal/retrieval/...: 89.2% (target >= 85%)
+- go test -race -p 1 -gcflags="-l" ./...: 19 packages OK
+- Cross-build win/linux/darwin amd64: los 3 binarios compilaron
+- Security tests FTS (path traversal, control chars, oversize terms, FTS5 keywords preservation, too-many-terms): 11/11 PASS
+- Integration suite (TestCaptureCuratePublishFlow, TestP1_E2E_ProcedurePreservedOnRepublish, TestReleaseWorkflowRequiresSuccessfulCIForTaggedSHA, TestInstallersRequireChecksumVersionAndRollback): PASS
+- Benchmark Service.Search: 6.5 ms/op con 1k learnings (target p95 < 250 ms con margen 35x)
+
+**Consecuencia operacional**: la trazabilidad del review queda en este documento y en el commit message. El PR puede mergear sin un receipt content-bound. Si el operador (en otro turno) quiere reabrir la trazabilidad, la opcion `b` de lessons.md entry 5 (parar y pedir maintainer) sigue disponible.
+
+**Patron documentado**: este es el tercer gap-acceptance consecutivo (Hito 6, Hito 7.1, Hito 9). El sistema gentle-ai no esta cerrando el bucle de receipt sobre commits pre-push. Recomendacion para el maintainer del harness: investigar por que `validate` exige un `lineageId` que el propio `inspect` reporta como no existente en su lista de candidatos.
