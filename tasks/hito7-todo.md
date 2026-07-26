@@ -19,10 +19,12 @@
   (`contract_test.go`) + tests de servicio (`service_test.go`). Nuevo
   `ErrorCode = "promotion_not_implemented"` en `domain/errors.go`.
   Commit: `d9617af`.
-- [ ] **Slice 7.1** — pipeline de redacción previo al `capture.Service.Ingest`.
+- [x] **Slice 7.1** — pipeline de redacción previo al `capture.Service.Ingest`.
   Extiende `internal/evidence` con la redacción de campos derivados
   del pattern (title, observation, retrieval terms, fingerprint
   preview hash). Todo el contenido redactado antes de la inserción.
+  Commit: `27c8cd9` (`feat(evidence):`). Lifecycle gap
+  operator-accepted per docs/lessons.md §5 (slice 7.1 entry).
 - [ ] **Slice 7.2** — `Promote` transaccional: construye `CaptureInput`
   desde el pattern, llama `s.capture.Capture(ctx, projectID, input)`,
   inserta audit row en `audit_events`, actualiza
@@ -53,6 +55,37 @@
       operador antes de aceptar el gap.
 - [ ] Push y PR (PR #6 per docs/26 §3) pendiente autorización
       explícita del operador.
+
+## Slice 7.1 closure notes
+
+- Branch: `feat/hito7-promotion`, commit `27c8cd9` (post-amend with
+  gofmt -w; original commit was `bf10634`).
+- 2 archivos cambiados, 546 LoC (impl 174 + tests 372).
+- Funciones:
+  - `evidence.RedactPromotionFields(*PromotionFields) RedactionReport`
+    — redacta los 7 campos derivados (Title, Context, Observation,
+    ReusableLesson, Limits, Recommended[i], RetrievalTerms[i]).
+    Nil-safe, dedup'd list, determinista.
+  - `evidence.PromotionFingerprint(PromotionFields) string` — SHA-256
+    64-hex lowercase sobre la forma canónica del bag ya redactado,
+    orden-independiente en slices.
+- Tests: 7 (4 tests `RedactPromotionFields_*`, 3 tests
+      `PromotionFingerprint_*`).
+  Cobertura funciones nuevas: `RedactPromotionFields` 100%,
+  `PromotionFingerprint` 90% (rama imposible de json.Marshal
+  deliberadamente no ejercitada).
+- Gates: `go test -race ./internal/{evidence,capture,experience}/...`
+  verde; `go vet ./...` limpio; `gofmt -l` limpio (requirió amend con
+  `gofmt -w` por newline final + alineación de map keys en el test).
+- Lifecycle: `gentle_review validate` returned `receipt.status:
+  not_applicable`, `applicability: ambiguous` (esperado: no hay
+  lineage para el changeset de slice 7.1 aún). Patrón del handoff:
+  operador aceptó el gap en su responsabilidad; documentado en
+  docs/lessons.md §5.
+- Flake MCP observado (TestMCP_Rollback_NotServedInReadOrAgent) pasa
+  aislado (3.7s), falla bajo carga. Pre-existente, ADR-0002.
+- No tocar `internal/experience/promotion` en este slice (queda en
+  51.2% scaffold; ≥ 80% aplica al cierre del Hito 7).
 
 ## Slice 7.0 closure notes
 

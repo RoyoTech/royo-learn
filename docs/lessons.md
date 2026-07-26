@@ -230,6 +230,42 @@ not accept the closure-orchestrator's synthesized binding. This
 is consistent with entry 3's "abandon failed with `review
 transaction changed concurrently`" report.
 
+**Occurrence on Hito 7 slice 7.1 (2026-07-25, `27c8cd9`)**: the
+working pattern from Hito 6 held for the second slice. A fresh
+change set on `feat/hito7-promotion` (two new files in
+`internal/evidence/`, pre-`git add`, with the documented PROMPT
+untracked preserved out of band) was submitted to
+`gentle_review validate` for the commit gate. The controller
+returned `applicability: "ambiguous"`, `receipt.status:
+"not_applicable"`, and 21 candidate lineages none of which
+matched the untracked files (the candidates were all Hito 1-2-5-6
+review lineages; Hito 7 has no lineage yet). Same gate behaviour
+as Hito 6. The same option (a) was taken: operator accepted the
+gap at operator responsibility and the commit landed on
+`27c8cd9` after `gofmt -w` reformat. The blocked gates for the
+gap-acceptance reason stay the same as Hito 6: race, vet,
+gofmt, coverage, and (when it lands) cross-build Windows amd64.
+The same flake (TestMCP_Rollback_NotServedInReadOrAgent under
+`go test -race ./...`) reappeared once during the suite run; it
+remains pre-existing and is out of scope for this slice per
+ADR-0002. No new gentle-ai bug surface was uncovered by this
+occurrence.
+
+**Working pattern update (post slice 7.1)**: when starting
+Hito 7 onward, the safer call sequence is
+
+1. `git add` the in-scope files first so the candidate view
+   captures them (entry 3);
+2. `gentle_review inspect` to confirm `intended_untracked` only
+   contains the intentional out-of-band files (PROMPT in this
+   project);
+3. `gentle_review start` with `mode: "ordinary"` and the
+   explicit `intentions` enumerated;
+4. If `finalize` is dropped twice in a row, stop the review
+   loop and ask the operator. The Hito 6 + slice 7.1 pattern
+   shows the fix is unlikely to be retry-driven; the operator
+   acceptance of the gap is the actual gate.
+
 ## Cross-references
 
 - The shell-detection rule (entry 1) and the WSL bypass pattern
