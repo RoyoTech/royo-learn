@@ -68,6 +68,9 @@ const (
 	ErrPatternAlreadyPromoted     ErrorCode = "pattern_already_promoted"
 	ErrPatternFalseCluster        ErrorCode = "pattern_false_cluster"
 	ErrPatternInsufficientSources ErrorCode = "pattern_insufficient_sources"
+
+	// Job engine codes (Hito 8).
+	ErrJobNotFound ErrorCode = "job_not_found"
 )
 
 // AllErrorCodes returns every stable error code modeled by the domain.
@@ -90,6 +93,7 @@ func AllErrorCodes() []ErrorCode {
 		ErrExperienceCommitUnknown,
 		ErrPatternNotFound, ErrPatternNotQualified, ErrPatternAlreadyPromoted,
 		ErrPatternFalseCluster, ErrPatternInsufficientSources,
+		ErrJobNotFound,
 	}
 }
 
@@ -105,7 +109,7 @@ func (c ErrorCode) ExitCode() int {
 	case ErrProjectNotFound, ErrAmbiguousProject, ErrUnknownProject:
 		return 4
 	case ErrLearningNotFound, ErrPreviewNotFound, ErrExperienceSourceNotFound,
-		ErrPatternNotFound:
+		ErrPatternNotFound, ErrJobNotFound:
 		return 5
 	case ErrInvalidTransition:
 		return 6

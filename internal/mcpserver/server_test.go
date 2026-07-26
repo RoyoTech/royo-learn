@@ -252,6 +252,7 @@ func TestListTools_MinimalProfile_LimitedTools(t *testing.T) {
 		"learning_list_patterns": true,
 		"learning_get_pattern":   true,
 		"learning_trace":         true,
+		"experience_jobs_list":   true,
 	}
 
 	for _, tool := range result.Tools {

@@ -26,7 +26,7 @@ type experienceInjectOutput struct {
 
 func runExperience(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		return writeExperienceError(stderr, "invalid_argument", "experience: a subcommand is required: detect, inject, opencode, patterns, trace")
+		return writeExperienceError(stderr, "invalid_argument", "experience: a subcommand is required: detect, inject, opencode, patterns, trace, jobs")
 	}
 	switch args[0] {
 	case "inject":
@@ -39,8 +39,10 @@ func runExperience(args []string, stdout, stderr io.Writer) int {
 		return runExperiencePatterns(args[1:], stdout, stderr)
 	case "trace":
 		return runExperienceTrace(args[1:], stdout, stderr)
+	case "jobs":
+		return runExperienceJobs(args[1:], stdout, stderr)
 	default:
-		return writeExperienceError(stderr, "invalid_argument", "experience: unknown subcommand %q: must be detect, inject, opencode, patterns, or trace", args[0])
+		return writeExperienceError(stderr, "invalid_argument", "experience: unknown subcommand %q: must be detect, inject, opencode, patterns, trace, or jobs", args[0])
 	}
 }
 
