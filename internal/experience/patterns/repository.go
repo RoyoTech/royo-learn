@@ -280,6 +280,79 @@ func (r *Repository) AddMember(
 	return &m, nil
 }
 
+// LookupPromotionState returns the (status, proposed_learning_id) pair
+// the idempotency lookup pre-insert needs. The lookup is intentionally
+// small: it returns only the two columns that govern the promotion
+// bridge so the caller can short-circuit on the already-promoted state
+// without touching Capture or the rest of the pattern fields. It uses
+// the same read-tx pattern as GetByID so the result is consistent with
+// the snapshot SQLite serves to the caller.
+//
+// Returns ErrPatternNotFound when the id does not match any persisted
+// pattern. Returns (PatternObserved, nil, nil) and friends for the
+// non-promoted states so the caller can dispatch on the status enum
+// without re-querying.
+func (r *Repository) LookupPromotionState(ctx context.Context, patternID domain.ExperiencePatternID) (PatternStatus, *domain.LearningID, error) {
+	if patternID == "" {
+		return "", nil, domain.NewValidationError(domain.ErrInvalidArgument, "patterns: id is required")
+	}
+	tx, err := r.resolveTx(ctx, false)
+	if err != nil {
+		return "", nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	var status string
+	var proposedLearningID sql.NullString
+	row := tx.QueryRowContext(ctx,
+		`SELECT status, proposed_learning_id FROM experience_patterns WHERE id = ?`,
+		string(patternID))
+	if err := row.Scan(&status, &proposedLearningID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil, ErrPatternNotFound
+		}
+		return "", nil, fmt.Errorf("patterns: lookup promotion state: %w", err)
+	}
+	var learningID *domain.LearningID
+	if proposedLearningID.Valid {
+		id := domain.LearningID(proposedLearningID.String)
+		learningID = &id
+	}
+	return PatternStatus(status), learningID, nil
+}
+
+// LookupPromotionAuditID returns the id of the earliest
+// experience_pattern_promoted audit row for the pattern, or ("", false,
+// nil) when no such row exists. The lookup is bounded by
+// (entity_id, operation) and orders by sequence ASC so the first
+// promotion's audit row is returned deterministically even after a
+// slice 7.2 / pre-slice-7.3 collision. The (AuditEventID, bool, error)
+// triple lets the caller distinguish the "no row" case from a real
+// error without depending on a sentinel.
+func (r *Repository) LookupPromotionAuditID(ctx context.Context, patternID domain.ExperiencePatternID) (domain.AuditEventID, bool, error) {
+	if patternID == "" {
+		return "", false, domain.NewValidationError(domain.ErrInvalidArgument, "patterns: id is required")
+	}
+	tx, err := r.resolveTx(ctx, false)
+	if err != nil {
+		return "", false, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	var auditID string
+	row := tx.QueryRowContext(ctx, `SELECT id FROM audit_events
+		WHERE entity_id = ? AND operation = ?
+		ORDER BY sequence ASC LIMIT 1`,
+		string(patternID), "experience_pattern_promoted")
+	if err := row.Scan(&auditID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("patterns: lookup promotion audit: %w", err)
+	}
+	return domain.AuditEventID(auditID), true, nil
+}
+
 // GetByFingerprint returns the pattern with the supplied
 // (project_id, fingerprint), or ErrPatternNotFound.
 func (r *Repository) GetByFingerprint(ctx context.Context, projectID domain.ProjectID, fingerprint string) (*ExperiencePattern, error) {

@@ -34,6 +34,7 @@ package promotion
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"agent-royo-learn/internal/capture"
 	"agent-royo-learn/internal/domain"
@@ -42,10 +43,32 @@ import (
 	"agent-royo-learn/internal/storage"
 )
 
+// patternsFacade is the minimal surface the promotion Service uses
+// from patterns. It is unexported on purpose: production wiring keeps
+// the *patterns.Service signature, while tests can inject a stub that
+// simulates the race window between the lookup pre-insert and the
+// CAS UPDATE inside PromoteAtomic without standing up a concurrent
+// transaction.
+type patternsFacade interface {
+	Get(ctx context.Context, id domain.ExperiencePatternID) (*patterns.ExperiencePattern, error)
+	LookupPromotionState(ctx context.Context, id domain.ExperiencePatternID) (patterns.PatternStatus, *domain.LearningID, error)
+	LookupPromotionAuditID(ctx context.Context, id domain.ExperiencePatternID) (domain.AuditEventID, bool, error)
+	PromoteAtomic(
+		ctx context.Context,
+		patternID domain.ExperiencePatternID,
+		learningID domain.LearningID,
+		normalizedHash string,
+		actor domain.Actor,
+		redactionReport evidence.RedactionReport,
+		note string,
+		promotionFingerprint string,
+	) (domain.AuditEventID, error)
+}
+
 // Service is the production PromotionService implementation.
 type Service struct {
 	capture  *capture.Service
-	patterns *patterns.Service
+	patterns patternsFacade
 	db       *storage.DB
 }
 
@@ -67,17 +90,37 @@ func NewService(c *capture.Service, p *patterns.Service, db *storage.DB) (*Servi
 	return &Service{capture: c, patterns: p, db: db}, nil
 }
 
-// Promote is the slice 7.2 transactional implementation. It validates
-// the input, looks up the pattern, runs the redaction pipeline, hands
-// the redacted bag to capture.Service, and finally stamps the
-// promotion audit row through patterns.Service.PromoteAtomic.
+// newServiceWithPatterns is the test-only constructor that lets a
+// test inject a stub patternsFacade. Production wiring uses
+// NewService; the unexported helper exists so the slice 7.3 race
+// test can simulate the lookup-vs-CAS-update window without
+// standing up a concurrent transaction.
+func newServiceWithPatterns(c *capture.Service, p patternsFacade, db *storage.DB) (*Service, error) {
+	if c == nil {
+		return nil, ErrPromotionInvalidArgument
+	}
+	if p == nil {
+		return nil, ErrPromotionInvalidArgument
+	}
+	if db == nil {
+		return nil, ErrPromotionInvalidArgument
+	}
+	return &Service{capture: c, patterns: p, db: db}, nil
+}
+
+// Promote is the slice 7.3 idempotent implementation. It validates the
+// input, runs the lookup pre-insert, and either short-circuits with
+// the existing learning (was_new=false), surfaces the typed error for
+// the orphan / not-eligible cases, or runs the two-phase transactional
+// pipeline (Capture + PromoteAtomic) for the happy path.
 //
 // The two phases are idempotent: Phase 1 keys Capture on
 // "promotion:" + pattern.Fingerprint so a retry collapses onto the
 // existing Learning; Phase 2's CAS guard on the pattern revision
-// rejects a stale caller with ErrPatternInsufficientSources and the
-// short-circuit on status='promoted' returns
-// ErrPromotionAlreadyPromoted before any work happens.
+// rejects a stale caller with ErrPatternInsufficientSources. The
+// lookup pre-insert catches the well-known "already promoted" case
+// BEFORE Capture runs, so the second call does not even attempt to
+// insert a new learning or audit row.
 func (s *Service) Promote(ctx context.Context, projectID domain.ProjectID, input *PromotionInput) (*PromotionResult, error) {
 	if s == nil {
 		return nil, ErrPromotionInvalidArgument
@@ -94,10 +137,66 @@ func (s *Service) Promote(ctx context.Context, projectID domain.ProjectID, input
 		return nil, ErrPromotionInvalidArgument
 	}
 
-	// Look up the pattern. Slice 6.4's patterns.Service.Get returns
-	// patterns.ErrPatternNotFound when the id is unknown; we rewrap
-	// the typed error so the CLI/MCP layer keeps a single source of
-	// truth for the canonical code (docs/17-ERROR-CODES.md).
+	// Lookup pre-insert (slice 7.3): the lookup returns only
+	// (status, proposed_learning_id) so the Service can short-circuit
+	// on the already-promoted case without fetching the rest of the
+	// pattern. The lookup is the beginning of the idempotency guard.
+	status, existingLearningID, err := s.patterns.LookupPromotionState(ctx, input.PatternID)
+	if err != nil {
+		if patterns.ErrorIs(err, patterns.ErrPatternNotFound) {
+			return nil, ErrPromotionPatternNotFound
+		}
+		return nil, err
+	}
+
+	// Idempotent return: the pattern is already promoted and the
+	// proposed_learning_id is populated. We return the existing
+	// learning without inserting a new one and without stamping a
+	// second audit row. The AuditID is recovered from the audit_events
+	// table so the observability envelope for the idempotent return
+	// still carries the original audit row (a defensive read; the
+	// (AuditEventID, false, nil) tuple degrades to AuditID="" if no
+	// row exists, which is the right behaviour for a freshly-created
+	// orphan-promoted state).
+	if status == patterns.PatternPromoted && existingLearningID != nil {
+		auditID, _, _ := s.patterns.LookupPromotionAuditID(ctx, input.PatternID)
+		return &PromotionResult{
+			PatternID:        input.PatternID,
+			LearningID:       *existingLearningID,
+			WasNew:           false,
+			AuditID:          auditID,
+			RedactionSummary: RedactionSummary{},
+		}, nil
+	}
+
+	// Orphan promoted state: status='promoted' but
+	// proposed_learning_id is NULL. The app invariant says promoted
+	// implies proposed_learning_id IS NOT NULL, so this is an
+	// inconsistent state — the lookup cannot be trusted and the
+	// Service must not attempt to fabricate a learning. Surface the
+	// slice 7.2 typed error and log a warning so an operator can
+	// investigate the orphan.
+	if status == patterns.PatternPromoted && existingLearningID == nil {
+		slog.Default().Warn("promotion: orphan promoted state with null learning_id",
+			"pattern_id", string(input.PatternID))
+		return nil, ErrPromotionAlreadyPromoted
+	}
+
+	// Status guard. Only PatternQualified is eligible; any other
+	// status (observed, dismissed, stale) surfaces
+	// ErrPromotionNotEligible before any DB write.
+	switch status {
+	case patterns.PatternQualified:
+		// Fall through to the transactional pipeline.
+	default:
+		return nil, ErrPromotionNotEligible
+	}
+
+	// Fetch the full pattern: the lookup returned only status +
+	// proposed_learning_id, but Capture + ToPromotionFields need
+	// Fingerprint, Title, Summary, etc. The Get is a cheap read on
+	// the same connection and is run only on the non-idempotent path,
+	// so the cost is paid once per first-time promotion.
 	current, err := s.patterns.Get(ctx, input.PatternID)
 	if err != nil {
 		if patterns.ErrorIs(err, patterns.ErrPatternNotFound) {
@@ -107,20 +206,6 @@ func (s *Service) Promote(ctx context.Context, projectID domain.ProjectID, input
 	}
 	if current == nil {
 		return nil, ErrPromotionPatternNotFound
-	}
-
-	// Status guard. Only PatternQualified is eligible; a second
-	// Promote on the same pattern sees PatternPromoted and returns
-	// the typed terminal-state error so the CLI can render a stable
-	// envelope. Any other status (observed, dismissed, stale)
-	// surfaces ErrPromotionNotEligible before any DB write.
-	switch current.Status {
-	case patterns.PatternPromoted:
-		return nil, ErrPromotionAlreadyPromoted
-	case patterns.PatternQualified:
-		// Fall through to the transactional pipeline.
-	default:
-		return nil, ErrPromotionNotEligible
 	}
 
 	// Build the deterministic PromotionFields bag from the pattern,

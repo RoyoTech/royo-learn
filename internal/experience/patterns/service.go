@@ -164,6 +164,29 @@ func (s *Service) Get(ctx context.Context, id domain.ExperiencePatternID) (*Expe
 	return s.repo.GetByID(ctx, id)
 }
 
+// LookupPromotionState returns the (status, proposed_learning_id) pair
+// the promotion idempotency lookup needs. It is a thin wrapper over
+// Repository.LookupPromotionState so the only surface that needs to
+// learn about the promotion pipeline is promotion.Service.
+func (s *Service) LookupPromotionState(ctx context.Context, patternID domain.ExperiencePatternID) (PatternStatus, *domain.LearningID, error) {
+	if s == nil || s.repo == nil {
+		return "", nil, domain.NewValidationError(domain.ErrInvalidArgument, "patterns: service is not initialised")
+	}
+	return s.repo.LookupPromotionState(ctx, patternID)
+}
+
+// LookupPromotionAuditID returns the id of the earliest
+// experience_pattern_promoted audit row for the pattern, or ("", false,
+// nil) when no such row exists. Promotion uses the lookup to recover
+// the AuditID of the first promote so the idempotent return preserves
+// the observability envelope.
+func (s *Service) LookupPromotionAuditID(ctx context.Context, patternID domain.ExperiencePatternID) (domain.AuditEventID, bool, error) {
+	if s == nil || s.repo == nil {
+		return "", false, domain.NewValidationError(domain.ErrInvalidArgument, "patterns: service is not initialised")
+	}
+	return s.repo.LookupPromotionAuditID(ctx, patternID)
+}
+
 // PromoteAtomic delegates to the repository so the promotion package
 // can record the CAS UPDATE on experience_patterns and the matching
 // experience_pattern_promoted audit row in a single SQLite

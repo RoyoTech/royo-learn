@@ -21,6 +21,7 @@ import (
 
 	"agent-royo-learn/internal/capture"
 	"agent-royo-learn/internal/domain"
+	"agent-royo-learn/internal/evidence"
 	"agent-royo-learn/internal/experience/patterns"
 	"agent-royo-learn/internal/storage"
 	"agent-royo-learn/internal/storage/storagetest"
@@ -404,39 +405,99 @@ func TestPromote_AuditRow_HasPromoteOperationAndCorrectShape(t *testing.T) {
 	}
 }
 
-// TestPromote_CASConflict_ReturnsTypedError exercises the
-// second-call collision: once a pattern is promoted, the second
-// Promote call sees status='promoted' and must surface
-// ErrPromotionAlreadyPromoted. The Learning written by the first call
-// must NOT be duplicated.
-func TestPromote_CASConflict_ReturnsTypedError(t *testing.T) {
+// TestPromote_CASConflict_RaceReturnsInsufficientSources simulates
+// the race window between the lookup pre-insert and the CAS UPDATE
+// inside PromoteAtomic. The lookup returns qualified (as the
+// pattern was at that moment), but the CAS UPDATE fails because
+// another transaction incremented revision. The Service must surface
+// the typed error from PromoteAtomic as-is so the caller can use
+// errors.Is(patterns.ErrPatternInsufficientSources) to detect the
+// race.
+//
+// The race window is reproduced with a stub patternsFacade rather
+// than real concurrency so the test is deterministic and does not
+// race the go test runner.
+func TestPromote_CASConflict_RaceReturnsInsufficientSources(t *testing.T) {
 	t.Parallel()
 
-	fx := newPromotionFixture(t, patterns.PatternQualified)
+	db := storagetest.OpenTemp(t)
+	projectID := domain.ProjectID(uuid.Must(uuid.NewV7()).String())
+	tx, err := db.DB.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := storage.SaveProject(context.Background(), tx, &domain.Project{
+		ID:            projectID,
+		ProjectKey:    "race-" + string(projectID),
+		DisplayName:   "Race",
+		CanonicalPath: t.TempDir(),
+		Fingerprint:   "fp-" + string(projectID),
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}); err != nil {
+		tx.Rollback()
+		t.Fatalf("SaveProject: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
 
-	first, err := fx.promotion.Promote(context.Background(), fx.projectID, &PromotionInput{
-		PatternID: fx.pattern.ID,
-		Actor:     domain.Actor{Kind: "user", Name: "operator"},
+	recordsDir := testutil.TempDir(t)
+	captureSvc := capture.NewService(db, recordsDir)
+
+	repo := patterns.NewRepository(db)
+	now2 := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	fingerprint := "fp-race-" + string(projectID)
+	saved, err := repo.SavePattern(context.Background(), patterns.ExperiencePattern{
+		ID:               domain.ExperiencePatternID("pat-" + fingerprint),
+		ProjectID:        projectID,
+		Status:           patterns.PatternQualified,
+		Kind:             domain.EventTestFailure,
+		Fingerprint:      fingerprint,
+		Title:            "race title " + fingerprint,
+		Summary:          "race summary",
+		DistinctSessions: 3,
+		DistinctDays:     2,
+		OccurrenceCount:  4,
+		FirstSeenAt:      now2,
+		LastSeenAt:       now2,
+		DetectorVersion:  "v1",
+		InputDigest:      "digest-" + fingerprint,
+		CreatedAt:        now2,
+		UpdatedAt:        now2,
 	})
 	if err != nil {
-		t.Fatalf("first Promote: %v", err)
+		t.Fatalf("SavePattern: %v", err)
 	}
 
-	_, err = fx.promotion.Promote(context.Background(), fx.projectID, &PromotionInput{
-		PatternID: fx.pattern.ID,
+	// Stub: lookup returns (qualified, nil) like the real DB would at
+	// the race window; PromoteAtomic returns
+	// ErrPatternInsufficientSources as the CAS guard would in a
+	// concurrent transition.
+	stub := &stubPatternsLookup{
+		lookupStatus: patterns.PatternQualified,
+		pattern:      saved,
+		promoteErr:   patterns.ErrPatternInsufficientSources,
+	}
+
+	promotion, err := newServiceWithPatterns(captureSvc, stub, db)
+	if err != nil {
+		t.Fatalf("newServiceWithPatterns: %v", err)
+	}
+
+	res, perr := promotion.Promote(context.Background(), projectID, &PromotionInput{
+		PatternID: saved.ID,
 		Actor:     domain.Actor{Kind: "user", Name: "operator"},
 	})
-	if !errors.Is(err, ErrPromotionAlreadyPromoted) {
-		t.Fatalf("second Promote error = %v, want ErrPromotionAlreadyPromoted", err)
+	if !errors.Is(perr, patterns.ErrPatternInsufficientSources) {
+		t.Fatalf("Promote error = %v, want ErrPatternInsufficientSources", perr)
 	}
-
-	// Only one Learning exists in the DB (idempotent retry collapses).
-	var count int
-	if err := fx.db.DB.QueryRow(`SELECT COUNT(*) FROM learnings WHERE id = ?`, string(first.LearningID)).Scan(&count); err != nil {
-		t.Fatalf("count learnings: %v", err)
+	if res != nil {
+		t.Fatalf("Promote returned %v, want nil", res)
 	}
-	if count != 1 {
-		t.Fatalf("learnings rows for %q = %d, want 1", first.LearningID, count)
+	if stub.promoteCalls != 1 {
+		t.Fatalf("PromoteAtomic calls = %d, want 1", stub.promoteCalls)
 	}
 }
 
@@ -664,4 +725,432 @@ func TestPromote_PromotionFingerprint_StableAcrossCalls(t *testing.T) {
 		}
 	}
 	_ = first.LearningID
+}
+
+// =========================================================================
+// Slice 7.3 — idempotency lookup pre-insert.
+// =========================================================================
+//
+// The tests below pin the slice 7.3 behavior:
+//
+//   - Second Promote on a promoted pattern returns success with
+//     WasNew=false, LearningID from the lookup, and AuditID from the
+//     earliest promote audit row. No new learning, no new audit row.
+//   - Orphan promoted state (status='promoted' with proposed_learning_id
+//     NULL) returns ErrPromotionAlreadyPromoted and logs a warning.
+//   - Race window (lookup returns qualified, CAS UPDATE fails) returns
+//     ErrPatternInsufficientSources without wrapping so the caller can
+//     compare with errors.Is.
+
+// stubPatternsLookup is the test-only patternsFacade simulations
+// use to exercise the race window between the lookup pre-insert and
+// the CAS UPDATE inside PromoteAtomic. The struct is intentionally
+// sequential: only the race test creates it, and that test runs
+// single-goroutine.
+type stubPatternsLookup struct {
+	lookupStatus     patterns.PatternStatus
+	lookupLearningID *domain.LearningID
+	lookupErr        error
+	pattern          *patterns.ExperiencePattern
+	getErr           error
+	promoteErr       error
+	promoteCalls     int
+	promoteAuditID   domain.AuditEventID
+}
+
+func (s *stubPatternsLookup) Get(ctx context.Context, id domain.ExperiencePatternID) (*patterns.ExperiencePattern, error) {
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	if s.pattern == nil {
+		return nil, patterns.ErrPatternNotFound
+	}
+	return s.pattern, nil
+}
+
+func (s *stubPatternsLookup) LookupPromotionState(ctx context.Context, id domain.ExperiencePatternID) (patterns.PatternStatus, *domain.LearningID, error) {
+	if s.lookupErr != nil {
+		return "", nil, s.lookupErr
+	}
+	return s.lookupStatus, s.lookupLearningID, nil
+}
+
+func (s *stubPatternsLookup) LookupPromotionAuditID(ctx context.Context, id domain.ExperiencePatternID) (domain.AuditEventID, bool, error) {
+	if s.promoteAuditID == "" {
+		return "", false, nil
+	}
+	return s.promoteAuditID, true, nil
+}
+
+func (s *stubPatternsLookup) PromoteAtomic(
+	ctx context.Context,
+	patternID domain.ExperiencePatternID,
+	learningID domain.LearningID,
+	normalizedHash string,
+	actor domain.Actor,
+	redactionReport evidence.RedactionReport,
+	note string,
+	promotionFingerprint string,
+) (domain.AuditEventID, error) {
+	s.promoteCalls++
+	if s.promoteErr != nil {
+		return "", s.promoteErr
+	}
+	return "", nil
+}
+
+// newTestPromotionWithStub wires a *Service backed by the stub
+// patternsFacade plus a real capture.Service. It is the shared
+// scaffolding the slice 7.3 stub-driven tests use.
+func newTestPromotionWithStub(t *testing.T, stub *stubPatternsLookup) (*Service, *storage.DB, domain.ProjectID, *patterns.ExperiencePattern) {
+	t.Helper()
+	db := storagetest.OpenTemp(t)
+	projectID := domain.ProjectID(uuid.Must(uuid.NewV7()).String())
+	tx, err := db.DB.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := storage.SaveProject(context.Background(), tx, &domain.Project{
+		ID:            projectID,
+		ProjectKey:    "stub-" + string(projectID),
+		DisplayName:   "Stub",
+		CanonicalPath: t.TempDir(),
+		Fingerprint:   "fp-" + string(projectID),
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}); err != nil {
+		tx.Rollback()
+		t.Fatalf("SaveProject: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	recordsDir := testutil.TempDir(t)
+	captureSvc := capture.NewService(db, recordsDir)
+
+	promotion, err := newServiceWithPatterns(captureSvc, stub, db)
+	if err != nil {
+		t.Fatalf("newServiceWithPatterns: %v", err)
+	}
+	return promotion, db, projectID, stub.pattern
+}
+
+// TestPromote_SecondCall_ReturnsExistingLearning pins the new
+// behavior: a second Promote on the same promoted pattern returns
+// success with WasNew=false and the same LearningID and AuditID as
+// the first call. The lookup pre-insert short-circuits Capture and
+// PromoteAtomic.
+func TestPromote_SecondCall_ReturnsExistingLearning(t *testing.T) {
+	t.Parallel()
+
+	fx := newPromotionFixture(t, patterns.PatternQualified)
+
+	first, err := fx.promotion.Promote(context.Background(), fx.projectID, &PromotionInput{
+		PatternID: fx.pattern.ID,
+		Actor:     domain.Actor{Kind: "user", Name: "operator"},
+	})
+	if err != nil {
+		t.Fatalf("first Promote: %v", err)
+	}
+	if first == nil {
+		t.Fatal("first Promote returned nil")
+	}
+	if !first.WasNew {
+		t.Fatalf("first.WasNew = false, want true")
+	}
+
+	second, err := fx.promotion.Promote(context.Background(), fx.projectID, &PromotionInput{
+		PatternID: fx.pattern.ID,
+		Actor:     domain.Actor{Kind: "user", Name: "operator"},
+	})
+	if err != nil {
+		t.Fatalf("second Promote: %v", err)
+	}
+	if second == nil {
+		t.Fatal("second Promote returned nil")
+	}
+	if second.WasNew {
+		t.Fatalf("second.WasNew = true, want false (idempotent lookup)")
+	}
+	if second.LearningID != first.LearningID {
+		t.Fatalf("second.LearningID = %q, want %q", second.LearningID, first.LearningID)
+	}
+	if second.AuditID != first.AuditID {
+		t.Fatalf("second.AuditID = %q, want %q", second.AuditID, first.AuditID)
+	}
+}
+
+// TestPromote_SecondCall_DoesNotCreateNewLearning pins the
+// idempotency invariant: after two Promote calls on the same
+// pattern, exactly one learnings row exists for the promotion
+// idempotency key. The second call does not insert a new learning.
+func TestPromote_SecondCall_DoesNotCreateNewLearning(t *testing.T) {
+	t.Parallel()
+
+	fx := newPromotionFixture(t, patterns.PatternQualified)
+
+	first, err := fx.promotion.Promote(context.Background(), fx.projectID, &PromotionInput{
+		PatternID: fx.pattern.ID,
+		Actor:     domain.Actor{Kind: "user", Name: "operator"},
+	})
+	if err != nil {
+		t.Fatalf("first Promote: %v", err)
+	}
+
+	if _, err := fx.promotion.Promote(context.Background(), fx.projectID, &PromotionInput{
+		PatternID: fx.pattern.ID,
+		Actor:     domain.Actor{Kind: "user", Name: "operator"},
+	}); err != nil {
+		t.Fatalf("second Promote: %v", err)
+	}
+
+	var count int
+	if err := fx.db.DB.QueryRow(`SELECT COUNT(*) FROM learnings WHERE idempotency_key = ?`,
+		"promotion:"+fx.pattern.Fingerprint).Scan(&count); err != nil {
+		t.Fatalf("count learnings: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("learnings rows with idempotency_key = %d, want 1", count)
+	}
+	_ = first
+}
+
+// TestPromote_SecondCall_DoesNotInsertSecondAuditRow pins the
+// audit-evidence invariant: after two Promote calls on the same
+// pattern, exactly one experience_pattern_promoted audit row
+// exists. The second call does not insert a duplicate audit row.
+func TestPromote_SecondCall_DoesNotInsertSecondAuditRow(t *testing.T) {
+	t.Parallel()
+
+	fx := newPromotionFixture(t, patterns.PatternQualified)
+
+	if _, err := fx.promotion.Promote(context.Background(), fx.projectID, &PromotionInput{
+		PatternID: fx.pattern.ID,
+		Actor:     domain.Actor{Kind: "user", Name: "operator"},
+	}); err != nil {
+		t.Fatalf("first Promote: %v", err)
+	}
+
+	if _, err := fx.promotion.Promote(context.Background(), fx.projectID, &PromotionInput{
+		PatternID: fx.pattern.ID,
+		Actor:     domain.Actor{Kind: "user", Name: "operator"},
+	}); err != nil {
+		t.Fatalf("second Promote: %v", err)
+	}
+
+	rows := auditRowsFor(t, fx.db, string(fx.pattern.ID), "experience_pattern_promoted")
+	if len(rows) != 1 {
+		t.Fatalf("audit rows for experience_pattern_promoted = %d, want 1", len(rows))
+	}
+}
+
+// TestPromote_OrphanPromotedStatus_PromotionIdempotentLookup is a
+// defensive edge case: a pattern in status='promoted' with a
+// populated proposed_learning_id (the orphan-promoted state seeded
+// directly through the DB rather than through Service.Promote).
+// Promote must return success with WasNew=false and the existing
+// LearningID from the lookup.
+//
+// The setup creates a learning via Capture first so the FK on
+// experience_patterns.proposed_learning_id REFERENCES learnings(id)
+// is satisfied; the pattern is then UPDATEd to the orphan-promoted
+// state, bypassing the PromoteAtomic CAS. The lookup path must
+// still recover the existing LearningID.
+func TestPromote_OrphanPromotedStatus_PromotionIdempotentLookup(t *testing.T) {
+	t.Parallel()
+
+	fx := newPromotionFixture(t, patterns.PatternQualified)
+
+	capRes, err := fx.captureSvc.Capture(context.Background(), fx.projectID, &capture.CaptureInput{
+		Title:          "orphan learning",
+		Context:        "orphan context",
+		Observation:    "orphan observation",
+		Lesson:         "orphan lesson",
+		Type:           domain.TypeProcedure,
+		Scope:          domain.ScopeProject,
+		Destination:    domain.DestProject,
+		Confidence:     domain.ConfidenceMedium,
+		EvidenceLevel:  domain.EvidenceInsufficient,
+		Actor:          domain.Actor{Kind: "user", Name: "operator"},
+		IdempotencyKey: "orphan:" + fx.pattern.Fingerprint,
+	})
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	if capRes == nil {
+		t.Fatal("Capture returned nil result")
+	}
+
+	if _, err := fx.db.DB.Exec(`UPDATE experience_patterns
+    		SET status = ?, proposed_learning_id = ?
+    		WHERE id = ?`,
+		string(patterns.PatternPromoted), string(capRes.LearningID), string(fx.pattern.ID)); err != nil {
+		t.Fatalf("UPDATE orphan promoted: %v", err)
+	}
+
+	res, err := fx.promotion.Promote(context.Background(), fx.projectID, &PromotionInput{
+		PatternID: fx.pattern.ID,
+		Actor:     domain.Actor{Kind: "user", Name: "operator"},
+	})
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	if res == nil {
+		t.Fatal("Promote returned nil")
+	}
+	if res.WasNew {
+		t.Fatalf("WasNew = true, want false (idempotent lookup)")
+	}
+	if res.LearningID != capRes.LearningID {
+		t.Fatalf("LearningID = %q, want %q", res.LearningID, capRes.LearningID)
+	}
+
+	// No new audit row inserted by the idempotent return (the orphan
+	// was seeded directly in the DB, bypassing PromoteAtomic).
+	rows := auditRowsFor(t, fx.db, string(fx.pattern.ID), "experience_pattern_promoted")
+	if len(rows) != 0 {
+		t.Fatalf("audit rows = %d, want 0 (idempotent return must not insert)", len(rows))
+	}
+}
+
+// TestPromote_OrphanPromotedStatus_NullLearningID_ReturnsTypedError
+// is the defensive edge case for an inconsistent state: status is
+// 'promoted' but proposed_learning_id is NULL. The lookup cannot
+// be trusted in that state, so the Service must surface
+// ErrPromotionAlreadyPromoted (preserving the slice 7.2 contract)
+// and log a warning so an operator can investigate the orphan.
+func TestPromote_OrphanPromotedStatus_NullLearningID_ReturnsTypedError(t *testing.T) {
+	t.Parallel()
+
+	fx := newPromotionFixture(t, patterns.PatternQualified)
+
+	if _, err := fx.db.DB.Exec(`UPDATE experience_patterns
+    		SET status = ?, proposed_learning_id = NULL
+    		WHERE id = ?`,
+		string(patterns.PatternPromoted), string(fx.pattern.ID)); err != nil {
+		t.Fatalf("UPDATE orphan promoted: %v", err)
+	}
+
+	_, err := fx.promotion.Promote(context.Background(), fx.projectID, &PromotionInput{
+		PatternID: fx.pattern.ID,
+		Actor:     domain.Actor{Kind: "user", Name: "operator"},
+	})
+	if !errors.Is(err, ErrPromotionAlreadyPromoted) {
+		t.Fatalf("Promote error = %v, want ErrPromotionAlreadyPromoted", err)
+	}
+
+	// No learning was created: the orphan path does not hit Capture.
+	var count int
+	if err := fx.db.DB.QueryRow(`SELECT COUNT(*) FROM learnings`).Scan(&count); err != nil {
+		t.Fatalf("count learnings: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("learnings rows = %d, want 0", count)
+	}
+}
+
+// TestPromote_LookupError_Propagates verifies that a generic (non
+// NotFound) error from LookupPromotionState surfaces as-is. The
+// stub controls the lookup so the test is deterministic.
+func TestPromote_LookupError_Propagates(t *testing.T) {
+	t.Parallel()
+	genericErr := errors.New("generic lookup error")
+	stub := &stubPatternsLookup{lookupErr: genericErr}
+	promotion, _, projectID, _ := newTestPromotionWithStub(t, stub)
+
+	_, err := promotion.Promote(context.Background(), projectID, &PromotionInput{
+		PatternID: domain.ExperiencePatternID("pat-any"),
+		Actor:     domain.Actor{Kind: "user", Name: "operator"},
+	})
+	if !errors.Is(err, genericErr) {
+		t.Fatalf("Promote error = %v, want %v", err, genericErr)
+	}
+	if stub.promoteCalls != 0 {
+		t.Fatalf("PromoteAtomic calls = %d, want 0 (error before atomic)", stub.promoteCalls)
+	}
+}
+
+// TestPromote_GetError_Propagates verifies that a generic (non
+// NotFound) error from Get surfaces as-is, after the lookup
+// short-circuits have run. The stub controls Get so the test is
+// deterministic.
+func TestPromote_GetError_Propagates(t *testing.T) {
+	t.Parallel()
+	genericErr := errors.New("generic get error")
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	stub := &stubPatternsLookup{
+		lookupStatus: patterns.PatternQualified,
+		pattern: &patterns.ExperiencePattern{
+			ID:          domain.ExperiencePatternID("pat-stub"),
+			ProjectID:   domain.ProjectID("proj-stub"),
+			Status:      patterns.PatternQualified,
+			Kind:        domain.EventTestFailure,
+			Fingerprint: "fp-stub",
+		},
+		getErr: genericErr,
+	}
+	_ = now
+	promotion, _, projectID, _ := newTestPromotionWithStub(t, stub)
+
+	_, err := promotion.Promote(context.Background(), projectID, &PromotionInput{
+		PatternID: domain.ExperiencePatternID("pat-stub"),
+		Actor:     domain.Actor{Kind: "user", Name: "operator"},
+	})
+	if !errors.Is(err, genericErr) {
+		t.Fatalf("Promote error = %v, want %v", err, genericErr)
+	}
+	if stub.promoteCalls != 0 {
+		t.Fatalf("PromoteAtomic calls = %d, want 0 (error before atomic)", stub.promoteCalls)
+	}
+}
+
+// TestNewServiceWithPatterns_NilArgs_Rejects exercises the
+// test-only constructor's nil guards so a misconfigured test
+// cannot silently fall through to a nil dereference. The cases
+// are written as direct calls (not a table) because a typed nil
+// passed to a patternsFacade interface parameter is NOT the same
+// as a true nil interface, and the constructor relies on the
+// latter to fire the patterns guard.
+func TestNewServiceWithPatterns_NilArgs_Rejects(t *testing.T) {
+	t.Parallel()
+
+	db := storagetest.OpenTemp(t)
+	cap := capture.NewService(db, testutil.TempDir(t))
+	stub := &stubPatternsLookup{}
+
+	cases := []struct {
+		name   string
+		invoke func() (*Service, error)
+	}{
+		{
+			name:   "nil_capture",
+			invoke: func() (*Service, error) { return newServiceWithPatterns(nil, stub, db) },
+		},
+		{
+			name:   "nil_patterns",
+			invoke: func() (*Service, error) { return newServiceWithPatterns(cap, nil, db) },
+		},
+		{
+			name:   "nil_db",
+			invoke: func() (*Service, error) { return newServiceWithPatterns(cap, stub, nil) },
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			svc, err := tc.invoke()
+			if err == nil {
+				t.Fatalf("newServiceWithPatterns = (%v, nil), want error", svc)
+			}
+			if svc != nil {
+				t.Fatalf("newServiceWithPatterns returned non-nil service on error: %v", svc)
+			}
+			if !errors.Is(err, ErrPromotionInvalidArgument) {
+				t.Fatalf("error %v does not match ErrPromotionInvalidArgument", err)
+			}
+		})
+	}
 }
