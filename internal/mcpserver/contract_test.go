@@ -236,6 +236,9 @@ var contractExtensions = map[string]bool{
 	"learning_dismiss_pattern":  true,
 	"learning_promote_pattern":  true,
 	"learning_trace":            true,
+	"experience_jobs_list":      true,
+	"experience_jobs_register":  true,
+	"experience_jobs_recover":   true,
 }
 
 func documentedTools(t *testing.T) map[string]bool {

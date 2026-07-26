@@ -14,6 +14,7 @@ import (
 	"agent-royo-learn/internal/evidence"
 	"agent-royo-learn/internal/experience"
 	"agent-royo-learn/internal/experience/detectors"
+	"agent-royo-learn/internal/experience/jobs"
 	"agent-royo-learn/internal/experience/patterns"
 	"agent-royo-learn/internal/experience/trace"
 	"agent-royo-learn/internal/publish"
@@ -1288,6 +1289,84 @@ func handleTrace(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest
 		return toolResultJSON(map[string]any{
 			"status": "ok",
 			"result": result,
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Experience Jobs tools (Hito 8)
+// ---------------------------------------------------------------------------
+
+// jobsListInput is the schema for experience_jobs_list.
+type jobsListInput struct{}
+
+// jobsRegisterInput is the schema for experience_jobs_register.
+type jobsRegisterInput struct {
+	Name        string `json:"name" jsonschema:"required,job name"`
+	Description string `json:"description,omitempty" jsonschema:"job description"`
+	IntervalSec int    `json:"interval_sec,omitempty" jsonschema:"default interval in seconds"`
+	MaxRetries  int    `json:"max_retries,omitempty" jsonschema:"max retry count"`
+	Enabled     bool   `json:"enabled,omitempty" jsonschema:"whether the job is enabled"`
+}
+
+// jobsRecoverInput is the schema for experience_jobs_recover.
+type jobsRecoverInput struct{}
+
+func handleJobsList(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in jobsListInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in jobsListInput) (*mcp.CallToolResult, any, error) {
+		svc := jobs.NewServiceWithDefaults(srv.db.DB)
+		states, err := svc.ListStates(ctx, srv.projectID)
+		if err != nil {
+			return toolDomainError(err, "jobs_list_failed")
+		}
+		return toolResultJSON(map[string]any{
+			"status": "ok",
+			"jobs":   states,
+		})
+	}
+}
+
+func handleJobsRegister(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in jobsRegisterInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in jobsRegisterInput) (*mcp.CallToolResult, any, error) {
+		if in.Name == "" {
+			return toolError("invalid_argument", "name is required")
+		}
+		intervalSec := in.IntervalSec
+		if intervalSec <= 0 {
+			intervalSec = 3600
+		}
+		maxRetries := in.MaxRetries
+		if maxRetries <= 0 {
+			maxRetries = 3
+		}
+		svc := jobs.NewServiceWithDefaults(srv.db.DB)
+		entry := jobs.JobRegistryEntry{
+			JobName:            in.Name,
+			Description:        in.Description,
+			DefaultIntervalSec: intervalSec,
+			DefaultMaxRetries:  maxRetries,
+			Enabled:            in.Enabled,
+		}
+		if err := svc.Register(ctx, srv.projectID, entry); err != nil {
+			return toolDomainError(err, "jobs_register_failed")
+		}
+		return toolResultJSON(map[string]any{
+			"status":   "registered",
+			"job_name": in.Name,
+		})
+	}
+}
+
+func handleJobsRecover(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in jobsRecoverInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in jobsRecoverInput) (*mcp.CallToolResult, any, error) {
+		svc := jobs.NewServiceWithDefaults(srv.db.DB)
+		recovered, err := svc.RecoverStaleLeases(ctx, srv.projectID)
+		if err != nil {
+			return toolDomainError(err, "jobs_recover_failed")
+		}
+		return toolResultJSON(map[string]any{
+			"status":    "ok",
+			"recovered": recovered,
 		})
 	}
 }

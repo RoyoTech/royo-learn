@@ -384,4 +384,31 @@ var allTools = []profileTool{
 			bind(ms, t, handleTrace(srv))
 		},
 	},
+	{
+		name:        "experience_jobs_list",
+		description: "List all job states for the current project. Returns status, retry count, and last error for each registered job. Read-only.",
+		access:      accessRead,
+		profiles:    map[string]bool{profileRead: true, profileAgent: true, profileAdmin: true},
+		register: func(ms *mcp.Server, srv *Server, t profileTool) {
+			bind(ms, t, handleJobsList(srv))
+		},
+	},
+	{
+		name:        "experience_jobs_register",
+		description: "Register a new job or update an existing one. Idempotent. Requires the admin profile.",
+		access:      accessWrite,
+		profiles:    map[string]bool{profileAdmin: true},
+		register: func(ms *mcp.Server, srv *Server, t profileTool) {
+			bind(ms, t, handleJobsRegister(srv))
+		},
+	},
+	{
+		name:        "experience_jobs_recover",
+		description: "Clear stale leases that have exceeded their expiration time, returning those jobs to idle. Requires the admin profile.",
+		access:      accessWrite,
+		profiles:    map[string]bool{profileAdmin: true},
+		register: func(ms *mcp.Server, srv *Server, t profileTool) {
+			bind(ms, t, handleJobsRecover(srv))
+		},
+	},
 }

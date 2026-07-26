@@ -52,7 +52,7 @@ lexical, adaptadores multi-agente."* Por eso minor, no patch.
 
 | # | Hito | PR | Estado |
 |---|---|---|---|
-| 8 | Motor de jobs (lease-based) + migración 006 | TBD | ⏳ |
+| 8 | Motor de jobs (lease-based) + migración 007 | feat/hito8-jobs | ✅ |
 | 9 | Retrieval lexical (FTS5) | TBD | ⏳ |
 | 3 | OpenCode `--watch` (continuo, depende de 2) | TBD | ⏳ |
 | 10 | Adaptador Claude Code / Codex | TBD | ⏳ |
