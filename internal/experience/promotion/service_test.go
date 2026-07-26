@@ -27,10 +27,10 @@ func TestNewService_NilArgs_Rejects(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name       string
-		cap        *capture.Service
-		pat        *patterns.Service
-		db         *storage.DB
+		name string
+		cap  *capture.Service
+		pat  *patterns.Service
+		db   *storage.DB
 	}{
 		{"all_nil", nil, nil, nil},
 	}
