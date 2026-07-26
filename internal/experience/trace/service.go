@@ -87,7 +87,7 @@ func (s *Service) getEvent(ctx context.Context, eventID domain.ExperienceEventID
 	var (
 		id, projectID, turnID, kind, summary, observation, outcome, fingerprint, evidenceJSON string
 		detectorJSON                                                                          sql.NullString
-		confidence                                                                           string
+		confidence                                                                            string
 		createdAt                                                                             string
 	)
 	row := s.db.QueryRowContext(ctx,
