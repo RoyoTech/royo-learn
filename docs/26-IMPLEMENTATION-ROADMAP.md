@@ -61,7 +61,7 @@ Al cerrar el PR 7 se cumple el "resultado esperado de la Ola 1" del plan §37.
 | PR | Hito | Entrega | Migración |
 |----|------|---------|-----------|
 | 8 | 8 | motor de jobs (lease SQLite, digest, run-due, retry, crash recovery) | **006** |
-| 9 | 9 | retrieval lexical + score components + saneamiento FTS | — |
+| 9 | 9 | retrieval lexical + score components + saneamiento FTS | — | cobertura ≥ 85% en internal/retrieval, benchmark p95 < 250ms con 1k learnings, ranking determinista (mismo seed → mismo orden), score components visibles en CLI/MCP |
 | 10 | 3 | OpenCode automático (`--watch`, setup preview/apply/remove) | — |
 | 11 | 10 | Claude Code (JSONL) — PR propio | — |
 | 12 | 10 | Codex (rollout) — PR propio, no fusionar con Claude Code | — |
@@ -106,6 +106,7 @@ de publicación existente.
   CLI `experience opencode scan` con `--project-root` y `--fixture`.
   Idempotencia por `(source, external_session_id, external_turn_id)`.
   Sin `--watch` todavía (queda para Ola 2 / PR #10).
+- **Hito 9: EN PROGRESO** — rama `feat/hito9-retrieval` desde `dba80e1`. PR #9 (estimado). Paquete `internal/retrieval/` con score components (bm25 normalizado, retrieval_terms, title_exact, evidence_level, recency), sanitización endurecida (whitelist Unicode + dedupe + escape FTS5), ranking determinista (tiebreaker fingerprint/id), cobertura 89.2%, benchmark Service.Search ≈ 7ms con 1k learnings (objetivo p95 < 250ms). CLI y MCP actualizados para incluir `score` y `score_components` aditivos. Detalles en `docs/27-RETRIEVAL.md`.
 - **Próximo: Hito 5** — detectores deterministas, PR #4.
 
 ## 9. Lecciones aprendidas en Hito 2 (para PR #3 y siguientes)

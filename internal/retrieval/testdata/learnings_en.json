@@ -1,0 +1,167 @@
+[
+  {
+    "id": "L-en-001",
+    "title": "Lexical retrieval with FTS5 in royo-learn",
+    "context": "Hito 9 ships term-based search without a stemmer.",
+    "observation": "The unicode61 tokenizer splits accented words without collapsing variants.",
+    "reusable_lesson": "Do not apply the Snowball stemmer until the corpus is large; unicode61 is enough for English.",
+    "retrieval_terms": ["fts", "retrieval", "lexical", "english", "unicode"],
+    "evidence_level": "strong",
+    "fingerprint": "fp-en-001",
+    "language": "en"
+  },
+  {
+    "id": "L-en-002",
+    "title": "Sanitizing queries against FTS5 injection",
+    "context": "Users could break the MATCH clause before sanitization.",
+    "observation": "AND/OR/NOT were dropped as substrings; now they survive as literal terms.",
+    "reusable_lesson": "Whitelist by character (Unicode Letter + Digit + _.-) plus dedupe preserving order.",
+    "retrieval_terms": ["sanitization", "fts", "injection", "whitelist"],
+    "evidence_level": "strong",
+    "fingerprint": "fp-en-002",
+    "language": "en"
+  },
+  {
+    "id": "L-en-003",
+    "title": "Path traversal blocked in search terms",
+    "context": "A malicious query like ../etc/passwd reached the FTS5 parser.",
+    "observation": "The '..' segment is filtered before reaching the database; 'etc' and 'passwd' survive as searchable terms.",
+    "reusable_lesson": "Reject '..' and terms starting with '/' before the MATCH.",
+    "retrieval_terms": ["path-traversal", "security", "fts"],
+    "evidence_level": "moderate",
+    "fingerprint": "fp-en-003",
+    "language": "en"
+  },
+  {
+    "id": "L-en-004",
+    "title": "Recency decay in ranking",
+    "context": "An obsolete learning should not outrank a freshly captured one at the same relevance.",
+    "observation": "Linear decay from 1.0 to 0.0 over 365 days; a fresh window of 7 days keeps recent hits at 1.0.",
+    "reusable_lesson": "Use a small weight (0.05) for recency so durable knowledge is not penalized too hard.",
+    "retrieval_terms": ["recency", "ranking", "decay"],
+    "evidence_level": "moderate",
+    "fingerprint": "fp-en-004",
+    "language": "en"
+  },
+  {
+    "id": "L-en-005",
+    "title": "FTS5 injection via double quotes",
+    "context": "A term containing a quote could break the FTS5 phrase.",
+    "observation": "Doubling each quote yields the FTS5-standard escape sequence.",
+    "reusable_lesson": "EscapePhrase must run on every term BEFORE the join.",
+    "retrieval_terms": ["fts", "escape", "injection"],
+    "evidence_level": "strong",
+    "fingerprint": "fp-en-005",
+    "language": "en"
+  },
+  {
+    "id": "L-en-006",
+    "title": "Deterministic ranking with a tiebreaker",
+    "context": "Two runs of the same query returned different orders.",
+    "observation": "Tiebreaker (score DESC, fingerprint ASC, id ASC) pins a canonical order.",
+    "reusable_lesson": "Use sort.SliceStable with three keys: score, fingerprint, id.",
+    "retrieval_terms": ["ranking", "determinism", "tiebreaker"],
+    "evidence_level": "strong",
+    "fingerprint": "fp-en-006",
+    "language": "en"
+  },
+  {
+    "id": "L-en-007",
+    "title": "Intersecting retrieval_terms for ranking",
+    "context": "Pure FTS5 misses the user intent when terms come from a controlled vocabulary.",
+    "observation": "Normalize query and retrieval_terms via patterns.NormalizeRetrievalTerms; non-empty intersection is 1.0.",
+    "reusable_lesson": "Binary score by intersection, not by distance.",
+    "retrieval_terms": ["retrieval-terms", "intersection", "ranking"],
+    "evidence_level": "moderate",
+    "fingerprint": "fp-en-007",
+    "language": "en"
+  },
+  {
+    "id": "L-en-008",
+    "title": "Weak vs strong evidence in ranking",
+    "context": "A weakly-evidenced learning should not compete on equal footing with a strong one.",
+    "observation": "Mapping: strong=1.0, moderate=0.7, weak=0.4, insufficient=0.1, default=0.5.",
+    "reusable_lesson": "Fold evidence_level into the final score.",
+    "retrieval_terms": ["evidence", "evidence-level", "ranking"],
+    "evidence_level": "moderate",
+    "fingerprint": "fp-en-008",
+    "language": "en"
+  },
+  {
+    "id": "L-en-009",
+    "title": "Term budget per query",
+    "context": "A 1000-token query degraded search performance.",
+    "observation": "Cap of 16 raw tokens surfaces the typed error ErrTooManyTerms.",
+    "reusable_lesson": "Validate BEFORE the MATCH; return an error, do not silently truncate.",
+    "retrieval_terms": ["limit", "terms", "validation"],
+    "evidence_level": "strong",
+    "fingerprint": "fp-en-009",
+    "language": "en"
+  },
+  {
+    "id": "L-en-010",
+    "title": "Stable pagination with offset",
+    "context": "A middle page of results must not lose rows when refreshed.",
+    "observation": "Offset is applied AFTER the sort, not before; the tiebreaker guarantees stability.",
+    "reusable_lesson": "Sort before paginate; never paginate before sort.",
+    "retrieval_terms": ["pagination", "offset", "limit"],
+    "evidence_level": "moderate",
+    "fingerprint": "fp-en-010",
+    "language": "en"
+  },
+  {
+    "id": "L-en-011",
+    "title": "Per-term length cap (256 chars)",
+    "context": "A single 10000-char word could exhaust memory.",
+    "observation": "Terms > 256 chars are dropped without error; valid results still come back.",
+    "reusable_lesson": "Defensive cap per term, not per query.",
+    "retrieval_terms": ["length", "term", "validation"],
+    "evidence_level": "weak",
+    "fingerprint": "fp-en-011",
+    "language": "en"
+  },
+  {
+    "id": "L-en-012",
+    "title": "English support without stemming",
+    "context": "User types 'retrieval' but the row contains 'retrieve'.",
+    "observation": "unicode61 does not normalize the suffix; FTS5 misses the exact match.",
+    "reusable_lesson": "Document the limitation; plan a stemmer for Ola 3.",
+    "retrieval_terms": ["english", "stemmer", "unicode"],
+    "evidence_level": "weak",
+    "fingerprint": "fp-en-012",
+    "language": "en"
+  },
+  {
+    "id": "L-en-013",
+    "title": "FTS5 index rebuilt on UPDATE",
+    "context": "An UPDATE on `learnings` must be reflected in `learnings_fts`.",
+    "observation": "The `learnings_au` trigger does DELETE + INSERT on the virtual row; no manual rebuild needed.",
+    "reusable_lesson": "Trust the triggers; do not write reindex logic in Go.",
+    "retrieval_terms": ["fts", "trigger", "update"],
+    "evidence_level": "strong",
+    "fingerprint": "fp-en-013",
+    "language": "en"
+  },
+  {
+    "id": "L-en-014",
+    "title": "User-visible score in CLI and MCP",
+    "context": "Users need to know WHY a learning ranked first.",
+    "observation": "JSON includes `score` and `score_components` per hit; additive, does not break consumers.",
+    "reusable_lesson": "Expose the full breakdown, not only the final score.",
+    "retrieval_terms": ["score", "transparency", "cli", "mcp"],
+    "evidence_level": "moderate",
+    "fingerprint": "fp-en-014",
+    "language": "en"
+  },
+  {
+    "id": "L-en-015",
+    "title": "Zero migration for Hito 9",
+    "context": "The FTS5 schema already existed in migration 001.",
+    "observation": "No new migration; scoring is entirely in Go on top of the existing schema.",
+    "reusable_lesson": "Reuse existing columns; add migrations only when strictly necessary.",
+    "retrieval_terms": ["migration", "schema", "fts"],
+    "evidence_level": "strong",
+    "fingerprint": "fp-en-015",
+    "language": "en"
+  }
+]

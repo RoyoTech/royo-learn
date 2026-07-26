@@ -13,6 +13,15 @@ royo-learn doctor
 royo-learn search "tema"
 ```
 
+> **Nota (Hito 9)**: desde la rama `feat/hito9-retrieval`, la salida de
+> `royo-learn search` y de la tool MCP `learning_search` incluye dos campos
+> adicionales por hit — `score` (float) y `score_components` (objeto con
+> `bm25`, `retrieval_terms`, `title_exact`, `evidence_level`, `recency`).
+> Son **aditivos**: los consumidores existentes siguen funcionando. El
+> campo `score_components` en MCP requiere `include_components: true`
+> para preservar la compatibilidad de los clientes que ya consumen
+> `learning_search`. Detalles en `docs/27-RETRIEVAL.md`.
+
 ## Backup
 
 - DB: snapshot SQLite consistente;

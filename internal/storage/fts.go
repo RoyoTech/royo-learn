@@ -10,6 +10,13 @@ import (
 
 // Search performs a full-text search on learnings using FTS5.
 // The query is sanitized to prevent FTS5 syntax errors.
+//
+// Deprecated: Search is preserved for backwards compatibility. New
+// code should use internal/retrieval.Service, which applies the v1
+// score components (bm25, retrieval_terms, title_exact,
+// evidence_level, recency) and the documented deterministic
+// tiebreaker. This function will be removed in a future release
+// once all callers migrate.
 func Search(ctx context.Context, db *DB, projectID domain.ProjectID, query string) ([]*domain.Learning, error) {
 	if query == "" {
 		return nil, nil

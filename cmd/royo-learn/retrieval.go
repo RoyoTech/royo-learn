@@ -15,6 +15,7 @@ import (
 	"agent-royo-learn/internal/engram"
 	"agent-royo-learn/internal/logging"
 	"agent-royo-learn/internal/recurrence"
+	"agent-royo-learn/internal/retrieval"
 	"agent-royo-learn/internal/storage"
 )
 
@@ -126,18 +127,37 @@ func runSearch(args []string, stdout, stderr io.Writer) int {
 	defer db.Close()
 
 	ctx := context.Background()
-	learnings, err := storage.Search(ctx, db, projectID, *query)
+	svc := retrieval.NewService(retrieval.NewRepository(db), retrieval.DefaultWeights())
+	res, err := svc.Search(ctx, retrieval.Query{
+		Text:      *query,
+		ProjectID: projectID,
+		Limit:     *limit,
+	})
 	if err != nil {
+		// Map the typed ErrTooManyTerms (wrapped as
+		// domain.ErrInvalidArgument) to the documented exit code 2.
+		if derr, ok := domain.AsDomainError(err); ok && derr.Code == domain.ErrInvalidArgument {
+			return writeRetrievalError(stderr, string(derr.Code), "search: %v", err)
+		}
 		return writeRetrievalError(stderr, "invalid_argument", "search: %v", err)
 	}
 
-	results := make([]map[string]any, 0, len(learnings))
-	for _, l := range learnings {
+	results := make([]map[string]any, 0, len(res.Hits))
+	for _, h := range res.Hits {
+		l := h.Learning
 		if *statusFilter != "" && string(l.Status) != *statusFilter {
 			continue
 		}
 		m := learningToOutputMap(l)
 		m["source"] = "royo_learn"
+		m["score"] = h.Score
+		m["score_components"] = map[string]float64{
+			"bm25":            h.Components.BM25,
+			"retrieval_terms": h.Components.RetrievalTerms,
+			"title_exact":     h.Components.TitleExact,
+			"evidence_level":  h.Components.EvidenceLevel,
+			"recency":         h.Components.Recency,
+		}
 		results = append(results, m)
 	}
 
