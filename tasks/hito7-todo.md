@@ -25,27 +25,27 @@
   preview hash). Todo el contenido redactado antes de la inserción.
   Commit: `27c8cd9` (`feat(evidence):`). Lifecycle gap
   operator-accepted per docs/lessons.md §5 (slice 7.1 entry).
-- [ ] **Slice 7.2** — `Promote` transaccional: construye `CaptureInput`
+- [x] **Slice 7.2** — `Promote` transaccional: construye `CaptureInput`
   desde el pattern, llama `s.capture.Capture(ctx, projectID, input)`,
   inserta audit row en `audit_events`, actualiza
   `experience_patterns.status = promoted` y
   `proposed_learning_id = learning.ID`. La transacción cubre los
   tres pasos; rollback limpio en cualquier fallo.
-- [ ] **Slice 7.3** — idempotencia: lookup pre-insert en
+- [x] **Slice 7.3** — idempotencia: lookup pre-insert en
   `experiencle_patterns.proposed_learning_id`. Si el patrón ya
   promovió, retorna el `learning_id` existente con
   `WasNew = false`. Doble `Promote` no produce doble `Learning`.
-- [ ] **Slice 7.4** — CLI `experience patterns promote --id <id>` + MCP
+- [x] **Slice 7.4** — CLI `experience patterns promote --id <id>` + MCP
   `learning_promote_pattern` (admin-only). Acceptance test con
   patrón sintético que cubre los 3 paths (qualified → Learning,
   already-promoted → idempotente, not-qualified → error).
 
 ## Verification gates
 
-- [ ] go build ./... verde en cada slice atómico.
-- [ ] go vet ./... verde en cada slice.
-- [ ] go test -race -count=1 ./... verde en cada slice.
-- [ ] Cobertura `internal/experience/promotion/` ≥ 80% al cierre
+- [x] go build ./... verde en cada slice atómico.
+- [x] go vet ./... verde en cada slice.
+- [x] go test -race -count=1 ./... verde en cada slice.
+- [x] Cobertura `internal/experience/promotion/` ≥ 80% al cierre
       (gate de Hito 7, no de slice 7.0).
 - [ ] Cross-build Windows amd64 verde (Linux/macOS no requerido per
       directiva del operador).
@@ -125,3 +125,61 @@
 ## Review
 
 _To be completed when Hito 7 closes._
+
+## Slice 7.2 closure notes
+
+- Branch: `feat/hito7-promotion`, commit `d5cf420`.
+- `Service.Promote` transaccional: construye `CaptureInput` desde el
+  pattern vía `lessonForCapture`, llama `capture.Service.Capture`,
+  inserta audit row en `audit_events` con `entity_type=pattern`,
+  `operation=promote`, actualiza `experience_patterns.status=promoted`
+  y `proposed_learning_id`.
+- Rollback limpio en cualquier fallo (tx cubre los 3 pasos).
+- `patternsFacade` interface desacopla `Service` del repo concreto
+  de patterns.
+
+## Slice 7.3 closure notes
+
+- Branch: `feat/hito7-promotion`, commit `cfff3d4`.
+- Idempotencia: lookup pre-insert en `experience_patterns.proposed_learning_id`.
+  Si el patrón ya promovió, retorna el `learning_id` existente con
+  `WasNew = false`.
+- Doble `Promote` no produce doble `Learning` (test incluido).
+
+## Slice 7.4 closure notes
+
+- Branch: `feat/hito7-promotion`, commit `350ac8c`.
+- CLI: `experience patterns promote --id <id> [--project <name>]`.
+- MCP: `learning_promote_pattern` (admin profile only).
+- Acceptance: 5 tests (qualified, idempotent, not-qualified, capture
+  bridge, stable JSON contract). Todos GREEN.
+- 6 archivos modificados, 1 nuevo (`acceptance_test.go`), +804/-6 LoC.
+- Coverage final del paquete promotion: 90.4% (gate ≥ 80%).
+- `go vet ./...` limpio. `gofmt -l` limpio.
+- Build Windows amd64: pendiente.
+
+## Hito 7 status: ALL SLICES COMMITTED
+
+| Slice | Commit | Status |
+|-------|--------|--------|
+| 7.0 | `d9617af` | ✅ |
+| 7.1 | `27c8cd9` | ✅ |
+| 7.2 | `d5cf420` | ✅ |
+| 7.3 | `cfff3d4` | ✅ |
+| 7.4 | `350ac8c` | ✅ |
+
+### Remaining for merge
+
+- [ ] Cross-build Windows amd64
+- [ ] e2e 37/37 pasos
+- [ ] gentle_review lifecycle (docs/lessons.md §5)
+- [ ] Push + PR #6 (requiere autorización del operador)
+
+### Outstanding risks — resolved
+
+- ~~Slice 7.2 tx atómica~~: RESUELTO — el promotion service abre tx,
+  el capture service usa la tx externa vía `CaptureWithTx`.
+- ~~Slice 7.3 race condition~~: MITIGADO — SQLite serializa escrituras;
+  idempotencia verificada con test `TestAcceptance_AlreadyPromoted_IsIdempotent`.
+- ~~Slice 7.4 CLI/MCP integration~~: COMPLETO — sigue patrón de Hito 6.
+- gentle_review finalize: MISMO GAP que slice 7.1 (docs/lessons.md §5).
