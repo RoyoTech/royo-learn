@@ -1,0 +1,5 @@
+{"type":"user","uuid":"turn-user-001","sessionId":"session-001","timestamp":"2026-01-02T03:04:05Z","stop_reason":"submitted","message":{"content":"Please inspect the fake example."}}
+{"type":"assistant","uuid":"turn-assistant-001","sessionId":"session-001","timestamp":1767323046000,"stop_reason":"end_turn","message":{"content":[{"type":"thinking","thinking":"private reasoning omitted"},{"type":"text","text":"Inspection complete."},{"type":"tool_use","id":"tool-fake-001","name":"Read","input":{"file_path":"/tmp/obviously-fake.txt"}}]}}
+{"type":"system","uuid":"turn-system-001","sessionId":"session-001","timestamp":"2026-01-02T03:04:07Z","message":{"content":"synthetic system event"}}
+not-json
+{"type":"assistant","uuid":"turn-incomplete-001","sessionId":"session-002","timestamp":"2026-01-02T03:04:08Z","message":{"content":"unfinished"}}

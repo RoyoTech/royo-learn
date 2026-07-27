@@ -78,13 +78,6 @@ func (a *Adapter) now() time.Time {
 
 // Health lives in health.go (slice 10.2).
 
-// Scan returns a not-yet-implemented error. Slice 10.3 replaces this body.
-func (a *Adapter) Scan(ctx context.Context, req ScanRequest) (ScanResult, error) {
-	_ = ctx
-	_ = req
-	return ScanResult{Status: "degraded", Code: "experience_source_schema_unsupported", Message: "claudecode adapter: Scan not yet implemented", ScannedAt: a.now()}, nil
-}
-
 // ResolveTrace returns a not-yet-implemented error. Slice 10.5 replaces this
 // body.
 func (a *Adapter) ResolveTrace(ctx context.Context, locator domain.TranscriptLocator, bounds TraceBounds) TraceResult {
