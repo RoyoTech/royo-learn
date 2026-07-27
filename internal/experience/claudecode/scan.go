@@ -35,6 +35,7 @@ func (a *Adapter) Scan(ctx context.Context, req ScanRequest) (ScanResult, error)
 	h := sha256.Sum256(data)
 	sourceHash := hex.EncodeToString(h[:])
 	result := ScanResult{Instance: req.Instance, Status: "ok", ScannedAt: a.now()}
+	cursorSession, cursorTurn, hasCursor := cursorCheckpoint(req.Cursor)
 	var turns []jsonlTurn
 	s := bufio.NewScanner(strings.NewReader(string(data)))
 	s.Buffer(make([]byte, 64*1024), maxJSONLLineBytes)
@@ -67,6 +68,9 @@ func (a *Adapter) Scan(ctx context.Context, req ScanRequest) (ScanResult, error)
 		}
 		if !complete {
 			result.SkippedIncomplete++
+			continue
+		}
+		if hasCursor && cursorAtOrBefore(turn.SessionID, turn.UUID, cursorSession, cursorTurn) {
 			continue
 		}
 		e := makeEnvelope(req, turn, sourceHash)
