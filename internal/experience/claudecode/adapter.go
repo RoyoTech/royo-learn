@@ -77,15 +77,7 @@ func (a *Adapter) now() time.Time {
 // tests are RED in the right places (cancellation, type mismatch).
 
 // Health lives in health.go (slice 10.2).
-
-// ResolveTrace returns a not-yet-implemented error. Slice 10.5 replaces this
-// body.
-func (a *Adapter) ResolveTrace(ctx context.Context, locator domain.TranscriptLocator, bounds TraceBounds) TraceResult {
-	_ = ctx
-	_ = locator
-	_ = bounds
-	return TraceResult{Code: "experience_source_schema_unsupported", Message: "claudecode adapter: ResolveTrace not yet implemented"}
-}
+// ResolveTrace lives in resolve_trace.go (slice 10.5).
 
 // Compile-time guarantee that *Adapter satisfies ExperienceAdapter.
 var _ ExperienceAdapter = (*Adapter)(nil)
