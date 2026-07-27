@@ -76,12 +76,7 @@ func (a *Adapter) now() time.Time {
 // here are intentionally minimal so the package compiles and the contract
 // tests are RED in the right places (cancellation, type mismatch).
 
-// Health returns a not-yet-implemented error. Slice 10.2 replaces this body.
-func (a *Adapter) Health(ctx context.Context, instance SourceInstance) HealthResult {
-	_ = ctx
-	_ = instance
-	return HealthResult{Status: "degraded", Code: "experience_source_schema_unsupported", Message: "claudecode adapter: Health not yet implemented", CheckedAt: a.now()}
-}
+// Health lives in health.go (slice 10.2).
 
 // Scan returns a not-yet-implemented error. Slice 10.3 replaces this body.
 func (a *Adapter) Scan(ctx context.Context, req ScanRequest) (ScanResult, error) {
