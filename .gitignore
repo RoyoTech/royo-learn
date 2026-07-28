@@ -8,3 +8,7 @@
 # Temp files
 *test_isnotexist*
 *Temp/opencode/*
+
+# Personal scratch prompts (one-off LLM executor inputs that landed at
+# the repo root during a session and are not project artifacts).
+/PROMPT-*.md
