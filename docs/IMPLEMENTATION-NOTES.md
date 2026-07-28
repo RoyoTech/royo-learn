@@ -700,3 +700,41 @@ Solución v1:
 
 - **PR #12 (Codex adapter)**: `openspec/changes/hito10-codex/{proposal,design,tasks}.md` ya escritos. Branch `feat/hito10-codex` desde `origin/main` **tras mergear PR #11** (per lessons.md entry 4: no branch desde local main). Mismo slice breakdown (12.0–12.7) que Claude Code; primer slice 12.0 scaffold.
 - **Hito 11 (semántica)** y **Hito 12 (drift/release)** quedan en Ola 3.
+
+## Hito 10 — Codex adapter (PR #12) · 2026-07-28
+
+**Branch:** `feat/hito10-codex` (22 commits ahead of `origin/main`).
+
+**Slices shipped (8/8, atomic conventional commits, no AI attribution):**
+
+| Slice | SHA | Función |
+|---|---|---|
+| 10.0 scaffold | `0ce6e7f` | package + contract + adapter skeleton |
+| 10.1 Discover | `6d7a7aa` | walk `.codex/sessions/`, filter `rollout-*.jsonl` |
+| 10.2 Health | `e5d99c4` | os.Stat + 1 KiB header probe, `session_meta` anchor |
+| 10.3 Scan | `a282ed8` | JSONL→envelope, drop `reasoning`, sha256 locator |
+| 10.4 Idempotency | `8a69ea6` | cursor `{last_session_id, last_turn_uuid}` |
+| 10.5 ResolveTrace | `1f605ca` | bounded redacted excerpt |
+| 10.6 CLI scan | `e0f4021` | `experience codex scan` subcommand |
+| 10.7 jobs | `abe351b` | `JobName = "experience_ingest:codex"` |
+
+**Bounded-review correction (4R, lineage `experience-hito10-codex-v1`):**
+
+| Commit | Concern |
+|---|---|
+| `b3bc8cf` | coverage 79.3% → 94.4% |
+| `f72ceb4` | **SEVERE**: `resolve_trace.go:130` filtraba `response_item` sin chequear `payload.type` → reasoning/function_call_output leak. Fix: `payload.Type != "reasoning" && != "function_call_output"` |
+| `87f40f4` | `Actor.Model` ahora se extrae de `turn_context.model` |
+| `c79c5cf` | `JobRegistryEntry.CreatedAt` con clock inyectable (test determinista) |
+
+Spec reconciliation: `last_line_number (numeric)` → `last_turn_uuid (string)` en `openspec/changes/hito10-codex/specs/experience-adapters/spec.md` (archivo intencionalmente untracked).
+
+**Verificaciones finales:** `go build ./...` ✓, `go vet ./...` ✓, `gofmt -l` clean ✓, coverage 94.4% (≥ 85% ✓), all `internal/experience/codex/...` tests pass.
+
+**Pre-existing failure ajeno a Codex:** `internal/publish/TestPublish_RollbackFailureObserved` — permisos WSL sobre temp file; ya estaba en `origin/main`.
+
+**Symmetry con PR #11 (Claude Code):** mismo package layout (`internal/experience/codex/` ↔ `internal/experience/claudecode/`), misma interface (5 métodos), mismo cursor shape, mismo `SafeToolCall`, mismo job registry shape. `SchemaTag = "codex/rollout-v1"` per `docs/22 §7`.
+
+**Pendiente operator:** `gentle-ai review finalize` (schema estricto), push, PR #12. Ver `docs/HANDOFF-HITO10-CODEX.md`.
+
+**Próximo:** Ola 3 — Hito 11 (semántica) + Hito 12 (drift/release), gateado por merge de PR #11 + PR #12.
