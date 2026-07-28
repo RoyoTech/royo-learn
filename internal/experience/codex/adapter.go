@@ -34,14 +34,6 @@ func (a *Adapter) now() time.Time {
 	return time.Now().UTC()
 }
 
-// Discover is replaced by slice 10.1.
-func (a *Adapter) Discover(ctx context.Context, _ string) ([]SourceInstance, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return nil, nil
-}
-
 // Health is replaced by slice 10.2.
 func (a *Adapter) Health(ctx context.Context, _ SourceInstance) HealthResult {
 	if err := ctx.Err(); err != nil {
