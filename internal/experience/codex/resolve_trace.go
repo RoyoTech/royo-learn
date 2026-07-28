@@ -128,7 +128,12 @@ func findCodexTurnContent(data []byte, turnID string) (string, bool) {
 				return line.Payload.Message, true
 			}
 		case "response_item":
-			if line.Payload.Text != "" {
+			// Reasoning and function_call_output are dropped at envelope-build
+			// time per design.md §Scan; ResolveTrace must follow the same
+			// rule so the trace never re-exposes content the scan refused.
+			if line.Payload.Text != "" &&
+				line.Payload.Type != "reasoning" &&
+				line.Payload.Type != "function_call_output" {
 				return line.Payload.Text, true
 			}
 		}

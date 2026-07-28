@@ -180,3 +180,63 @@ func TestResolveTrace_MissingFile(t *testing.T) {
 		t.Fatalf("ResolveTrace Code = %q, want %q", result.Code, domain.ErrExperienceSourceNotFound)
 	}
 }
+
+// TestResolveTrace_DropsReasoning covers the response_item branch when the
+// only payload for the turn is reasoning. design.md §Scan requires reasoning
+// to be dropped at envelope-build time; ResolveTrace must follow the same
+// rule so a trace never re-exposes reasoning content.
+func TestResolveTrace_DropsReasoning(t *testing.T) {
+	path := writeScanFile(t, "rollout-trace-reasoning.jsonl",
+		scanSessionMeta("session-001")+"\n"+
+			scanResponseReasoning("turn-reason")+"\n",
+	)
+	result := NewAdapter().ResolveTrace(context.Background(), locatorFor(t, path, "turn-reason"), TraceBounds{MaxBytes: 1024})
+	if result.Code != "trace_source_unavailable" {
+		t.Fatalf("ResolveTrace Code = %q, want trace_source_unavailable", result.Code)
+	}
+	if strings.Contains(result.Excerpt, "SECRET-LEAK from reasoning") {
+		t.Fatalf("ResolveTrace Excerpt = %q leaks reasoning content", result.Excerpt)
+	}
+}
+
+// TestResolveTrace_DropsFunctionCallOutput covers the response_item branch
+// when the only payload for the turn is a function_call_output. Same rule
+// as reasoning: dropped at envelope-build, must not re-appear in trace.
+func TestResolveTrace_DropsFunctionCallOutput(t *testing.T) {
+	const secret = "SECRET-FUNCTION-OUTPUT-12345"
+	path := writeScanFile(t, "rollout-trace-fco.jsonl",
+		scanSessionMeta("session-001")+"\n"+
+			scanResponseFunctionCallOutput("call-1", secret)+"\n",
+	)
+	result := NewAdapter().ResolveTrace(context.Background(), locatorFor(t, path, "call-1"), TraceBounds{MaxBytes: 1024})
+	if strings.Contains(result.Excerpt, secret) {
+		t.Fatalf("ResolveTrace Excerpt = %q leaks function_call_output content", result.Excerpt)
+	}
+}
+
+// TestResolveTrace_FallsThroughFromReasoningToMessage covers the case where
+// a turn has BOTH a reasoning response_item and a message response_item.
+// ResolveTrace must skip the reasoning and return the message text. This
+// also serves as the redaction coverage finding from the reliability lens:
+// a secret placed in the message text must be redacted, not leaked raw.
+func TestResolveTrace_FallsThroughFromReasoningToMessage(t *testing.T) {
+	const secret = "sk-abc123def456ghi789jkl012mno345pq"
+	path := writeScanFile(t, "rollout-trace-reason-then-message.jsonl",
+		scanSessionMeta("session-001")+"\n"+
+			scanResponseReasoning("turn-mix")+"\n"+
+			`{"timestamp":"2026-07-27T12:00:05Z","type":"response_item","turn_id":"turn-mix","payload":{"role":"assistant","type":"message","text":"prefix `+secret+` suffix"}}`+"\n",
+	)
+	result := NewAdapter().ResolveTrace(context.Background(), locatorFor(t, path, "turn-mix"), TraceBounds{MaxBytes: 1024})
+	if result.Code != "" {
+		t.Fatalf("ResolveTrace Code = %q, want empty", result.Code)
+	}
+	if !result.Redacted {
+		t.Fatalf("ResolveTrace Redacted = false, want true")
+	}
+	if strings.Contains(result.Excerpt, secret) {
+		t.Fatalf("ResolveTrace Excerpt = %q still contains raw secret", result.Excerpt)
+	}
+	if strings.Contains(result.Excerpt, "SECRET-LEAK from reasoning") {
+		t.Fatalf("ResolveTrace Excerpt = %q leaked reasoning content", result.Excerpt)
+	}
+}
