@@ -15,6 +15,13 @@ import (
 // helper is the single source of truth for the job name and default config
 // (per docs/25-EXPERIENCE-ACCEPTANCE-MATRIX.md §2 Hito 10 jobs row).
 func TestJobRegistryEntry_Shape(t *testing.T) {
+	// Inject a deterministic clock so the CreatedAt assertion is stable
+	// across runs (reliability lens finding: jobregistryentry-nondeterministic-createdat).
+	prev := jobNow
+	fixed := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
+	jobNow = func() time.Time { return fixed }
+	t.Cleanup(func() { jobNow = prev })
+
 	entry := JobRegistryEntry()
 
 	if entry.JobName != "experience_ingest:codex" {
@@ -37,6 +44,9 @@ func TestJobRegistryEntry_Shape(t *testing.T) {
 	}
 	if entry.CreatedAt.Location() != time.UTC {
 		t.Errorf("CreatedAt location = %v, want UTC", entry.CreatedAt.Location())
+	}
+	if !entry.CreatedAt.Equal(fixed) {
+		t.Errorf("CreatedAt = %v, want injected fixed clock %v", entry.CreatedAt, fixed)
 	}
 }
 
