@@ -34,12 +34,4 @@ func (a *Adapter) now() time.Time {
 	return time.Now().UTC()
 }
 
-// ResolveTrace is replaced by slice 10.5.
-func (a *Adapter) ResolveTrace(ctx context.Context, _ domain.TranscriptLocator, _ TraceBounds) TraceResult {
-	if err := ctx.Err(); err != nil {
-		return TraceResult{Code: string(domain.ErrTimeout), Message: err.Error()}
-	}
-	return TraceResult{Code: string(domain.ErrExperienceLocatorInvalid)}
-}
-
 var _ ExperienceAdapter = (*Adapter)(nil)
