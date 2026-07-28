@@ -127,3 +127,42 @@ También:
 ## Regla de entrega
 
 Codex no debe limitarse a explicar cómo hacerlo. Debe crear, compilar, instalar y comprobar el producto dentro del entorno permitido.
+
+## Workflow de push a GitHub (operator + orchestrator)
+
+### Deploy keys registradas en `RoyoTech/royo-learn`
+
+| Nombre | Fingerprint SHA256 | Permisos | Ubicación local |
+|---|---|---|---|
+| `royo-learn-deploy` | `28vajSJ0cGstFngwHngb68TcyKPpX5OvFPGczSLln7Y` | **Read/write** | `C:\Users\angel\.ssh\id_ed25519` (Windows) — desde WSL: `/mnt/c/Users/angel/.ssh/id_ed25519` |
+| `royotech_ops` | `MPJ2HfWldUR4lC2b9TNGC6hPBMMbxTPHvd6rM3+bDjI` | Read-only | `~/.codex/github_keys/royotech_ops_deploy_ed25519` (WSL) |
+| `id_ed25519` (legacy) | `A4CEAIwfc8tYORvgpGXjnqbmG6VqLYC/zWconpJPxRs` | Read-only (deploy key) | `/home/angel/.ssh/id_ed25519` (WSL) — **NO usar para push** |
+
+### Procedimiento de push desde el sandbox (WSL)
+
+1. **NO** confiar en `gh.exe` ni en `cmd.exe`/`powershell.exe` — la interoperabilidad WSL falla con "Exec format error" (ver `docs/lessons.md` entrada 2).
+2. **NO** usar la remote HTTPS `https://github.com/RoyoTech/royo-learn.git` — el credential helper `gh.exe auth git-credential` no se puede invocar y no hay PAT.
+3. **Cambiar** a remote SSH: `git remote set-url origin git@github.com:RoyoTech/royo-learn.git`.
+4. **Copiar** la clave con permisos correctos antes de invocar SSH (SSH rechaza archivos 0777):
+   ```bash
+   cp /mnt/c/Users/angel/.ssh/id_ed25519 /tmp/royo-learn-deploy-key
+   chmod 600 /tmp/royo-learn-deploy-key
+   ```
+5. **Push** con la clave explícita:
+   ```bash
+   GIT_SSH_COMMAND="ssh -i /tmp/royo-learn-deploy-key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+     git push -u origin <branch>
+   ```
+6. Para PR: `gh.exe` no funciona desde WSL. Usar la URL que devuelve el push remoto (`https://github.com/RoyoTech/royo-learn/pull/new/<branch>`) o el `gh` nativo desde PowerShell/Windows terminal.
+
+### Si la push falla con "denied to deploy key"
+
+El error significa que la clave usada está registrada como **read-only**. Verificar:
+
+- Fingerprint de la clave usada: `ssh-keygen -lf <key>`.
+- Comparar contra la tabla de arriba. Solo `royo-learn-deploy` (fingerprint `28vajSJ...`) tiene write access.
+- El resto de claves son deploy keys de **otros** repos (chat-piscineria, mathquestgalaxy, servicio-terreno, etc.) o personales sin acceso.
+
+### Lección aprendida (sesión 2026-07-28)
+
+La clave que abre write access vive en el lado **Windows** (`C:\Users\angel\.ssh\id_ed25519`), no en WSL (`/home/angel/.ssh/`). Las dos carpetas `.ssh` son independientes. La regla "agente busca primero en `~/.ssh/`" falla aquí porque esa es la clave equivocada.
