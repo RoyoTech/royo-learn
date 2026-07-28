@@ -75,6 +75,37 @@ func TestScan_BuildsNeutralEnvelopesAndDropsReasoning(t *testing.T) {
 	}
 }
 
+// TestScan_ExtractsActorModelFromTurnContext covers design.md §Scan
+// requirement: Actor.Model = turn_context.model. The new envelope must
+// surface the model so downstream consumers can discriminate Codex models.
+func TestScan_ExtractsActorModelFromTurnContext(t *testing.T) {
+	rollout := writeScanFile(t, "rollout-model.jsonl",
+		scanSessionMeta("session-001")+"\n"+
+			scanTurnContextWithModel("turn-1", "codex-large-v1")+"\n"+
+			scanEventMsg("event_msg.task_started", "turn-1", "user", "hello")+"\n"+
+			scanEventMsg("event_msg.task_complete", "turn-1", "assistant", "done")+"\n",
+	)
+	adapter := NewAdapter()
+	req := ScanRequest{
+		ProjectRoot: filepath.Dir(rollout),
+		Instance:    SourceInstance{Source: domain.SourceCodex, RolloutPath: rollout, Schema: SchemaTag},
+	}
+	result, err := adapter.Scan(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(result.Envelopes) != 1 {
+		t.Fatalf("Scan returned %d envelopes, want 1", len(result.Envelopes))
+	}
+	env := result.Envelopes[0]
+	if env.Actor.Model != "codex-large-v1" {
+		t.Fatalf("envelope Actor.Model = %q, want %q", env.Actor.Model, "codex-large-v1")
+	}
+	if env.Actor.Kind != "agent" || env.Actor.Name != "codex" {
+		t.Fatalf("envelope Actor = %+v, want {Kind:agent, Name:codex, Model:codex-large-v1}", env.Actor)
+	}
+}
+
 func TestScan_CursorAdvancesAndSkipsEarlierTurns(t *testing.T) {
 	rollout := writeScanFile(t, "rollout-cursor.jsonl",
 		scanSessionMeta("session-001")+"\n"+
@@ -205,7 +236,14 @@ func scanSessionMeta(sessionID string) string {
 }
 
 func scanTurnContext(turnID string) string {
-	return `{"timestamp":"2026-07-27T12:00:01Z","type":"turn_context","payload":{"turn_id":"` + turnID + `"}}`
+	return scanTurnContextWithModel(turnID, "")
+}
+
+func scanTurnContextWithModel(turnID, model string) string {
+	if model == "" {
+		return `{"timestamp":"2026-07-27T12:00:01Z","type":"turn_context","payload":{"turn_id":"` + turnID + `"}}`
+	}
+	return `{"timestamp":"2026-07-27T12:00:01Z","type":"turn_context","payload":{"turn_id":"` + turnID + `","model":"` + model + `"}}`
 }
 
 func scanEventMsg(eventType, turnID, role, text string) string {

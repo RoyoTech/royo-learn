@@ -34,6 +34,8 @@ type codexEvent struct {
 		Arguments      json.RawMessage `json:"arguments"`
 		Output         string          `json:"output"`
 		Text           string          `json:"text"`
+		Model          string          `json:"model"`
+		Cwd            string          `json:"cwd"`
 	} `json:"payload"`
 }
 
@@ -100,6 +102,13 @@ func (a *Adapter) Scan(ctx context.Context, req ScanRequest) (ScanResult, error)
 			turns[id] = newCodexTurn(id)
 			if _, ok := indexOfTurn(turnOrder, id); !ok {
 				turnOrder = append(turnOrder, id)
+			}
+			// turn_context is the per-turn anchor for the active Codex
+			// model. design.md §Scan requires Actor.Model to come from
+			// here so envelopes can discriminate between Codex models
+			// downstream.
+			if ev.Payload.Model != "" {
+				turns[id].Model = ev.Payload.Model
 			}
 		case "event_msg":
 			id := firstNonEmpty(ev.TurnID, ev.Payload.TurnID)
@@ -217,6 +226,7 @@ func (a *Adapter) Scan(ctx context.Context, req ScanRequest) (ScanResult, error)
 
 type codexTurn struct {
 	ID              string
+	Model           string
 	UserText        string
 	AssistantText   string
 	ToolCalls       []experience.SafeToolCall
@@ -295,7 +305,7 @@ func makeCodexEnvelope(req ScanRequest, sessionID, turnID string, turn *codexTur
 	envelope.Turn.UserText = turn.UserText
 	envelope.Turn.AssistantText = turn.AssistantText
 	envelope.Turn.SourceRevision = sourceHash
-	envelope.Actor = domain.Actor{Kind: "agent", Name: "codex"}
+	envelope.Actor = domain.Actor{Kind: "agent", Name: "codex", Model: turn.Model}
 
 	if len(turn.ToolCalls) > 0 {
 		prepared := make([]experience.SafeToolCall, 0, len(turn.ToolCalls))
