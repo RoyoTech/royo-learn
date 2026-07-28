@@ -34,14 +34,6 @@ func (a *Adapter) now() time.Time {
 	return time.Now().UTC()
 }
 
-// Health is replaced by slice 10.2.
-func (a *Adapter) Health(ctx context.Context, _ SourceInstance) HealthResult {
-	if err := ctx.Err(); err != nil {
-		return HealthResult{Status: "error", Code: string(domain.ErrTimeout), Message: err.Error(), CheckedAt: a.now()}
-	}
-	return HealthResult{Status: "degraded", Code: string(domain.ErrExperienceSchemaUnsupported), CheckedAt: a.now()}
-}
-
 // Scan is replaced by slice 10.3.
 func (a *Adapter) Scan(ctx context.Context, _ ScanRequest) (ScanResult, error) {
 	if err := ctx.Err(); err != nil {
