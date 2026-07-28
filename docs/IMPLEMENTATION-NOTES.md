@@ -656,3 +656,47 @@ Solución v1:
 **Consecuencia operacional**: la trazabilidad del review queda en este documento y en el commit message. El PR puede mergear sin un receipt content-bound. Si el operador (en otro turno) quiere reabrir la trazabilidad, la opcion `b` de lessons.md entry 5 (parar y pedir maintainer) sigue disponible.
 
 **Patron documentado**: este es el tercer gap-acceptance consecutivo (Hito 6, Hito 7.1, Hito 9). El sistema gentle-ai no esta cerrando el bucle de receipt sobre commits pre-push. Recomendacion para el maintainer del harness: investigar por que `validate` exige un `lineageId` que el propio `inspect` reporta como no existente en su lista de candidatos.
+
+## Hito 10 — Claude Code adapter (PR #11)
+
+### Decisiones de scope (2026-07-27)
+
+- **Branch:** `feat/hito10-claudecode` desde `origin/main` (`d4a3d63`). 8 commits atómicos, una slice por commit, conventional commits, sin AI attribution.
+- **Slices 10.0–10.7 shipped:**
+  - 10.0 scaffold (`e79e2e1`) — interface + types + contract test
+  - 10.1 Discover (`1f40b11`) — canonical walk, symlink guard
+  - 10.2 Health (`bc47dbd`) — stat + 1-KiB header probe
+  - 10.3 Scan (`84306e6`) — JSONL → envelope, drop thinking, sha256 locator
+  - 10.4 Idempotency (`95e932e`) — cursor + service integration
+  - 10.5 ResolveTrace (`b230f72`) — bounded redacted excerpt
+  - 10.6 CLI subcommand (`81c2fa7`) — `experience claude-code scan`
+  - 10.7 Job registry (`0cab86e`) — `experience_ingest:claude_code`
+- **Spec finalization deferida a archive:** `openspec/changes/hito10-claudecode/{proposal,design,tasks}.md` permanece untracked en working tree. `docs/04-CLI-SPEC.md` y `docs/25-EXPERIENCE-ACCEPTANCE-MATRIX.md` no se modificaron en apply; el operador los actualiza en archive.
+- **Discovery sobre el proposal:** la propuesta referenciaba `experience_ingest:opencode` como precedente de registration, pero **no existía** en código. 10.7 introduce el primer `experience_ingest:*` (claude_code). El de opencode queda como follow-up fuera de este PR.
+
+### Pendiente fuera de scope (PR #11)
+
+- **Push + PR**: el sandbox WSL de la sesión no puede invocar `gh.exe` ni el credential helper de git ("Exec format error" en WSL interop). Artefactos preparados en `/tmp/hito10-pr-body.md` y `/tmp/hito10-push-and-pr.sh`. El operador corre el script desde su shell nativo. Ver lessons.md (memoria `go-binary-location`) para contexto.
+- **Review lifecycle gap**: per lessons.md entry 5, `gentle_review validate` no cierra el bucle de receipt sobre commits pre-push. Cuarto gap consecutivo (Hito 6, 7.1, 9, 10). El operador acepta el gap documentándolo en commit message y push directo, o para y pide maintainer.
+- **CI gates no ejecutados localmente**: `race-linux` (-race, gcc no instalado), `cross-build` (windows/linux/darwin), `coverage-linux` (≥ 85% en `internal/experience/claudecode/`). CI los corre.
+- **`experience_ingest:opencode` registration**: no introducido en este PR. Follow-up natural: anexar al slice 10.7 (o en el PR de opencode retroactivo) para que el motor de jobs tenga ambos adapters simétricos.
+
+### Decisiones operativas durante la sesión
+
+- **Tres reescrituras de historial** (slices 10.1, 10.2, 10.6) por bundling no autorizado de spec/docs en slice commits. Recipe aplicado: `git reset --mixed HEAD~1` (o más para llegar al commit limpio) + `git add` selectivo de archivos de código + `git commit -F /tmp/msg-*.txt`. Memoria `sdd-apply-scope-spec.md` documenta el patrón y la recipe.
+- **Go binary location**: Go 1.25.5 está en `/home/angel/local/go/bin/`, no en PATH por defecto en este WSL. Todo gate local requirió `export PATH=/home/angel/local/go/bin:$PATH`. Memoria `go-binary-location.md` documenta el patrón.
+- **Bundle commit vs scaffold split**: en slice 10.1 el agente bundleó el scaffold 10.0 (estaba untracked) en el commit de 10.1. El operador rechazó bundling y pidió split limpio, resultando en dos commits separados. La memoria captura esta preferencia.
+
+### Acceptance matrix (docs/25) — PR #11 rows
+
+- Hito 2 security row (T4): ✓ symlink escape rechazado con `experience_locator_outside_root`.
+- Hito 2 health row (§6 mapping): ✓ ok/degraded/error con códigos estables.
+- Hito 2 fixture row (redaction, no secrets): ✓ `internal/evidence.Redact` round-trip sigue verde; fixture sintético sin secretos.
+- Hito 2 reinicio row (idempotent re-ingest): ✓ `TestScan_RescanAfterIngestIsIdempotent` GREEN.
+- Hito 2 source-mutated row (T12): ✓ `trace_source_changed` con excerpt advisory.
+- Hito 8 jobs row: ✓ `TestJobRegistration_Idempotent` GREEN; una sola fila de registry tras 2× Register.
+
+### Próximo Hito
+
+- **PR #12 (Codex adapter)**: `openspec/changes/hito10-codex/{proposal,design,tasks}.md` ya escritos. Branch `feat/hito10-codex` desde `origin/main` **tras mergear PR #11** (per lessons.md entry 4: no branch desde local main). Mismo slice breakdown (12.0–12.7) que Claude Code; primer slice 12.0 scaffold.
+- **Hito 11 (semántica)** y **Hito 12 (drift/release)** quedan en Ola 3.
