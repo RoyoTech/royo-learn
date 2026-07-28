@@ -278,3 +278,80 @@ Hito 7 onward, the safer call sequence is
 - The finalize-dropped rule (entry 5) explains why the operator
   may accept a documented gap as the gate instead of insisting
   on a successful receipt.
+
+---
+
+## 6. `git push` from WSL: use the Windows-side `id_ed25519`, not `~/.ssh/`
+
+**Learned**: 2026-07-28 (Hito 10 Codex session). The first attempt
+to push `feat/hito10-codex` to `RoyoTech/royo-learn` failed because
+the agent searched `/home/angel/.ssh/` (WSL) for an SSH key and
+found only `id_ed25519` (fingerprint `A4CEAIwfc8tYORvgpGXjnqbmG6VqLYC/zWconpJPxRs`),
+which is registered as a **read-only** deploy key. The push
+returned `ERROR: Permission to RoyoTech/royo-learn.git denied to
+deploy key`.
+
+**Problem**: There are **two** independent `~/.ssh/` directories in
+this environment — one on the WSL side (`/home/angel/.ssh/`), one
+on the Windows side (`C:\Users\angel\.ssh\` mounted at
+`/mnt/c/Users/angel/.ssh/`). They do **not** share files. The
+read/write deploy key (`royo-learn-deploy`,
+`SHA256:28vajSJ0cGstFngwHngb68TcyKPpX5OvFPGczSLln7Y`) lives only
+on the Windows side. Searching `~/.ssh/` from WSL misses it.
+
+**Recipe** (use after the lifecycle `review/start` has been closed
+and the working tree is clean):
+
+```bash
+cd /mnt/c/wordpress-lab/wp-content/proyectos/agent-royo-learn-codex-spec
+
+# 1. Confirm fingerprint matches the read/write deploy key on GitHub.
+ssh-keygen -lf /mnt/c/Users/angel/.ssh/id_ed25519
+# Expected: SHA256:28vajSJ0cGstFngwHngb68TcyKPpX5OvFPGczSLln7Y
+
+# 2. SSH rejects keys with mode 0777 (which is the Windows-side default).
+#    Copy to /tmp with the right perms.
+cp /mnt/c/Users/angel/.ssh/id_ed25519 /tmp/royo-learn-deploy-key
+chmod 600 /tmp/royo-learn-deploy-key
+
+# 3. Switch the remote to SSH (HTTPS path requires gh.exe, which fails).
+git remote set-url origin git@github.com:RoyoTech/royo-learn.git
+
+# 4. Push with the explicit key.
+GIT_SSH_COMMAND="ssh -i /tmp/royo-learn-deploy-key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+  git push -u origin feat/hito10-codex
+
+# 5. PR: gh.exe fails from WSL. The push response prints the URL:
+#    https://github.com/RoyoTech/royo-learn/pull/new/feat/hito10-codex
+#    Open that URL in a browser, or run `gh pr create` from PowerShell.
+```
+
+**Anti-recipe** (what NOT to do):
+
+- Do not try `id_ed25519` from `/home/angel/.ssh/` — read-only.
+- Do not try `royotech_ops_deploy_ed25519` from
+  `~/.codex/github_keys/` — read-only.
+- Do not try `gh.exe`, `cmd.exe`, `powershell.exe`, `wsl.exe` from
+  WSL bash — "Exec format error" (entry 2 covers this).
+- Do not paste the private key anywhere outside `/tmp/`.
+
+**Detection signals**:
+
+- `git push` returns `ERROR: Permission to ... denied to deploy key`.
+  → Wrong key (read-only) OR correct key without write flag.
+- `ssh-keygen -lf <key>` fingerprint does NOT match
+  `SHA256:28vajSJ0cGstFngwHngb68TcyKPpX5OvFPGczSLln7Y`.
+  → Not the read/write deploy key.
+- `ssh -i <key> -v -T git@github.com` shows
+  `Authenticated to github.com using "publickey"` but no shell
+  → Key is registered but GitHub denies push.
+
+**Why two `~/.ssh/` dirs**: WSL runs Linux in a sandboxed VM with
+its own filesystem. Windows-side config (added by PowerShell users
+or tools like GitHub Desktop) lives in `C:\Users\<user>\.ssh\` and
+is mounted read-write at `/mnt/c/Users/<user>/.ssh/`. They are
+not symlinked. Treating them as one directory is the failure mode.
+
+**Related**: rule 11 of `AGENTS.md` (no publicar sin aprobación)
+is unaffected — this entry describes an operational recipe, not
+a project rule.
