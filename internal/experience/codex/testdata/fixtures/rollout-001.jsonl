@@ -1,0 +1,10 @@
+{"timestamp":"2026-07-27T12:00:00Z","type":"session_meta","payload":{"codex_session_id":"session-001","cwd":"/tmp/project","cli_version":"1.2.3"}}
+{"timestamp":"2026-07-27T12:00:01Z","type":"turn_context","payload":{"turn_id":"turn-1"}}
+{"timestamp":"2026-07-27T12:00:02Z","type":"event_msg","payload":{"type":"event_msg.task_started","turn_id":"turn-1","role":"user","message":"hello"}}
+{"timestamp":"2026-07-27T12:00:03Z","type":"response_item","turn_id":"turn-1","payload":{"role":"assistant","type":"function_call","name":"shell","arguments":{"cmd":"ls"},"call_id":"call-1"}}
+{"timestamp":"2026-07-27T12:00:04Z","type":"response_item","turn_id":"turn-1","payload":{"role":"assistant","type":"reasoning","text":"SECRET-LEAK reasoning"}}
+{"timestamp":"2026-07-27T12:00:05Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-1","output":"SECRET-LEAK output"}}
+{"timestamp":"2026-07-27T12:00:06Z","type":"event_msg","payload":{"type":"event_msg.task_complete","turn_id":"turn-1","role":"assistant","message":"done"}}
+{"timestamp":"2026-07-27T12:01:00Z","type":"turn_context","payload":{"turn_id":"turn-2"}}
+{"timestamp":"2026-07-27T12:01:01Z","type":"event_msg","payload":{"type":"event_msg.task_started","turn_id":"turn-2","role":"user","message":"second"}}
+{"timestamp":"2026-07-27T12:01:02Z","type":"event_msg","payload":{"type":"event_msg.task_complete","turn_id":"turn-2","role":"assistant","message":"finished"}}
