@@ -34,14 +34,6 @@ func (a *Adapter) now() time.Time {
 	return time.Now().UTC()
 }
 
-// Scan is replaced by slice 10.3.
-func (a *Adapter) Scan(ctx context.Context, _ ScanRequest) (ScanResult, error) {
-	if err := ctx.Err(); err != nil {
-		return ScanResult{}, err
-	}
-	return ScanResult{Status: "ok", ScannedAt: a.now()}, nil
-}
-
 // ResolveTrace is replaced by slice 10.5.
 func (a *Adapter) ResolveTrace(ctx context.Context, _ domain.TranscriptLocator, _ TraceBounds) TraceResult {
 	if err := ctx.Err(); err != nil {
