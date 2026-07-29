@@ -82,6 +82,13 @@ type Result struct {
 	// ErrorCode is a structured failure code ("" on success). The
 	// audit hook writes it into the job_failed event's payload.
 	ErrorCode string
+
+	// ErrorMessage is a human-readable failure message ("" on
+	// success). The audit hook writes it into the job_failed
+	// event's payload. The field is intentionally separate from
+	// ErrorCode so the allow-list helper can write each value to
+	// its own key (docs/24-TM §6, hito10-codex-review-fixes.md).
+	ErrorMessage string
 }
 
 // Job binds a registry entry to its runtime closure. The static
