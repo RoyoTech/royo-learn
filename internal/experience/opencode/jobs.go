@@ -1,22 +1,24 @@
-package claudecode
+package opencode
 
 import (
 	"context"
+	"time"
 
 	"agent-royo-learn/internal/domain"
+	"agent-royo-learn/internal/experience"
 	"agent-royo-learn/internal/experience/jobs"
 	"agent-royo-learn/internal/experience/semantic"
 )
 
-// JobName is the canonical job identifier for the Claude Code ingest loop.
-const JobName = "experience_ingest:claude_code"
+// JobName is the canonical job identifier for the OpenCode ingest loop.
+const JobName = "experience_ingest:opencode"
 
-// Job returns a fresh runtime binding for the Claude Code ingest job.
+// Job returns a fresh runtime binding for the OpenCode ingest job.
 func (a *Adapter) Job() *semantic.Job {
-	entry := newIngestJobRegistryEntry()
+	entry := newIngestJobRegistryEntry(a.now())
 	return &semantic.Job{
 		Name:               entry.JobName,
-		Source:             string(domain.SourceClaudeCode),
+		Source:             string(domain.SourceOpenCode),
 		Intent:             entry.Intent,
 		Scope:              entry.Scope,
 		RiskClass:          entry.RiskClass,
@@ -32,25 +34,33 @@ func (a *Adapter) Job() *semantic.Job {
 				return semantic.Result{}, nil
 			}
 			result, err := a.Scan(ctx, ScanRequest{ProjectRoot: instance.ProjectRoot, Instance: instance})
-			out := semantic.Result{SkippedIncomplete: result.SkippedIncomplete, SkippedMalformed: result.SkippedMalformed}
-			out.Envelopes = make([]any, len(result.Envelopes))
-			for i := range result.Envelopes {
-				out.Envelopes[i] = result.Envelopes[i]
-			}
-			return out, err
+			return semanticResult(result.Envelopes, result.SkippedIncomplete, 0, result.NextCursor), err
 		},
 	}
 }
 
-func newIngestJobRegistryEntry() jobs.JobRegistryEntry {
+func newIngestJobRegistryEntry(createdAt time.Time) jobs.JobRegistryEntry {
 	return jobs.JobRegistryEntry{
 		JobName:            JobName,
-		Description:        "Incremental ingest of Claude Code JSONL transcripts.",
+		Description:        "Incremental ingest of OpenCode SQLite transcripts.",
 		DefaultIntervalSec: 300,
 		DefaultMaxRetries:  3,
 		Enabled:            false,
+		CreatedAt:          createdAt.UTC(),
 		Intent:             semantic.JobIntentIngest,
 		Scope:              semantic.JobScopeProject,
 		RiskClass:          semantic.JobRiskClassLow,
 	}
+}
+
+func semanticResult(envelopes []experience.ExperienceEnvelope, skippedIncomplete, skippedMalformed int, cursor map[string]any) semantic.Result {
+	out := semantic.Result{SkippedIncomplete: skippedIncomplete, SkippedMalformed: skippedMalformed}
+	out.Envelopes = make([]any, len(envelopes))
+	for i := range envelopes {
+		out.Envelopes[i] = envelopes[i]
+	}
+	if value, ok := cursor["last_message_id"].(string); ok {
+		out.NextCursor = value
+	}
+	return out
 }

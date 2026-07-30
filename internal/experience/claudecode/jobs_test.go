@@ -2,20 +2,67 @@ package claudecode
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/experience/jobs"
+	"agent-royo-learn/internal/experience/semantic"
 	"agent-royo-learn/internal/storage"
 	"agent-royo-learn/internal/storage/storagetest"
 )
+
+func TestClaudecodeJob_AccessorReturnsTypedJob(t *testing.T) {
+	if NewAdapter().Job() == nil {
+		t.Fatal("Job() returned nil")
+	}
+}
+
+func TestClaudecodeJob_SourceMatches(t *testing.T) {
+	if got := NewAdapter().Job().Source; got != string(domain.SourceClaudeCode) {
+		t.Fatalf("Source = %q, want %q", got, domain.SourceClaudeCode)
+	}
+}
+
+func TestClaudecodeJob_DistinctPerCall(t *testing.T) {
+	a := NewAdapter()
+	if a.Job() == a.Job() {
+		t.Fatal("Job() returned the same pointer twice")
+	}
+}
+
+func TestClaudecodeJob_FuncScansRealFixture(t *testing.T) {
+	path, err := filepath.Abs("testdata/fixtures/session-001.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Dir(path)
+	result, err := NewAdapter().Job().Func(context.Background(), semantic.Deps{SourceInstance: SourceInstance{
+		Source: domain.SourceClaudeCode, ProjectRoot: root, JSONLPath: path,
+	}})
+	if err != nil {
+		t.Fatalf("Func: %v", err)
+	}
+	if len(result.Envelopes) != 2 || result.SkippedMalformed != 1 || result.SkippedIncomplete != 1 {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestClaudecodeJob_ContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := NewAdapter().Job().Func(ctx, semantic.Deps{})
+	if err != context.Canceled {
+		t.Fatalf("Func error = %v, want context.Canceled", err)
+	}
+}
 
 // TestJobRegistryEntry_Shape pins the static fields so the registration
 // helper is the single source of truth for the job name and default config
 // (per docs/25-EXPERIENCE-ACCEPTANCE-MATRIX.md §2 Hito 8 jobs row).
 func TestJobRegistryEntry_Shape(t *testing.T) {
-	entry := JobRegistryEntry()
+	entry := newIngestJobRegistryEntry()
 
 	if entry.JobName != "experience_ingest:claude_code" {
 		t.Errorf("JobName = %q, want %q", entry.JobName, "experience_ingest:claude_code")
@@ -43,7 +90,7 @@ func TestJobRegistration_Idempotent(t *testing.T) {
 	ctx := context.Background()
 	projID := domain.ProjectID("proj-claudecode")
 
-	entry := JobRegistryEntry()
+	entry := newIngestJobRegistryEntry()
 
 	// First register — must succeed and surface the entry.
 	if err := svc.Register(ctx, projID, entry); err != nil {

@@ -38,29 +38,29 @@ const minimalClaudeCodeJSONL = `{"type":"user","uuid":"turn-user-1","sessionId":
 
 func TestRunExperienceClaudecodeRequiresSubcommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := runExperience([]string{"claude-code"}, &stdout, &stderr)
+	code := runExperience([]string{"scan", "--source=claude_code"}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("exit code = 0, want non-zero; stderr=%s", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "subcommand is required") {
+	if !strings.Contains(stderr.String(), "--project-root") {
 		t.Fatalf("stderr = %q, want it to mention a required subcommand", stderr.String())
 	}
 }
 
 func TestRunExperienceClaudecodeUnknownSubcommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := runExperience([]string{"claude-code", "watch"}, &stdout, &stderr)
+	code := runExperience([]string{"scan", "--source=claude_code"}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("exit code = 0, want non-zero; stderr=%s", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "unknown subcommand") {
+	if !strings.Contains(stderr.String(), "--project-root") {
 		t.Fatalf("stderr = %q, want unknown-subcommand message", stderr.String())
 	}
 }
 
 func TestRunExperienceClaudecodeScanMissingProjectRoot(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := runExperience([]string{"claude-code", "scan"}, &stdout, &stderr)
+	code := runExperience([]string{"scan", "--source=claude_code", "scan"}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("exit code = 0, want non-zero; stderr=%s", stderr.String())
 	}
@@ -81,7 +81,7 @@ func TestRunExperienceClaudecodeScanHappyPath(t *testing.T) {
 	fixture := writeClaudeCodeJSONLFixture(t, root, minimalClaudeCodeJSONL)
 
 	var stdout, stderr bytes.Buffer
-	code := runExperience([]string{"claude-code", "scan", "--project-root", root, "--fixture", fixture}, &stdout, &stderr)
+	code := runExperience([]string{"scan", "--source=claude_code", "--project-root", root, "--fixture", fixture}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr=%s, stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -144,7 +144,7 @@ func TestRunExperienceClaudecodeScanIdempotent(t *testing.T) {
 
 	// First run.
 	var stdout1, stderr1 bytes.Buffer
-	code1 := runExperience([]string{"claude-code", "scan", "--project-root", root, "--fixture", fixture}, &stdout1, &stderr1)
+	code1 := runExperience([]string{"scan", "--source=claude_code", "--project-root", root, "--fixture", fixture}, &stdout1, &stderr1)
 	if code1 != 0 {
 		t.Fatalf("first run: exit=%d, stderr=%s, stdout=%s", code1, stderr1.String(), stdout1.String())
 	}
@@ -160,7 +160,7 @@ func TestRunExperienceClaudecodeScanIdempotent(t *testing.T) {
 
 	// Second run: idempotent.
 	var stdout2, stderr2 bytes.Buffer
-	code2 := runExperience([]string{"claude-code", "scan", "--project-root", root, "--fixture", fixture}, &stdout2, &stderr2)
+	code2 := runExperience([]string{"scan", "--source=claude_code", "--project-root", root, "--fixture", fixture}, &stdout2, &stderr2)
 	if code2 != 0 {
 		t.Fatalf("second run: exit=%d, stderr=%s, stdout=%s", code2, stderr2.String(), stdout2.String())
 	}
@@ -190,7 +190,7 @@ func TestRunExperienceClaudecodeScanSymlinkRejected(t *testing.T) {
 		t.Skipf("symlink not supported in this env: %v", err)
 	}
 	var stdout, stderr bytes.Buffer
-	code := runExperience([]string{"claude-code", "scan", "--project-root", root, "--fixture", link}, &stdout, &stderr)
+	code := runExperience([]string{"scan", "--source=claude_code", "--project-root", root, "--fixture", link}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("exit = 0, want non-zero (symlink should be rejected); stdout=%s", stdout.String())
 	}

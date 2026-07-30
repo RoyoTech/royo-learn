@@ -20,6 +20,32 @@ Inyecta un `ExperienceEnvelope` JSON de fixture mediante `--envelope <path>` o `
 royo-learn experience inject --envelope fixture.json --project-root /repo
 ```
 
+### `royo-learn experience scan`
+
+Runs one unified experience scan. `--source` is required and accepts the
+engine-owned source values `opencode`, `claudecode`, or `codex`.
+
+```text
+royo-learn experience scan --source=opencode --project-root /repo
+royo-learn experience scan --source=claudecode --project-root /repo
+royo-learn experience scan --source=codex --project-root /repo
+```
+
+Flags:
+
+```text
+--source <opencode|claudecode|codex>   required adapter selector
+--project-root <path>                  required project root
+--fixture <path>                       optional real SQLite/JSONL fixture
+--once                                 run one scan and exit (default true)
+```
+
+The JSON envelope remains stable across adapters: `source`, `status`,
+`instances`, `ingested_turns`, `duplicates`, `skipped_incomplete`,
+`skipped_malformed`, and `envelopes_total`. Binaries built with the CLI
+collapse disabled keep the legacy `experience <source> scan` form for one
+migration window and print a `DEPRECATED:` note to `stderr`.
+
 ### `royo-learn version`
 
 Muestra versión, commit, fecha y Go version.

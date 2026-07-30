@@ -119,29 +119,29 @@ func makeOpencodeFixtureEmpty(t *testing.T, root string) string {
 
 func TestRunExperienceOpencodeRequiresSubcommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := runExperience([]string{"opencode"}, &stdout, &stderr)
+	code := runExperience([]string{"scan", "--source=opencode"}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("exit code = 0, want non-zero; stderr=%s", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "subcommand is required") {
+	if !strings.Contains(stderr.String(), "--project-root") {
 		t.Fatalf("stderr = %q, want it to mention a required subcommand", stderr.String())
 	}
 }
 
 func TestRunExperienceOpencodeUnknownSubcommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := runExperience([]string{"opencode", "watch"}, &stdout, &stderr)
+	code := runExperience([]string{"scan", "--source=opencode"}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("exit code = 0, want non-zero; stderr=%s", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "unknown subcommand") {
+	if !strings.Contains(stderr.String(), "--project-root") {
 		t.Fatalf("stderr = %q, want unknown-subcommand message", stderr.String())
 	}
 }
 
 func TestRunExperienceOpencodeScanMissingProjectRoot(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := runExperience([]string{"opencode", "scan"}, &stdout, &stderr)
+	code := runExperience([]string{"scan", "--source=opencode", "scan"}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("exit code = 0, want non-zero; stderr=%s", stderr.String())
 	}
@@ -152,7 +152,7 @@ func TestRunExperienceOpencodeScanMissingProjectRoot(t *testing.T) {
 
 func TestRunExperienceOpencodeScanInvalidProjectRoot(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := runExperience([]string{"opencode", "scan", "--project-root", "/definitely/does/not/exist/royo-learn-cli-test"}, &stdout, &stderr)
+	code := runExperience([]string{"scan", "--source=opencode", "--project-root", "/definitely/does/not/exist/royo-learn-cli-test"}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("exit code = 0, want non-zero; stderr=%s", stderr.String())
 	}
@@ -161,7 +161,7 @@ func TestRunExperienceOpencodeScanInvalidProjectRoot(t *testing.T) {
 func TestRunExperienceOpencodeScanEmptyDiscovery(t *testing.T) {
 	root := setupProjectRoot(t)
 	var stdout, stderr bytes.Buffer
-	code := runExperience([]string{"opencode", "scan", "--project-root", root}, &stdout, &stderr)
+	code := runExperience([]string{"scan", "--source=opencode", "--project-root", root}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr=%s, stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -188,7 +188,7 @@ func TestRunExperienceOpencodeScanFixture(t *testing.T) {
 	root := setupProjectRoot(t)
 	fixture := makeOpencodeFixtureEmpty(t, root)
 	var stdout, stderr bytes.Buffer
-	code := runExperience([]string{"opencode", "scan", "--project-root", root, "--fixture", fixture}, &stdout, &stderr)
+	code := runExperience([]string{"scan", "--source=opencode", "--project-root", root, "--fixture", fixture}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr=%s, stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -234,7 +234,7 @@ func TestRunExperienceOpencodeScanFixtureIngestAndIdempotent(t *testing.T) {
 
 	// First run: ingests the one complete turn.
 	var stdout1, stderr1 bytes.Buffer
-	code1 := runExperience([]string{"opencode", "scan", "--project-root", root, "--fixture", fixture}, &stdout1, &stderr1)
+	code1 := runExperience([]string{"scan", "--source=opencode", "--project-root", root, "--fixture", fixture}, &stdout1, &stderr1)
 	if code1 != 0 {
 		t.Fatalf("first run: exit=%d, stderr=%s, stdout=%s", code1, stderr1.String(), stdout1.String())
 	}
@@ -269,7 +269,7 @@ func TestRunExperienceOpencodeScanFixtureIngestAndIdempotent(t *testing.T) {
 	// Second run: same fixture, same project root → the service must report
 	// the turn as a duplicate (idempotency by source + external IDs).
 	var stdout2, stderr2 bytes.Buffer
-	code2 := runExperience([]string{"opencode", "scan", "--project-root", root, "--fixture", fixture}, &stdout2, &stderr2)
+	code2 := runExperience([]string{"scan", "--source=opencode", "--project-root", root, "--fixture", fixture}, &stdout2, &stderr2)
 	if code2 != 0 {
 		t.Fatalf("second run: exit=%d, stderr=%s, stdout=%s", code2, stderr2.String(), stdout2.String())
 	}
@@ -319,7 +319,7 @@ func TestRunExperienceOpencodeScanFixtureSkipsIncomplete(t *testing.T) {
 	})
 
 	var stdout, stderr bytes.Buffer
-	code := runExperience([]string{"opencode", "scan", "--project-root", root, "--fixture", fixture}, &stdout, &stderr)
+	code := runExperience([]string{"scan", "--source=opencode", "--project-root", root, "--fixture", fixture}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr=%s, stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -357,7 +357,7 @@ func TestRunExperienceOpencodeScanFixtureSymlinkRejected(t *testing.T) {
 		t.Skipf("symlink not supported in this env: %v", err)
 	}
 	var stdout, stderr bytes.Buffer
-	code := runExperience([]string{"opencode", "scan", "--project-root", root, "--fixture", link}, &stdout, &stderr)
+	code := runExperience([]string{"scan", "--source=opencode", "--project-root", root, "--fixture", link}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("exit = 0, want non-zero (symlink should be rejected); stdout=%s", stdout.String())
 	}
@@ -405,7 +405,7 @@ func TestRunExperienceOpencodeScanFixtureOutsideRootRejected(t *testing.T) {
 		t.Fatalf("move fixture: %v", err)
 	}
 	var stdout, stderr bytes.Buffer
-	code := runExperience([]string{"opencode", "scan", "--project-root", root, "--fixture", moved}, &stdout, &stderr)
+	code := runExperience([]string{"scan", "--source=opencode", "--project-root", root, "--fixture", moved}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("exit = 0, want non-zero; stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
@@ -421,7 +421,7 @@ func TestRunExperienceOpencodeScanFixtureSecretIdempotent(t *testing.T) {
 	fixture := makeOpencodeFixtureWithSecretTurn(t, root)
 
 	var stdout1, stderr1 bytes.Buffer
-	code1 := runExperience([]string{"opencode", "scan", "--project-root", root, "--fixture", fixture}, &stdout1, &stderr1)
+	code1 := runExperience([]string{"scan", "--source=opencode", "--project-root", root, "--fixture", fixture}, &stdout1, &stderr1)
 	if code1 != 0 {
 		t.Fatalf("first run: exit=%d, stderr=%s, stdout=%s", code1, stderr1.String(), stdout1.String())
 	}
@@ -437,7 +437,7 @@ func TestRunExperienceOpencodeScanFixtureSecretIdempotent(t *testing.T) {
 	}
 
 	var stdout2, stderr2 bytes.Buffer
-	code2 := runExperience([]string{"opencode", "scan", "--project-root", root, "--fixture", fixture}, &stdout2, &stderr2)
+	code2 := runExperience([]string{"scan", "--source=opencode", "--project-root", root, "--fixture", fixture}, &stdout2, &stderr2)
 	if code2 != 0 {
 		t.Fatalf("second run: exit=%d, stderr=%s, stdout=%s", code2, stderr2.String(), stdout2.String())
 	}

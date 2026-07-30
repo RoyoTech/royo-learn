@@ -68,6 +68,14 @@
       ruta del artefacto de recuperación de un error de rollback.
 - [ ] occurrence.
 - [ ] métricas.
+- [ ] cada ejecución de job registra `job_pending`, `job_running` y exactamente
+      un evento terminal (`job_succeeded` o `job_failed`) con el mismo `run_id`.
+- [ ] los payloads `job_*` respetan el allow-list del engine y no contienen
+      texto de transcript, argumentos de tools ni `OutputHint`.
+- [ ] la migración 008 agrega taxonomía a `job_registry` y `job_run_log` de
+      forma idempotente en SQLite real.
+- [ ] `experience scan --source=<opencode|claudecode|codex>` conserva byte por
+      byte el envelope JSON del formulario legacy para la misma entrada.
 
 ## F. Seguridad
 
