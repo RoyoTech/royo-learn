@@ -18,6 +18,7 @@ import (
 	"agent-royo-learn/internal/experience/patterns"
 	"agent-royo-learn/internal/experience/trace"
 	"agent-royo-learn/internal/publish"
+	"agent-royo-learn/internal/publish/drift"
 	"agent-royo-learn/internal/recurrence"
 	"agent-royo-learn/internal/retrieval"
 	"agent-royo-learn/internal/storage"
@@ -1381,6 +1382,43 @@ func handleJobsRecover(srv *Server) func(ctx context.Context, req *mcp.CallToolR
 		return toolResultJSON(map[string]any{
 			"status":    "ok",
 			"recovered": recovered,
+		})
+	}
+}
+
+// driftStatusInput is the schema for experience_drift_status.
+type driftStatusInput struct {
+	Source string `json:"source,omitempty" jsonschema:"filter by source: opencode|claudecode|codex; empty = all sources"`
+}
+
+// handleDriftStatus reports drift across the three experience adapters and
+// the publication_drift_state table. Returns the same JSON envelope as the
+// CLI surface (`experience drift`) — see cmd/royo-learn/experience_drift.go.
+// Requires the admin profile.
+func handleDriftStatus(srv *Server) func(ctx context.Context, req *mcp.CallToolRequest, in driftStatusInput) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in driftStatusInput) (*mcp.CallToolResult, any, error) {
+		filter := drift.ListFilter{}
+		switch in.Source {
+		case "":
+			// all sources
+		case string(domain.SourceOpenCode), string(domain.SourceClaudeCode), string(domain.SourceCodex):
+			filter.Source = in.Source
+		default:
+			return toolResultJSON(map[string]any{
+				"status": "invalid_argument",
+				"error":  fmt.Sprintf("invalid source %q; allowed: opencode, claudecode, codex", in.Source),
+			})
+		}
+		repo := drift.NewRepository(srv.db.DB, nil)
+		rows, err := repo.ListDrift(ctx, filter)
+		if err != nil {
+			return toolDomainError(err, "drift_list_failed")
+		}
+		return toolResultJSON(map[string]any{
+			"status":       "ok",
+			"sources":      aggregateDriftBySource(rows),
+			"publications": redactDriftForJSON(rows),
+			"total":        len(rows),
 		})
 	}
 }

@@ -411,4 +411,13 @@ var allTools = []profileTool{
 			bind(ms, t, handleJobsRecover(srv))
 		},
 	},
+	{
+		name:        "experience_drift_status",
+		description: "Report drift status across the three experience adapters and the publication_drift_state table. Read-only. Requires the admin profile (Hito 12).",
+		access:      accessRead,
+		profiles:    map[string]bool{profileAdmin: true},
+		register: func(ms *mcp.Server, srv *Server, t profileTool) {
+			bind(ms, t, handleDriftStatus(srv))
+		},
+	},
 }

@@ -63,14 +63,6 @@ type Result struct {
 	Err        error
 }
 
-// IsReadOnly reports whether a given file path is unchanged by the
-// Checker. The contract_test.go uses this as a guard.
-//
-// Deprecated: this stub exists to keep the package-level docstring honest
-// while the read-only contract test is the canonical check. New callers
-// should import the contract test helpers directly.
-func IsReadOnly() bool { return true }
-
 // Checker computes SHA-256 of a published target and compares it to the
 // expected hash captured at publish time. It is strictly read-only on
 // the target — see contract_test.go.

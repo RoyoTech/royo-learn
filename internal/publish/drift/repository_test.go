@@ -337,3 +337,41 @@ func TestRecordDrift_DefaultCheckedAt(t *testing.T) {
 		t.Errorf("CheckedAt = %v, want %v (zero value should use injected clock)", got[0].CheckedAt, fixedNow())
 	}
 }
+
+// TestNewRepository_NilNowFn asserts the production path that passes
+// nil to NewRepository falls back to time.Now.UTC.
+func TestNewRepository_NilNowFn(t *testing.T) {
+	db, cleanup := openTestDB(t)
+	defer cleanup()
+
+	repo := NewRepository(db.DB, nil)
+	if repo == nil {
+		t.Fatal("NewRepository returned nil")
+	}
+	// Inject a row with CheckedAt=zero; the default nowFn should stamp it.
+	row := DriftRow{
+		PublicationID: "01HZXPUB0000000000000000000",
+		Source:        "opencode",
+		TargetPath:    "/var/data/nil-clock.jsonl",
+		ExpectedHash:  "e",
+		ActualHash:    "a",
+		Status:        StatusOK,
+		RunID:         "r",
+	}
+	before := time.Now().UTC().Add(-1 * time.Second)
+	if err := repo.RecordDrift(context.Background(), row); err != nil {
+		t.Fatalf("RecordDrift: %v", err)
+	}
+	after := time.Now().UTC().Add(1 * time.Second)
+
+	got, err := repo.ListDrift(context.Background(), ListFilter{})
+	if err != nil {
+		t.Fatalf("ListDrift: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("ListDrift returned %d rows, want 1", len(got))
+	}
+	if got[0].CheckedAt.Before(before) || got[0].CheckedAt.After(after) {
+		t.Errorf("CheckedAt = %v, want a value between %v and %v (time.Now fallback)", got[0].CheckedAt, before, after)
+	}
+}

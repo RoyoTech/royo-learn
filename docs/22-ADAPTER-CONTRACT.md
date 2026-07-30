@@ -302,6 +302,31 @@ neutral envelopes, and reports malformed and incomplete input through counters.
 - **AND** secrets are processed by `evidence.Redact`
 - **AND** reasoning and `function_call_output` content are absent
 
+### Requirement: Cross-adapter drift policy parity (Hito 12)
+
+All three adapters (`opencode`, `claudecode`, `codex`) MUST return an
+identical `ResolveTrace` result shape on source drift: the bounded excerpt
+is suppressed and the divergence surfaces as `Code="trace_source_changed"`
+plus `SourceChanged=true`. The "advisory excerpt" branch that historically
+existed in the Claude Code adapter is removed; callers see the same JSON
+shape regardless of which adapter emitted the result.
+
+#### Scenario: Source mismatch suppresses excerpt across all three adapters
+
+- **WHEN** any adapter's `ResolveTrace` runs with a `locator.SourceHash`
+  that does not match the on-disk hash
+- **THEN** `Result.Excerpt == ""` and `Result.Redacted == false`
+- **AND** `Result.Code == "trace_source_changed"` and `Result.SourceChanged == true`
+- **AND** `Result.Message` describes the divergence (no PII, no secret)
+
+#### Scenario: Source unavailable suppresses excerpt across all three adapters
+
+- **WHEN** any adapter's `ResolveTrace` cannot read or locate the source
+  (file removed, permissions, I/O error)
+- **THEN** `Result.Excerpt == ""`
+- **AND** `Result.Code` is one of `trace_source_unavailable`,
+  `experience_source_not_found`, `trace_event_unavailable` per adapter
+
 ### Requirement: CLI subcommand `experience codex scan` is additive
 
 #### Scenario: Dispatcher and output remain stable
