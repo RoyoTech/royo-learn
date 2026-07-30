@@ -192,3 +192,145 @@ royo-learn experience status
 Cada adaptador aporta: fixtures reales anonimizados, discovery seguro, parser
 versionado, estabilidad, trace resolver, setup reversible, checks de `doctor` y
 e2e.
+
+## 11. Extensión Codex rollout v1
+
+Los requisitos de esta sección son aditivos. Preservan la interfaz, los errores y
+las reglas generales anteriores, y concretan el tercer adaptador de plataforma en
+`internal/experience/codex`.
+
+### Requirement: ExperienceAdapter is implemented by every platform adapter
+
+El adaptador Codex implementa el contrato completo `ExperienceAdapter` sin cambiar
+firmas ni relajar las reglas de respeto de `context`, cierre de recursos y no
+mutación de la fuente.
+
+#### Scenario: Codex adapter satisfies the contract
+
+- **WHEN** `*codex.Adapter` is asserted to `codex.ExperienceAdapter` at compile time
+- **THEN** the assertion succeeds and `TestAdapter_ImplementsContract` passes
+- **AND** `codex.NewAdapter().Name()` equals `domain.SourceCodex` (`"codex"`)
+
+### Requirement: TranscriptLocator accepts `rollout` as a valid kind
+
+`rollout` es un `TranscriptLocator.Kind` válido junto con los valores existentes.
+
+#### Scenario: Codex scan builds a rollout locator
+
+- **WHEN** Codex builds an `ExperienceEnvelope`
+- **THEN** `Session.Locator.Kind == "rollout"`
+- **AND** `Path` is the canonical absolute rollout JSONL path
+- **AND** `SourceHash` is the file SHA-256 at scan time
+
+#### Scenario: Codex trace resolver rejects another locator kind
+
+- **WHEN** `ResolveTrace` receives `Kind != "rollout"`
+- **THEN** it returns `experience_locator_invalid`
+- **AND** performs no source I/O
+
+### Requirement: Schema tag for Codex is `codex/rollout-v1`
+
+El adaptador declara `SchemaTag = "codex/rollout-v1"`; cambiarlo es breaking.
+
+#### Scenario: SchemaTag is pinned by a test
+
+- **WHEN** the contract tests run
+- **THEN** `SchemaTag == "codex/rollout-v1"`
+
+#### Scenario: Schema mismatch is explicit and read-only
+
+- **WHEN** the first 1 KiB lacks a valid `session_meta` with non-empty
+  `payload.codex_session_id`
+- **THEN** Health returns `degraded` with
+  `experience_source_schema_unsupported`
+- **AND** source mtime and size remain unchanged
+
+### Requirement: Codex discovers caller-root-reachable rollout JSONL files
+
+Codex discovers only `rollout-*.jsonl` under `.codex/sessions/YYYY/MM/DD/` and
+`.codex/archived_sessions/` reachable from the canonical caller-supplied project
+root.
+
+#### Scenario: Discovery is safe and deterministic
+
+- **WHEN** valid active and archived rollout files exist
+- **THEN** they are returned sorted by `RolloutPath`
+- **AND** index files such as `session_index.jsonl` are ignored
+- **AND** files outside the project root, including symlink escapes, are not surfaced
+
+#### Scenario: Project root is required
+
+- **WHEN** `projectRoot` is empty or whitespace
+- **THEN** Discover returns `experience_locator_invalid`
+- **AND** performs no filesystem walk
+
+### Requirement: Codex Scan produces neutral envelopes and a stable cursor
+
+Scan treats `session_meta` and `turn_context` as anchors, emits only complete
+neutral envelopes, and reports malformed and incomplete input through counters.
+
+#### Scenario: Anchors do not emit envelopes
+
+- **WHEN** Scan reads `session_meta` or `turn_context`
+- **THEN** it updates session/turn anchors only
+
+#### Scenario: Unsafe or incomplete content is omitted
+
+- **WHEN** a turn is incomplete, a line is malformed, or a `reasoning` item appears
+- **THEN** incomplete and malformed counters are incremented as applicable
+- **AND** reasoning is absent from every envelope field
+- **AND** `function_call_output` is represented only by a bounded digest or omission marker
+
+#### Scenario: Cursor is opaque, stable, and idempotent
+
+- **WHEN** Scan emits at least one envelope
+- **THEN** `NextCursor` carries string fields `last_session_id` and `last_turn_uuid`
+- **AND** scanning the same fixture again with that cursor emits no new envelopes
+
+### Requirement: Codex ResolveTrace returns bounded, redacted excerpts
+
+#### Scenario: Source changes or disappears
+
+- **WHEN** the current source hash differs from `locator.SourceHash`
+- **THEN** ResolveTrace returns `trace_source_changed` with no excerpt
+- **AND** a missing source or turn returns `trace_source_unavailable` with no excerpt
+
+#### Scenario: Excerpt is safe
+
+- **WHEN** the requested turn exists
+- **THEN** the excerpt respects `bounds.MaxBytes` and uses `...` when truncated
+- **AND** secrets are processed by `evidence.Redact`
+- **AND** reasoning and `function_call_output` content are absent
+
+### Requirement: CLI subcommand `experience codex scan` is additive
+
+#### Scenario: Dispatcher and output remain stable
+
+- **WHEN** `royo-learn experience codex scan --project-root <path>` runs
+- **THEN** it routes to the Codex orchestrator
+- **AND** missing `--project-root` returns `invalid_argument`
+- **AND** stdout includes `source`, `status`, `instances`, `ingested_turns`,
+  `duplicates`, `skipped_incomplete`, `skipped_malformed`, and `envelopes_total`
+
+#### Scenario: Fixture path is constrained
+
+- **WHEN** `--fixture` is a symlink, outside the canonical root, or not `.jsonl`
+- **THEN** a typed error is returned and no scan occurs
+
+### Requirement: Job registry entry `experience_ingest:codex` is registered
+
+#### Scenario: Registration is idempotent and disabled by default
+
+- **WHEN** the same entry is registered twice
+- **THEN** exactly one row exists
+- **AND** `Enabled == false`, `DefaultIntervalSec == 300`, and
+  `DefaultMaxRetries == 3`
+- **AND** `RunDue` skips it until a later milestone enables it
+
+### Requirement: Coverage target for the Codex package is at least 85 percent
+
+#### Scenario: Package coverage gate
+
+- **WHEN** `go test -cover ./internal/experience/codex/...` runs in CI
+- **THEN** statement coverage is at least 85 percent
+- **AND** the CI gate fails below that threshold

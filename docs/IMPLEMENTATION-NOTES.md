@@ -738,3 +738,36 @@ Spec reconciliation: `last_line_number (numeric)` → `last_turn_uuid (string)` 
 **Pendiente operator:** `gentle-ai review finalize` (schema estricto), push, PR #12. Ver `docs/HANDOFF-HITO10-CODEX.md`.
 
 **Próximo:** Ola 3 — Hito 11 (semántica) + Hito 12 (drift/release), gateado por merge de PR #11 + PR #12.
+
+## PR #15 Scope-Reduced Closure
+
+**Fecha:** 2026-07-29
+**Branch:** `feat/hito11-pr15-cli-collapse`
+**Operador decisión:** "Cerrar con scope reducido" (los 2 gaps quedan como follow-ups).
+
+### Lo que pasa
+
+- `Job() *semantic.Job` accessors en los 3 adapters (`opencode`, `claudecode`, `codex`) con `Source` matching
+- Per-adapter tests (`TestOpencodeJob_*`, `TestClaudecodeJob_*`, `TestCodexJob_*`)
+- CLI `experience scan --source=<value>` routing; missing/invalid → exit 2
+- JSON envelope byte-for-byte parity a nivel dispatcher/runtime
+- `--experimental-cli-collapse` ldflags default ON; OFF produce `DEPRECATED:` stderr
+- Docs `docs/04-CLI-SPEC.md` y `docs/14-ACCEPTANCE-CRITERIA.md` actualizadas
+- Coverage final:
+  - opencode: 87.2% (target ≥85% ✅)
+  - claudecode: 85.9% ✅
+  - codex: 91.7% ✅
+  - jobs: 94.4% (no regresión) ✅
+  - cli/collapse helper: 100.0% ✅
+
+### Follow-ups (gaps documentados)
+
+1. **RunOne `SourceInstance` wiring (cross-PR)** — PR #14 dejó `semantic.Deps.SourceInstance` recibiendo `j.Source` en lugar de un adapter-specific `SourceInstance`. Los accessors de PR #15 son no-op seguros cuando no hay typed instance. La resolución completa requiere cambiar el wiring entre PR #14 y PR #15. Estimado: 30-60 min. NO bloquea PR #15 porque el path seguro funciona.
+
+2. **E2E binary tests reales** — el criterio #9 de `tasks.md` pide "E2E binary tests" (compilar `royo-learn` y ejecutarlo contra fixtures). El agente implementó dispatcher-level runtime tests que pasan, pero NO tests que compilen el binario. Para tener cobertura completa del CLI surface, abrir follow-up que compile `cmd/royo-learn` y ejecute `experience scan --source=...` contra los 3 fixtures. Estimado: 1-2 horas.
+
+3. **Race-test no corrido** — `go test -race` requiere CGO/gcc, no disponible en este WSL. Per `AGENTS.md` §"Antes de terminar", documentado y pendiente Linux CI. PR #15 es purely additive + refactor, así que el race risk está bounded a los nuevos accessors.
+
+### Decisión registrada
+
+El operador aprobó explícitamente cerrar PR #15 con scope reducido. Los 3 gaps quedan como deuda técnica rastreada, no como bloqueos.

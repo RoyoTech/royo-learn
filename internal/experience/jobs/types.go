@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"agent-royo-learn/internal/domain"
+	"agent-royo-learn/internal/experience/semantic"
 )
 
 // --- Typed errors ----------------------------------------------------
@@ -83,6 +84,14 @@ type JobState struct {
 
 // JobRegistryEntry is the static registration row that lists a known
 // job name, its default config, and whether it is enabled.
+//
+// Hito 11 (PR #13) extends the entry with three taxonomy fields:
+// Intent, Scope, and RiskClass. The fields default to the zero value
+// (empty string) for backward compatibility — existing callers that
+// build a JobRegistryEntry by literal are not expected to set the
+// fields yet. The repository layer (PR #14) populates the columns
+// from these fields at upsert time, and the validation helper below
+// rejects unknown values before they reach the database.
 type JobRegistryEntry struct {
 	JobName            string    `json:"job_name"`
 	Description        string    `json:"description"`
@@ -90,6 +99,49 @@ type JobRegistryEntry struct {
 	DefaultMaxRetries  int       `json:"default_max_retries"`
 	Enabled            bool      `json:"enabled"`
 	CreatedAt          time.Time `json:"created_at"`
+
+	// Intent classifies the job's purpose (see semantic.JobIntent).
+	// The migration's DEFAULT 'ingest' is the safe fallback for any
+	// existing row that pre-dates the field.
+	Intent semantic.JobIntent `json:"intent"`
+
+	// Scope is the boundary the job runs against (see
+	// semantic.JobScope). The migration's DEFAULT 'project' is the
+	// safe fallback.
+	Scope semantic.JobScope `json:"scope"`
+
+	// RiskClass is the operator-visible hazard class (see
+	// semantic.JobRiskClass). The migration's DEFAULT 'low' is the
+	// safe fallback.
+	RiskClass semantic.JobRiskClass `json:"risk_class"`
+}
+
+// Validate reports whether the three taxonomy fields are populated
+// with values the semantic package recognises. A zero value fails
+// because the JobIntent/JobScope/JobRiskClass enums only declare the
+// non-empty literal constants; an empty string is "unknown" by
+// definition and cannot be written to the SQLite NOT NULL columns
+// without an explicit DEFAULT.
+//
+// The helper is intentionally small: it delegates to the semantic
+// validators so the rules live in one place. PR #14's
+// Repository.UpsertRegistryEntry calls Validate before INSERT so a
+// future constructor that forgets to set the fields fails fast
+// instead of writing a default-shaped row.
+func (e *JobRegistryEntry) Validate() error {
+	if e == nil {
+		return errors.New("jobs: nil JobRegistryEntry")
+	}
+	if !semantic.IsValidIntent(e.Intent) {
+		return domain.NewValidationError(domain.ErrInvalidArgument, "jobs: registry entry has invalid Intent")
+	}
+	if !semantic.IsValidScope(e.Scope) {
+		return domain.NewValidationError(domain.ErrInvalidArgument, "jobs: registry entry has invalid Scope")
+	}
+	if !semantic.IsValidRiskClass(e.RiskClass) {
+		return domain.NewValidationError(domain.ErrInvalidArgument, "jobs: registry entry has invalid RiskClass")
+	}
+	return nil
 }
 
 // LeaseBounds parameterise a lease acquisition. LeaseDuration is how

@@ -109,7 +109,11 @@ de publicación existente.
 - **Hito 9: EN PROGRESO** — rama `feat/hito9-retrieval` desde `dba80e1`. PR #9 (estimado). Paquete `internal/retrieval/` con score components (bm25 normalizado, retrieval_terms, title_exact, evidence_level, recency), sanitización endurecida (whitelist Unicode + dedupe + escape FTS5), ranking determinista (tiebreaker fingerprint/id), cobertura 89.2%, benchmark Service.Search ≈ 7ms con 1k learnings (objetivo p95 < 250ms). CLI y MCP actualizados para incluir `score` y `score_components` aditivos. Detalles en `docs/27-RETRIEVAL.md`.
 - **Próximo: Hito 5** — detectores deterministas, PR #4.
 
+- **Hito 11: EN PROGRESO** — motor de jobs semántico/simétrico; PR #14 en
+  vuelo. Planning y contratos: [`openspec/changes/hito11-semantic/`](../openspec/changes/hito11-semantic/).
+
 ## 9. Lecciones aprendidas en Hito 2 (para PR #3 y siguientes)
+
 
 - **`SkippedIncomplete` debe ser visible al operador.** El adapter
   originalmente descartaba turnos con `complete=0` en silencio. Mientras

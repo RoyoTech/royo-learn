@@ -11,6 +11,25 @@ import (
 	"agent-royo-learn/internal/storage/storagetest"
 )
 
+func TestCodexJob_AccessorReturnsTypedJob(t *testing.T) {
+	if NewAdapter().Job() == nil {
+		t.Fatal("Job() returned nil")
+	}
+}
+
+func TestCodexJob_SourceMatches(t *testing.T) {
+	if got := NewAdapter().Job().Source; got != string(domain.SourceCodex) {
+		t.Fatalf("Source = %q, want %q", got, domain.SourceCodex)
+	}
+}
+
+func TestCodexJob_DistinctPerCall(t *testing.T) {
+	a := NewAdapter()
+	if a.Job() == a.Job() {
+		t.Fatal("Job() returned the same pointer twice")
+	}
+}
+
 // TestJobRegistryEntry_Shape pins the static fields so the registration
 // helper is the single source of truth for the job name and default config
 // (per docs/25-EXPERIENCE-ACCEPTANCE-MATRIX.md §2 Hito 10 jobs row).
@@ -22,7 +41,7 @@ func TestJobRegistryEntry_Shape(t *testing.T) {
 	jobNow = func() time.Time { return fixed }
 	t.Cleanup(func() { jobNow = prev })
 
-	entry := JobRegistryEntry()
+	entry := newIngestJobRegistryEntry()
 
 	if entry.JobName != "experience_ingest:codex" {
 		t.Errorf("JobName = %q, want %q", entry.JobName, "experience_ingest:codex")
@@ -57,7 +76,7 @@ func TestJobRegistration_Idempotent(t *testing.T) {
 	ctx := context.Background()
 	projID := domain.ProjectID("proj-codex")
 
-	entry := JobRegistryEntry()
+	entry := newIngestJobRegistryEntry()
 
 	if err := svc.Register(ctx, projID, entry); err != nil {
 		t.Fatalf("first Register: %v", err)
