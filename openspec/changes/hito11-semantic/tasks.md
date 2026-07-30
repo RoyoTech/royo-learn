@@ -246,6 +246,7 @@ operator can copy it when needed.
 
 ### Phase 7: Per-adapter `Job()` rewrite (Integration / Wiring)
 
+- **Status**: [x] Applied in PR #15 worktree.
 - **Goal**: Rewrite each per-adapter `jobs.go` to expose `Job()
   *semantic.Job`; the legacy static constructor becomes an unexported
   `newIngestJobRegistryEntry` helper called inside the `JobFunc` body.
@@ -266,6 +267,7 @@ operator can copy it when needed.
 
 ### Phase 8: CLI collapse flag + dispatcher rewrite (Integration / Wiring)
 
+- **Status**: [x] Applied in PR #15 worktree.
 - **Goal**: Add the build-time `--experimental-cli-collapse` ldflags
   helper with env-var override; rewrite `cmd/royo-learn/experience.go`
   to expose `runExperienceUnified` and route legacy subcommands when the
@@ -291,6 +293,7 @@ operator can copy it when needed.
 
 ### Phase 9: E2E bin tests (Testing)
 
+- **Status**: [ ] Partial: dispatcher/runtime tests added; standalone binary E2E cases remain.
 - **Goal**: Build the CLI binary and assert the unified form + the legacy
   collapse-off path produce the documented JSON and stderr.
 - **Files**: Modify `cmd/royo-learn/e2e_test.go` (existing file).
@@ -304,6 +307,7 @@ operator can copy it when needed.
 
 ### Phase 10: Documentation closeout (Cleanup)
 
+- **Status**: [x] Applied in PR #15 worktree.
 - **Goal**: Mark PR #14 row in `docs/26` §5 as "in flight" with link to
   `openspec/changes/hito11-semantic`; add the `--source` flag and unified
   subcommand to `docs/04-CLI-SPEC.md`; add the audit-event + migration

@@ -8,9 +8,13 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 
 	"agent-royo-learn/internal/domain"
 	"agent-royo-learn/internal/experience"
+	"agent-royo-learn/internal/experience/claudecode"
+	experiencecli "agent-royo-learn/internal/experience/cli"
+	"agent-royo-learn/internal/experience/codex"
 	"agent-royo-learn/internal/experience/opencode"
 	"agent-royo-learn/internal/logging"
 	"agent-royo-learn/internal/project"
@@ -26,17 +30,28 @@ type experienceInjectOutput struct {
 
 func runExperience(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		return writeExperienceError(stderr, "invalid_argument", "experience: a subcommand is required: detect, inject, opencode, claude-code, codex, patterns, trace, jobs")
+		return writeExperienceError(stderr, "invalid_argument", "experience: a subcommand is required: detect, inject, scan, patterns, trace, jobs")
 	}
 	switch args[0] {
 	case "inject":
 		return runExperienceInject(args[1:], stdout, stderr)
+	case "scan":
+		return runExperienceUnified(args[1:], stdout, stderr)
 	case "opencode":
-		return runExperienceOpencode(args[1:], stdout, stderr)
-	case "claude-code":
-		return runExperienceClaudecode(args[1:], stdout, stderr)
+		if experiencecli.ExperimentalCLICollapse() {
+			return writeExperienceError(stderr, "invalid_argument", "experience: unknown subcommand %q", args[0])
+		}
+		return runExperienceLegacy(string(domain.SourceOpenCode), args[1:], stdout, stderr)
+	case "claude-code", "claudecode":
+		if experiencecli.ExperimentalCLICollapse() {
+			return writeExperienceError(stderr, "invalid_argument", "experience: unknown subcommand %q", args[0])
+		}
+		return runExperienceLegacy(string(domain.SourceClaudeCode), args[1:], stdout, stderr)
 	case "codex":
-		return runExperienceCodex(args[1:], stdout, stderr)
+		if experiencecli.ExperimentalCLICollapse() {
+			return writeExperienceError(stderr, "invalid_argument", "experience: unknown subcommand %q", args[0])
+		}
+		return runExperienceLegacy(string(domain.SourceCodex), args[1:], stdout, stderr)
 	case "detect":
 		return runExperienceDetect(args[1:], stdout, stderr)
 	case "patterns":
@@ -46,7 +61,63 @@ func runExperience(args []string, stdout, stderr io.Writer) int {
 	case "jobs":
 		return runExperienceJobs(args[1:], stdout, stderr)
 	default:
-		return writeExperienceError(stderr, "invalid_argument", "experience: unknown subcommand %q: must be detect, inject, opencode, claude-code, codex, patterns, trace, or jobs", args[0])
+		return writeExperienceError(stderr, "invalid_argument", "experience: unknown subcommand %q: must be detect, inject, scan, patterns, trace, or jobs", args[0])
+	}
+}
+
+func runExperienceUnified(args []string, stdout, stderr io.Writer) int {
+	source, remaining, err := parseExperienceSource(args)
+	if err != nil {
+		return writeExperienceError(stderr, "invalid_argument", "%v; usage: experience scan --source=<opencode|claudecode|codex>", err)
+	}
+	return runExperienceSource(source, remaining, stdout, stderr)
+}
+
+func parseExperienceSource(args []string) (string, []string, error) {
+	remaining := make([]string, 0, len(args))
+	source := ""
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case strings.HasPrefix(arg, "--source="):
+			source = strings.TrimPrefix(arg, "--source=")
+		case arg == "--source":
+			if i+1 >= len(args) {
+				return "", nil, fmt.Errorf("experience scan: --source requires a value")
+			}
+			i++
+			source = args[i]
+		default:
+			remaining = append(remaining, arg)
+		}
+	}
+	if source == "" {
+		return "", nil, fmt.Errorf("experience scan: --source is required")
+	}
+	return source, remaining, nil
+}
+
+func runExperienceLegacy(source string, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 || args[0] != "scan" {
+		return writeExperienceError(stderr, "invalid_argument", "experience %s: a subcommand is required: scan", source)
+	}
+	_, _ = fmt.Fprintf(stderr, "DEPRECATED: use 'experience scan --source=%s' (legacy form removed in v1)\n", source)
+	return runExperienceSource(source, args[1:], stdout, stderr)
+}
+
+func runExperienceSource(source string, args []string, stdout, stderr io.Writer) int {
+	switch source {
+	case string(domain.SourceOpenCode):
+		_ = opencode.NewAdapter().Job()
+		return runExperienceOpencodeScan(args, stdout, stderr)
+	case "claudecode", string(domain.SourceClaudeCode):
+		_ = claudecode.NewAdapter().Job()
+		return runExperienceClaudecodeScan(args, stdout, stderr)
+	case string(domain.SourceCodex):
+		_ = codex.NewAdapter().Job()
+		return runExperienceCodexScan(args, stdout, stderr)
+	default:
+		return writeExperienceError(stderr, "invalid_argument", "experience scan: invalid --source %q; allowed values: opencode, claudecode, codex", source)
 	}
 }
 

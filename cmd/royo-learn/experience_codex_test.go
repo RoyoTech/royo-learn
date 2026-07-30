@@ -37,29 +37,29 @@ const minimalCodexJSONL = `{"timestamp":"2026-01-02T03:04:05Z","type":"session_m
 
 func TestRunExperienceCodexRequiresSubcommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := runExperience([]string{"codex"}, &stdout, &stderr)
+	code := runExperience([]string{"scan", "--source=codex"}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("exit code = 0, want non-zero; stderr=%s", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "subcommand is required") {
+	if !strings.Contains(stderr.String(), "--project-root") {
 		t.Fatalf("stderr = %q, want it to mention a required subcommand", stderr.String())
 	}
 }
 
 func TestRunExperienceCodexUnknownSubcommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := runExperience([]string{"codex", "watch"}, &stdout, &stderr)
+	code := runExperience([]string{"scan", "--source=codex"}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("exit code = 0, want non-zero; stderr=%s", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "unknown subcommand") {
+	if !strings.Contains(stderr.String(), "--project-root") {
 		t.Fatalf("stderr = %q, want unknown-subcommand message", stderr.String())
 	}
 }
 
 func TestRunExperienceCodexScanMissingProjectRoot(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := runExperience([]string{"codex", "scan"}, &stdout, &stderr)
+	code := runExperience([]string{"scan", "--source=codex", "scan"}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("exit code = 0, want non-zero; stderr=%s", stderr.String())
 	}
@@ -76,7 +76,7 @@ func TestRunExperienceCodexScanHappyPath(t *testing.T) {
 	fixture := writeCodexJSONLFixture(t, root, "rollout.jsonl", minimalCodexJSONL)
 
 	var stdout, stderr bytes.Buffer
-	code := runExperience([]string{"codex", "scan", "--project-root", root, "--fixture", fixture}, &stdout, &stderr)
+	code := runExperience([]string{"scan", "--source=codex", "--project-root", root, "--fixture", fixture}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr=%s, stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -132,7 +132,7 @@ func TestRunExperienceCodexScanIdempotent(t *testing.T) {
 	fixture := writeCodexJSONLFixture(t, root, "rollout.jsonl", minimalCodexJSONL)
 
 	var stdout1, stderr1 bytes.Buffer
-	code1 := runExperience([]string{"codex", "scan", "--project-root", root, "--fixture", fixture}, &stdout1, &stderr1)
+	code1 := runExperience([]string{"scan", "--source=codex", "--project-root", root, "--fixture", fixture}, &stdout1, &stderr1)
 	if code1 != 0 {
 		t.Fatalf("first run: exit=%d, stderr=%s, stdout=%s", code1, stderr1.String(), stdout1.String())
 	}
@@ -147,7 +147,7 @@ func TestRunExperienceCodexScanIdempotent(t *testing.T) {
 	}
 
 	var stdout2, stderr2 bytes.Buffer
-	code2 := runExperience([]string{"codex", "scan", "--project-root", root, "--fixture", fixture}, &stdout2, &stderr2)
+	code2 := runExperience([]string{"scan", "--source=codex", "--project-root", root, "--fixture", fixture}, &stdout2, &stderr2)
 	if code2 != 0 {
 		t.Fatalf("second run: exit=%d, stderr=%s, stdout=%s", code2, stderr2.String(), stdout2.String())
 	}
@@ -175,7 +175,7 @@ func TestRunExperienceCodexScanSymlinkRejected(t *testing.T) {
 		t.Skipf("symlink not supported in this env: %v", err)
 	}
 	var stdout, stderr bytes.Buffer
-	code := runExperience([]string{"codex", "scan", "--project-root", root, "--fixture", link}, &stdout, &stderr)
+	code := runExperience([]string{"scan", "--source=codex", "--project-root", root, "--fixture", link}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("exit = 0, want non-zero (symlink should be rejected); stdout=%s", stdout.String())
 	}
