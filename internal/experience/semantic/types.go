@@ -20,9 +20,11 @@ package semantic
 // the value at audit-hook time and at operator inspection time ("which
 // jobs are ingests?").
 //
-// JobIntentIngest is the only value used by the Hito 11 static jobs.
-// The Promote/Rebuild/Cleanup constants are reserved for future hits
-// and are exported so that later work can extend the registry without
+// JobIntentIngest is the value used by the Hito 11 static ingest jobs.
+// JobIntentDrift is the value used by the Hito 12 publication drift
+// checker (read-only monitor; see docs/24-EXPERIENCE-THREAT-MODEL.md §6).
+// The Promote/Rebuild/Cleanup constants are reserved for future hits and
+// are exported so that later work can extend the registry without
 // re-opening this package.
 type JobIntent string
 
@@ -31,6 +33,7 @@ const (
 	JobIntentPromote JobIntent = "promote"
 	JobIntentRebuild JobIntent = "rebuild"
 	JobIntentCleanup JobIntent = "cleanup"
+	JobIntentDrift   JobIntent = "drift"
 )
 
 // IsValid reports whether the intent value is one of the documented
@@ -43,7 +46,8 @@ func (i JobIntent) IsValid() bool {
 // IsValidIntent is the package-level validator for JobIntent values.
 func IsValidIntent(i JobIntent) bool {
 	switch i {
-	case JobIntentIngest, JobIntentPromote, JobIntentRebuild, JobIntentCleanup:
+	case JobIntentIngest, JobIntentPromote, JobIntentRebuild, JobIntentCleanup,
+		JobIntentDrift:
 		return true
 	default:
 		return false

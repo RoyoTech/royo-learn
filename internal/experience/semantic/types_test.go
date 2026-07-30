@@ -14,6 +14,7 @@ func TestJobIntent_KnownValues(t *testing.T) {
 		{JobIntentPromote, "promote"},
 		{JobIntentRebuild, "rebuild"},
 		{JobIntentCleanup, "cleanup"},
+		{JobIntentDrift, "drift"},
 	}
 	for _, c := range cases {
 		if string(c.got) != c.want {
@@ -25,6 +26,23 @@ func TestJobIntent_KnownValues(t *testing.T) {
 		if !IsValidIntent(c.got) {
 			t.Errorf("IsValidIntent(%q) = false, want true", c.want)
 		}
+	}
+}
+
+// TestJobIntent_DriftAccepted asserts that the Hito 12 JobIntentDrift
+// constant (introduced for the publication drift checker) is accepted by
+// IsValidIntent. Without the switch extension, the repository upsert path
+// at internal/experience/jobs/repository.go rejects the new value with a
+// ErrInvalidArgument at write time.
+func TestJobIntent_DriftAccepted(t *testing.T) {
+	if string(JobIntentDrift) != "drift" {
+		t.Errorf("JobIntentDrift literal = %q, want %q", string(JobIntentDrift), "drift")
+	}
+	if !JobIntentDrift.IsValid() {
+		t.Errorf("JobIntentDrift.IsValid() = false, want true")
+	}
+	if !IsValidIntent(JobIntentDrift) {
+		t.Errorf("IsValidIntent(JobIntentDrift) = false, want true")
 	}
 }
 
