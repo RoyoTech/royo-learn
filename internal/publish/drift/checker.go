@@ -100,7 +100,7 @@ func (c *Checker) Check(ctx context.Context, target, expectedHash string) (Resul
 	if err := ctx.Err(); err != nil {
 		return Result{
 			Status: StatusTargetUnreadable,
-			Err:    fmt.Errorf("drift: ctx: %w", err),
+			Err:    errors.Join(ErrTargetUnreadable, fmt.Errorf("drift: ctx: %w", err)),
 		}, nil
 	}
 	if _, err := os.Stat(target); err != nil {
