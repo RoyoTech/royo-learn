@@ -11,15 +11,17 @@
 -- disagrees with the current one.
 --
 -- The CHECK constraints enforce the four-value outcome enum (status) and
--- the three-value source enum (opencode / claudecode / codex). Both
--- constraints fail the insert at write time so a stale or future value
--- cannot silently land in publication_drift_state.
+-- the four-value source enum (opencode / claudecode / codex / publish).
+-- The 'publish' source is written by the drift JobFunc itself when no
+-- adapter source is associated with the publication (decision D3,
+-- design.md); the three adapter names cover the per-adapter case where
+-- the publication originated from an experience envelope.
 
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS publication_drift_state (
     publication_id TEXT NOT NULL REFERENCES publications(id),
-    source         TEXT NOT NULL CHECK(source IN ('opencode','claudecode','codex')),
+    source         TEXT NOT NULL CHECK(source IN ('opencode','claudecode','codex','publish')),
     target_path    TEXT NOT NULL,
     expected_hash  TEXT NOT NULL,
     actual_hash    TEXT NOT NULL DEFAULT '',
