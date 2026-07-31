@@ -168,3 +168,58 @@ No se acepta como terminado si:
 - [ ] secretos no llegan a SQLite ni auditoría;
 - [ ] el cursor solo avanza tras un commit exitoso;
 - [ ] `experience inject` conserva JSON en stdout y errores en stderr.
+
+
+## L. Hito 12 — drift detection + release
+
+### Drift checker (four outcomes)
+
+- [ ] `Checker.Check` returns exactly four outcomes: `ok`, `drifted`,
+  `target_missing`, `target_unreadable`.
+- [ ] `ok` outcome: target matches the recorded fingerprint.
+- [ ] `drifted` outcome: target exists and is readable but fingerprint
+  differs from the recorded one.
+- [ ] `target_missing` outcome: target no longer exists at the recorded path.
+- [ ] `target_unreadable` outcome: target exists but cannot be read
+  (permissions, I/O error); the gate fails closed.
+- [ ] `publication_drift_check` job is wired into the publish path with the
+  four outcomes surfaced in the job event payload.
+- [ ] drift repository records the observation (`RecordDrift`) and lists
+  recent observations (`ListDrift`).
+
+### Unified CLI/MCP envelope
+
+- [ ] CLI `publish drift-check` and MCP `publish_drift_check` return the
+  same JSON envelope shape: `outcome`, `learning_id`, `target_path`,
+  `expected_fingerprint`, `actual_fingerprint`, `checked_at`.
+- [ ] CLI flag `--json` is honored; human-readable output is the default.
+- [ ] MCP error responses use the project's typed error envelope
+  (`code`, `recoverable`, `details`, `next_action`).
+
+### Cross-adapter drift policy parity
+
+- [ ] Claude Code, Codex, and OpenCode adapters report the same four
+  outcomes for the same input.
+- [ ] `Job()` accessors on each adapter surface the publication drift
+  check with identical payload contract.
+- [ ] `SkippedIncomplete` parity: incomplete turns are counted in all
+  three adapters.
+
+### SBOM emission
+
+- [ ] `.goreleaser.yml` carries the `sboms:` block with
+  `formats: ['spdx-json']`.
+- [ ] `goreleaser release --snapshot --clean` produces `*.spdx.json` files
+  in `dist/` next to `*.tar.gz` / `*.zip`.
+- [ ] `tests/release/goreleaser_snapshot_test.go` compiles and runs
+  (skips when `goreleaser` is not on PATH).
+
+### CHANGELOG backfill
+
+- [ ] Hitos 8, 9, 10, 11 appear under `[0.8.0]`, `[0.9.0]`, `[0.10.0]`,
+  `[0.11.0]` respectively.
+- [ ] Each entry carries a `[^pr-N]: #N` footnote linking to the GitHub PR.
+- [ ] `[Unreleased]` contains no Hito 8/9/10/11 entries.
+- [ ] `v1.0.0` ⏳ marker is demoted to a "no tag yet" section that lists
+  the Hito 12 preconditions and links to `RELEASE.md`.
+- [ ] No ISO-8601 date appears under the `v1.0.0` heading.

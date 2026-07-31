@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Hito 12: drift detection + release hardening** (PRs #13a/#13b/#13c,
+  branch `feat/hito12-release-extras`). Closes the pre-v1.0.0 gaps in the
+  release pipeline:
+  - Publication drift checker with four outcomes (`ok`, `drifted`,
+    `target_missing`, `target_unreadable`) in `internal/publish/drift`.
+  - Unified CLI/MCP envelope for drift status and adapter parity.
+  - SBOM emission in `.goreleaser.yml` (`sboms:` block, `spdx-json` format).
+  - `RELEASE.md` self-contained release runbook at the repo root, linked from
+    `docs/15-OPERATIONS.md`.
+  - `CHANGELOG.md` backfilled for Hitos 8–11; `v1.0.0` ⏳ marker demoted to
+    "no tag yet."
+  - Snapshot test `tests/release/goreleaser_snapshot_test.go` asserting
+    `*.spdx.json` SBOM emission (skips when GoReleaser is absent).
+
 - **Hito 6: pattern mining** (branch `feat/hito6-patterns`, PR #5
   per `docs/26` §3). Closes the slice 6 deliverable from
   `docs/26-IMPLEMENTATION-ROADMAP.md`. Five atomic commits on the
@@ -158,6 +172,108 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   operator accepted the gap at operator responsibility rather than
   rolling back the work.
 
+## [v1.0.0] - no tag yet
+
+No `v1.0.0` tag exists. The following Hito 12 preconditions must merge
+before tagging:
+
+- **SBOM emission** - `.goreleaser.yml` carries the `sboms:` block with
+  `formats: ['spdx-json']`.
+- **Release runbook** - `RELEASE.md` is self-contained at the repo root.
+- **CHANGELOG backfill** - Hitos 8-11 are under their version headings
+  (`[0.8.0]`-`[0.11.0]`); `[Unreleased]` carries only genuinely unreleased
+  items.
+- **Drift detection** - publication drift checker ships four outcomes
+  (`ok`, `drifted`, `target_missing`, `target_unreadable`) and is wired into
+  the publish path.
+
+See [RELEASE.md](RELEASE.md) for the operator-facing release procedure.
+
+## [0.11.0] - 2026
+
+### Added
+
+- **Hito 11: semantic job engine + CLI collapse** (merged via
+  `3f1b112 Merge feat/hito11-semantic into main`). Three sub-PRs:
+  - Semantic job contract + migration 008 (`ebebb48`).[^pr-29]
+  - `jobs.RunOne` audit hook + `job_run_log` + repository taxonomy
+    (`c50351a`).[^pr-30]
+  - Per-adapter `Job()` accessors + unified CLI collapse (`fcdbe30`).[^pr-31]
+
+### Notes
+
+- Hito 11 merged into `main` as `feat/hito11-semantic`. The semantic job
+  engine adds an optional semantic layer on top of the lexical retrieval
+  from Hito 9, without breaking existing CLI/MCP contracts.
+- Coverage on `internal/jobs` reached 94.4% via targeted SQL
+  error-injection tests.
+
+## [0.10.0] - 2026
+
+### Added
+
+- **Hito 10: multi-agent experience adapters** (Claude Code + Codex).
+  Delivered as two parallel adapter implementations, each following the
+  frozen adapter contract from `docs/22-ADAPTER-CONTRACT.md`:
+  - **Claude Code adapter** (JSONL) - Discover, Health, Scan,
+    ResolveTrace, cursor idempotency, job registry, and CLI
+    `experience claude-code scan` subcommand (`e79e2e1`-`0cab86e`).[^pr-11]
+  - **Codex adapter** (rollout JSONL) - Discover, Health, Scan,
+    ResolveTrace, cursor idempotency, job registry, and CLI
+    `experience codex scan` subcommand (`0ce6e7f`-`abe351b`).[^pr-12]
+  - `setup` CLI for multi-agent configuration (Claude Code, Codex,
+    OpenCode).
+
+### Notes
+
+- Codex adapter coverage reached 94.4% on `internal/experience/codex`.
+- `Actor.Model` extraction from `turn_context` added for Codex adapter.
+- `ResolveTrace` drops `reasoning` and `function_call_output` fields for
+  safety.
+
+## [0.9.0] - 2026
+
+### Added
+
+- **Hito 9: lexical retrieval** (PR #26, merge commit `d4a3d63`).[^pr-26]
+  `internal/retrieval/` package with:
+  - BM25 backend via FTS5 with `project_id` and term filtering.
+  - Additive score components: `bm25` (0.5) + `retrieval_terms` (0.2) +
+    `title_exact` (0.15) + `evidence_level` (0.10) + `recency` (0.05).
+  - Deterministic ordering: score DESC, fingerprint ASC, id ASC.
+  - Configurable limit (default 50, max 200) with offset.
+  - Hardened sanitizer: Unicode letter/number whitelist, max 16 terms,
+    max 256 chars per term, no keyword deletion, path traversal rejected.
+  - CLI and MCP wired to `retrieval.Service`: `score` and
+    `score_components` visible in JSON output.
+
+### Notes
+
+- Coverage 89.2% on `internal/retrieval`. Benchmark `Service.Search` ~ 7ms
+  with 1k learnings (objective p95 < 250ms).
+- `storage.Search` preserved with `Deprecated` comment for legacy
+  compatibility.
+- `docs/27-RETRIEVAL.md` added.
+
+## [0.8.0] - 2026
+
+### Added
+
+- **Hito 8: lease-based job engine** (merge commit `dba80e1`, part of the
+  Ola 2 batch).[^pr-26] `internal/jobs/` package with:
+  - SQLite-coordinated lease mechanism: two processes never execute the
+    same job; lease expires after a configurable timeout.
+  - Digest-based idempotency: input without changes is skipped.
+  - Retry with exponential backoff.
+  - Crash recovery: a crashed runner does not block the next lease.
+  - Migration `007_job_engine.sql`.
+
+### Notes
+
+- The Hito 8 job engine was merged via local commit `dba80e1`. The commit
+  message references PR #26 (the Ola 2 retrieval batch that followed on
+  `feat/hito9-retrieval`).
+
 ## [0.2.0-rc1] - 2026-07-24
 
 First release candidate that includes Hito 1 (experience discovery).
@@ -276,6 +392,13 @@ git log v0.1.0..v0.1.1 --oneline
 Backfilling these entries is a separate task; tracked outside this
 file.
 
+
+[^pr-11]: https://github.com/RoyoTech/royo-learn/pull/11
+[^pr-12]: https://github.com/RoyoTech/royo-learn/pull/12
+[^pr-26]: https://github.com/RoyoTech/royo-learn/pull/26
+[^pr-29]: https://github.com/RoyoTech/royo-learn/pull/29
+[^pr-30]: https://github.com/RoyoTech/royo-learn/pull/30
+[^pr-31]: https://github.com/RoyoTech/royo-learn/pull/31
 ---
 
 ## Version ↔ Ola map (proposed 2026-07-23)
@@ -316,7 +439,7 @@ working agreement until a future ADR formalizes it.
 | Hito 2 PR (PR #21) merged to remote main | (no tag — accumulates in [Unreleased]) | ✅ |
 | Ola 1 last PR (Hito 4) merged to remote main | `v0.2.0` | ⏳ |
 | Ola 2 last PR (Hito 10 — Codex) merged to remote main | `v0.3.0` | ⏳ |
-| Ola 3 last PR (Pi) merged to remote main | `v1.0.0` | ⏳ |
+| Ola 3 last PR (Pi) merged to remote main | `v1.0.0` | no tag yet (see [RELEASE.md](RELEASE.md)) |
 
 Until these triggers fire, the corresponding tag does not exist.
 The trigger table is the source of truth for "are we ready for

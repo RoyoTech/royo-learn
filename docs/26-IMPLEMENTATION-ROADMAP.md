@@ -58,21 +58,21 @@ Al cerrar el PR 7 se cumple el "resultado esperado de la Ola 1" del plan §37.
 
 ## 4. Ola 2 — robustez y alcance
 
-| PR | Hito | Entrega | Migración |
-|----|------|---------|-----------|
-| 8 | 8 | motor de jobs (lease SQLite, digest, run-due, retry, crash recovery) | **006** |
-| 9 | 9 | retrieval lexical + score components + saneamiento FTS | — | cobertura ≥ 85% en internal/retrieval, benchmark p95 < 250ms con 1k learnings, ranking determinista (mismo seed → mismo orden), score components visibles en CLI/MCP |
-| 10 | 3 | OpenCode automático (`--watch`, setup preview/apply/remove) | — |
-| 11 | 10 | Claude Code (JSONL) — PR propio | — |
-| 12 | 10 | Codex (rollout) — PR propio, no fusionar con Claude Code | — |
+| PR | Hito | Entrega | Migración | Estado |
+|----|------|---------|-----------|--------|
+| 8 | 8 | motor de jobs (lease SQLite, digest, run-due, retry, crash recovery) | **007** | ✅ COMPLETO (PR #26) |
+| 9 | 9 | retrieval lexical + score components + saneamiento FTS | — | ✅ COMPLETO (`c24fed5`) — cobertura 89.2%, benchmark 7ms |
+| 10 | 3 | OpenCode automático (`--watch`, setup preview/apply/remove) | — | ❌ PENDIENTE (opcional) |
+| 11 | 10 | Claude Code (JSONL) — PR propio | — | ✅ COMPLETO (PR #11) |
+| 12 | 10 | Codex (rollout) — PR propio, no fusionar con Claude Code | — | ✅ COMPLETO (PR #12) — cobertura 94.4% |
 
 ## 5. Ola 3 — optimización (con gate previo obligatorio)
 
-| PR | Hito | Gate previo |
-|----|------|-------------|
-| 13 | 12 drift/release hardening | — |
-| 14 | 11 semántica opcional | informe que demuestre consultas donde lexical falla + mejora medible + rebuild fiable |
-| — | Pi | documentar fuente, fixtures reales, ADR de estabilidad de formato |
+| PR | Hito | Gate previo | Estado |
+|----|------|-------------|--------|
+| 13 | 12 drift/release hardening | — | 🚧 EN VUELO (PRs #13a/#13b/#13c, `feat/hito12-release-extras`) — Slice 1/2 merged a `main`; Slice 3 (SBOM + RELEASE.md + CHANGELOG backfill) en este PR |
+| 14 | 11 semántica opcional | informe que demuestre consultas donde lexical falla + mejora medible + rebuild fiable | ✅ COMPLETO (`feat/hito11-semantic`) |
+| — | Pi | documentar fuente, fixtures reales, ADR de estabilidad de formato | ❌ PENDIENTE |
 
 ## 6. Definición de "hecho" por PR
 
@@ -95,22 +95,45 @@ de publicación existente.
 
 ## 8. Estado actual
 
-- **Hito 0: COMPLETO** (este árbol, solo `.md`).
-- **Hito 1: COMPLETO** — mergeado en `main` como `b105e34`; corrección
-  post-review en `f989579`; dominio experiencia, migración 004, servicio
-  ingestión, CLI `experience inject`. Cobertura `internal/experience` 90%.
-  v0.2.0-rc1 taggeado.
-- **Hito 2: COMPLETO** (PR #3, rama `feat/hito2-opencode-once`) —
-  adaptador OpenCode read-only (`--once`), sub-slice 2.0 scaffold →
-  2.7 acceptance. Cobertura `internal/experience/opencode` 80.5%.
-  CLI `experience opencode scan` con `--project-root` y `--fixture`.
-  Idempotencia por `(source, external_session_id, external_turn_id)`.
-  Sin `--watch` todavía (queda para Ola 2 / PR #10).
-- **Hito 9: EN PROGRESO** — rama `feat/hito9-retrieval` desde `dba80e1`. PR #9 (estimado). Paquete `internal/retrieval/` con score components (bm25 normalizado, retrieval_terms, title_exact, evidence_level, recency), sanitización endurecida (whitelist Unicode + dedupe + escape FTS5), ranking determinista (tiebreaker fingerprint/id), cobertura 89.2%, benchmark Service.Search ≈ 7ms con 1k learnings (objetivo p95 < 250ms). CLI y MCP actualizados para incluir `score` y `score_components` aditivos. Detalles en `docs/27-RETRIEVAL.md`.
-- **Próximo: Hito 5** — detectores deterministas, PR #4.
+### Ola 1 — COMPLETA ✅
 
-- **Hito 11: EN PROGRESO** — motor de jobs semántico/simétrico; PR #14 en
-  vuelo. Planning y contratos: [`openspec/changes/hito11-semantic/`](../openspec/changes/hito11-semantic/).
+- **Hito 0: COMPLETO** — docs 20–26 + ADR-0001.
+- **Hito 1: COMPLETO** — dominio experiencia, migración 004, servicio
+  ingestión, CLI `experience inject`. Cobertura `internal/experience` 90%.
+- **Hito 2: COMPLETO** (PR #3) — adaptador OpenCode read-only (`--once`).
+  Cobertura `internal/experience/opencode` 80.5%.
+- **Hito 5: COMPLETO** (PR #4, `59d5e74`) — detectores deterministas,
+  persistencia, CLI/MCP surface.
+- **Hito 6: COMPLETO** (PR #5, `55ef635`) — pattern mining, qualification,
+  dismissal, CLI/MCP surface. Migración 005.
+- **Hito 7: COMPLETO** — promoción gobernada vía `capture.Service`,
+  idempotencia, redaction pipeline.
+- **Hito 4: COMPLETO** (PR #25) — trace progresivo, migración 006,
+  `learning_trace` MCP + CLI. Cobertura 83.6%.
+
+### Ola 2 — mayormente completa
+
+- **Hito 8: COMPLETO** (PR #26, `81605f7`) — lease-based job engine,
+  migración 007.
+- **Hito 9: COMPLETO** (`c24fed5`) — retrieval lexical, score components,
+  sanitización FTS5. Cobertura 89.2%, benchmark 7ms.
+- **Hito 10: COMPLETO** — Claude Code (PR #11) + Codex (PR #12),
+  simétricos. Cobertura Codex 94.4%.
+- **Hito 3: PENDIENTE** — OpenCode `--watch` (opcional).
+
+### Ola 3 — en progreso
+
+- **Hito 11: COMPLETO** (`feat/hito11-semantic`, mergeado a `main`) —
+  motor de jobs semántico, `Job()` accessors, CLI collapse.
+- **Hito 12: EN VUELO** — drift/release hardening. Slices 1/2 merged a `main`
+  (publication drift checker con cuatro outcomes, unified CLI/MCP
+  envelope, adapter parity). Slice 3 (PR #13c) ships preconditions for
+  `v1.0.0`: SBOM en `.goreleaser.yml`, `RELEASE.md` runbook, CHANGELOG
+  backfill. See `feat/hito12-release-extras`.
+- **Pi adapter: PENDIENTE** — documentar fuente, fixtures reales, ADR.
+
+**Próximo: Hito 12 Slice 3** — PR #13c en este change. Tras merge, el
+operador decide cuándo taggear `v1.0.0` siguiendo `RELEASE.md`.
 
 ## 9. Lecciones aprendidas en Hito 2 (para PR #3 y siguientes)
 

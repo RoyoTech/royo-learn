@@ -104,6 +104,42 @@
 | contratos previos siguen; ranking determinista; sin FTS injection | unit/benchmark |
 | búsquedas ES/EN; p95 local en presupuesto | benchmark |
 
+### Hito 10 — Multi-agent experience adapters (Claude Code + Codex)
+
+| Aceptación | Prueba |
+|------------|--------|
+| paridad Claude Code / Codex: mismas cinco operaciones (Discover, Health, Scan, ResolveTrace, Job) | unit/contract |
+| cursor idempotency `(source, external_session_id, external_turn_id)` en ambos adapters | integration |
+| `Actor.Model` extraído de `turn_context` (Codex) | unit |
+| `ResolveTrace` redacta `reasoning` y `function_call_output` | unit/security |
+| `experience claude-code scan` y `experience codex scan` CLI subcommands | e2e |
+| cobertura Codex ≥ 85% en `internal/experience/codex` | coverage |
+
+### Hito 11 — Semantic job engine + CLI collapse (migración 008)
+
+| Aceptación | Prueba |
+|------------|--------|
+| `Job()` accessors por adapter (OpenCode, Claude Code, Codex) con contrato unificado | unit/contract |
+| `jobs.RunOne` audit hook + `job_run_log` + repository taxonomy | integration |
+| CLI collapse: subcommands de experiencia unificados por adapter | unit |
+| migration 008 idempotente en SQLite real | migration test |
+| cobertura `internal/jobs` ≥ 90% | coverage |
+
+### Hito 12 — Drift detection + release hardening
+
+| Aceptación | Prueba |
+|------------|--------|
+| `Checker.Check` retorna exactamente cuatro outcomes: `ok`, `drifted`, `target_missing`, `target_unreadable` | unit |
+| parity CLI/MCP envelope para `publish drift-check` / `publish_drift_check` | contract |
+| paridad cross-adapter: OpenCode, Claude Code, Codex reportan los mismos cuatro outcomes | unit/contract |
+| `publication_drift_check` job integrado en el publish path con payload uniforme | integration |
+| `internal/publish/drift` read-only (sin mutaciones) | static check |
+| `.goreleaser.yml` emite `*.spdx.json` SBOM en `dist/` | snapshot test |
+| `tests/release/goreleaser_snapshot_test.go` pasa (skip si goreleaser no est en PATH) | CI |
+| `RELEASE.md` contiene las cinco secciones obligatorias | grep |
+| `CHANGELOG.md` backfill: Hitos 8–11 bajo `[0.8.0]`–`[0.11.0]`; `[Unreleased]` limpio | grep |
+| `v1.0.0` ⏳ demoted a "no tag yet" + link a `RELEASE.md` | grep |
+
 ## 3. Amenazas de seguridad → prueba
 
 | Amenaza (24-TM) | Escenario adversarial | Hito |
@@ -124,6 +160,7 @@
 ```text
 internal/experience >= 90% · internal/patterns >= 90% · internal/jobs >= 90%
 internal/retrieval  >= 85% · internal/adapters >= 85%
+internal/publish/drift >= 90% · internal/semantic >= 90% · internal/experience/{claudecode,codex,opencode} >= 85%
 ```
 
 ## 5. Regla de parada
