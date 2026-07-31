@@ -74,6 +74,13 @@ Un aprendizaje puede marcarse `needs_review` cuando:
 
 No debe despublicarse automáticamente.
 
+## Release runbook
+
+Para cortar o revertir una release, sigue el runbook autocontenido en
+[RELEASE.md](../RELEASE.md) (raíz del repo). Cubre la tabla de triggers,
+checks de CI obligatorios, creación de tags `vX.Y.Z` / `vX.Y.Z-pre.N`,
+verificación de instalación y receta de rollback con `install.sh --uninstall`.
+
 ## Compatibilidad
 
 `royo-learn version --json` expone:

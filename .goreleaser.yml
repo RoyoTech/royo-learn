@@ -42,6 +42,10 @@ archives:
       - install.sh
       - install.ps1
 
+sboms:
+  - artifacts: archive
+    formats: ['spdx-json']
+
 checksum:
   name_template: "checksums.txt"
   algorithm: sha256
