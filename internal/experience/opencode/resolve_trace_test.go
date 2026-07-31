@@ -166,7 +166,7 @@ func TestResolveTrace_RedactsSecrets(t *testing.T) {
 
 // TestResolveTrace_SourceChanged verifies that a stale SourceHash on the
 // locator surfaces as Code="trace_source_changed".
-func TestResolveTrace_SourceChanged(t *testing.T) {
+func TestResolveTrace_SourceChanged_OmitsExcerpt(t *testing.T) {
 	dbPath := newFixtureDB(t, func(db *sql.DB) {
 		insertSessionForTrace(t, db, "s-1")
 		insertMessageForTrace(t, db, messageFixtureForTrace{

@@ -102,7 +102,13 @@ func TestResolveTrace_RedactsSecrets(t *testing.T) {
 	}
 }
 
-func TestResolveTrace_SourceChangedReturnsNoExcerpt(t *testing.T) {
+// TestResolveTrace_SourceChanged_OmitsExcerpt verifies parity across the
+// three experience adapters: when the locator's SourceHash does not match
+// the current file, the bounded excerpt is suppressed (Excerpt="") and the
+// divergence surfaces as Code="trace_source_changed" + SourceChanged=true.
+// Per docs/22-ADAPTER-CONTRACT.md Scenario "Source changes or disappears"
+// tightened in Hito 12.
+func TestResolveTrace_SourceChanged_OmitsExcerpt(t *testing.T) {
 	path := writeScanFile(t, "rollout-trace-stale.jsonl",
 		scanSessionMeta("session-001")+"\n"+
 			scanEventMsg("event_msg.user_message", "turn-1", "user", "hello world")+"\n",

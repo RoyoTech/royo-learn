@@ -252,6 +252,41 @@ func TestChecker_OpenFnNilUsesDefault(t *testing.T) {
 	}
 }
 
+// TestChecker_IoCopyFailureYieldsUnreadable injects a Reader that
+// returns an error after the first successful Read so io.Copy bubbles
+// up the failure. The Checker must classify this as target_unreadable.
+func TestChecker_IoCopyFailureYieldsUnreadable(t *testing.T) {
+	dir := testutil.TempDir(t)
+	target := writeFile(t, dir, "iocopy.bin", []byte("abc"))
+
+	c := &Checker{
+		openFn: func(name string) (*os.File, error) {
+			f, err := os.Open(name)
+			if err != nil {
+				return nil, err
+			}
+			// Wrap the file's Read method to return an error on the
+			// second call. We replace the file via a small shim by
+			// returning os.File directly (which already implements
+			// io.Reader); we cannot replace its Read method without
+			// redefining the type. Instead, we close the file to make
+			// io.Copy fail with "read |0: file already closed".
+			f.Close()
+			return f, nil
+		},
+	}
+	res, err := c.Check(context.Background(), target, "anything")
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if res.Status != StatusTargetUnreadable {
+		t.Errorf("Status = %q, want %q", res.Status, StatusTargetUnreadable)
+	}
+	if !errors.Is(res.Err, ErrTargetUnreadable) {
+		t.Errorf("res.Err = %v, want errors.Is(_, ErrTargetUnreadable) = true", res.Err)
+	}
+}
+
 // TestChecker_StatErrorOnNonEnotExentIsUnreadable asserts that an
 // os.Stat error other than ENOENT (here simulated by feeding a path
 // whose parent is a file, which yields ENOTDIR on most platforms) is

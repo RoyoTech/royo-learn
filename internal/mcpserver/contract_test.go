@@ -239,6 +239,7 @@ var contractExtensions = map[string]bool{
 	"experience_jobs_list":      true,
 	"experience_jobs_register":  true,
 	"experience_jobs_recover":   true,
+	"experience_drift_status":   true,
 }
 
 func documentedTools(t *testing.T) map[string]bool {

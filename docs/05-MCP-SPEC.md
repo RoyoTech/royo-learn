@@ -278,6 +278,48 @@ conflicto.
 
 Read-only por defecto; `fix_safe` opcional.
 
+### `experience_drift_status`
+
+Read-only. Solo perfil `admin` (Hito 12).
+
+Reporta drift a través de los tres adapters de experiencia
+(`opencode`/`claudecode`/`codex`) y de la tabla `publication_drift_state`.
+Devuelve el mismo envelope JSON que la CLI `experience drift`:
+
+```json
+{
+  "status": "ok",
+  "sources": [
+    {"source": "opencode", "total_checks": 0, "ok": 0, "drifted": 0, "target_missing": 0, "target_unreadable": 0},
+    {"source": "claudecode", "total_checks": 0, "ok": 0, "drifted": 0, "target_missing": 0, "target_unreadable": 0},
+    {"source": "codex", "total_checks": 0, "ok": 0, "drifted": 0, "target_missing": 0, "target_unreadable": 0}
+  ],
+  "publications": [
+    {
+      "publication_id": "01HZXPUB...",
+      "source": "opencode",
+      "target_path": "secret.json",
+      "expected_hash": "...",
+      "actual_hash": "...",
+      "status": "drifted",
+      "checked_at": "2026-07-30T12:00:00Z",
+      "run_id": "..."
+    }
+  ],
+  "total": 0
+}
+```
+
+**Argumentos:**
+
+| Campo | Tipo | Default | Descripción |
+|-------|------|---------|-------------|
+| `source` | string | `""` (todas) | Filtrar por source: `opencode` / `claudecode` / `codex` |
+
+**Contrato de PII:** `target_path` se redacta a `filepath.Base(...)` antes
+de serializar (REQ-DCM-3). El path completo vive solo en
+`publication_drift_state` y no se expone por esta superficie.
+
 ## Errores MCP
 
 Siempre usar respuesta estructurada:

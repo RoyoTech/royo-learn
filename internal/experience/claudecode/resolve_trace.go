@@ -98,20 +98,12 @@ func (a *Adapter) ResolveTrace(ctx context.Context, locator domain.TranscriptLoc
 	currentHash := sha256.Sum256(data)
 	currentHashHex := hex.EncodeToString(currentHash[:])
 	if locator.SourceHash != "" && currentHashHex != locator.SourceHash {
-		// Source is advisory: still return the bounded excerpt while flagging
-		// the divergence so the caller can downgrade the result.
-		content, ok := findTurnContent(data, locator.TurnID)
-		if !ok {
-			return TraceResult{
-				SourceChanged: true,
-				Code:          "trace_source_changed",
-				Message:       "claudecode trace: source file has changed since the locator was issued",
-			}
-		}
-		excerpt, redacted := redactExcerpt(content, maxBytes)
+		// Per docs/22-ADAPTER-CONTRACT.md Scenario "Source changes or
+		// disappears": on hash mismatch the bounded excerpt is suppressed
+		// (parity with opencode and codex adapters). The trace surfaces the
+		// divergence via SourceChanged + Code, and the caller can re-issue
+		// a fresh locator.
 		return TraceResult{
-			Excerpt:       excerpt,
-			Redacted:      redacted,
 			SourceChanged: true,
 			Code:          "trace_source_changed",
 			Message:       "claudecode trace: source file has changed since the locator was issued",

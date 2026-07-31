@@ -144,10 +144,13 @@ func TestResolveTrace_RedactsSecrets(t *testing.T) {
 	}
 }
 
-// TestResolveTrace_SourceChanged verifies that a stale SourceHash on the
-// locator surfaces as Code="trace_source_changed" while the excerpt is
-// still returned (advisory).
-func TestResolveTrace_SourceChanged(t *testing.T) {
+// TestResolveTrace_SourceChanged_OmitsExcerpt verifies parity with
+// opencode and codex adapters: when the locator's SourceHash does not
+// match the current file, the bounded excerpt is suppressed (Excerpt="")
+// and the divergence surfaces as Code="trace_source_changed" +
+// SourceChanged=true. Per docs/22-ADAPTER-CONTRACT.md Scenario "Source
+// changes or disappears" tightened in Hito 12.
+func TestResolveTrace_SourceChanged_OmitsExcerpt(t *testing.T) {
 	path := writeJSONL(t, "session.jsonl", []byte(lineUser+"\n"+lineAssistant+"\n"))
 	locator := locatorFor(t, path, "turn-user-001")
 	locator.SourceHash = "stale-hash-does-not-match-the-current-file"
@@ -160,8 +163,11 @@ func TestResolveTrace_SourceChanged(t *testing.T) {
 	if !result.SourceChanged {
 		t.Fatalf("ResolveTrace SourceChanged = false, want true")
 	}
-	if !strings.Contains(result.Excerpt, "hello world") {
-		t.Fatalf("ResolveTrace Excerpt = %q, want it to still contain the original content (advisory)", result.Excerpt)
+	if result.Excerpt != "" {
+		t.Fatalf("ResolveTrace Excerpt = %q, want empty on source mismatch (parity with opencode/codex)", result.Excerpt)
+	}
+	if result.Redacted {
+		t.Fatalf("ResolveTrace Redacted = true, want false on suppressed excerpt")
 	}
 }
 
