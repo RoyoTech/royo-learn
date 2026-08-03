@@ -15,8 +15,6 @@ builds:
     binary: royo-learn
     goos:
       - windows
-      - linux
-      - darwin
     goarch:
       - amd64
       - arm64
@@ -71,16 +69,3 @@ release:
   extra_files:
     - glob: ./install.sh
     - glob: ./install.ps1
-  footer: |
-    ## Installation
-
-    ### Linux/macOS
-    ```bash
-    curl -fsSL https://github.com/RoyoTech/royo-learn/releases/latest/download/install.sh | bash
-    ```
-
-    ### Windows
-    ```powershell
-    Invoke-WebRequest -Uri https://github.com/RoyoTech/royo-learn/releases/latest/download/install.ps1 -OutFile install.ps1
-    .\install.ps1
-    ```
