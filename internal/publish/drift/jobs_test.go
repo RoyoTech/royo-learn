@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -211,20 +212,25 @@ func TestPublicationDriftCheck_AllFourOutcomes(t *testing.T) {
 	// target_missing: path does not exist.
 	missingPath := filepath.Join(targetsDir, "missing.jsonl")
 
-	// target_unreadable: file exists; we chmod 0o000 on POSIX.
+	// target_unreadable: file exists; we chmod 0o000 on POSIX non-root.
+	// On Windows, chmod 0o000 only sets the read-only attribute and does
+	// not prevent reading, so we use a file-shaped parent path instead
+	// (os.Stat returns ENOTDIR, which the Checker maps to
+	// StatusTargetUnreadable). The same file-shaped approach is used
+	// for root on POSIX, where chmod 0o000 is bypassed.
 	unreadablePath := filepath.Join(targetsDir, "locked.bin")
 	if err := os.WriteFile(unreadablePath, []byte("locked"), 0o644); err != nil {
 		t.Fatalf("WriteFile(unreadable): %v", err)
 	}
-	if os.Geteuid() != 0 { // root bypasses POSIX chmod; skip the unreadable case for root
+	if os.Geteuid() != 0 && runtime.GOOS != "windows" {
 		_ = os.Chmod(unreadablePath, 0o000)
 		t.Cleanup(func() { _ = os.Chmod(unreadablePath, 0o644) })
 	} else {
-		// Running as root: chmod 0o000 is ineffective. Replace with a
-		// directory-shaped path that os.Open cannot read after stat.
+		// Root or Windows: use a file-shaped parent path. os.Stat on
+		// "file/child" returns ENOTDIR because the parent is a file.
 		_ = os.Remove(unreadablePath)
-		if err := os.Mkdir(unreadablePath, 0o755); err != nil {
-			t.Fatalf("Mkdir(unreadable): %v", err)
+		if err := os.WriteFile(unreadablePath, []byte("not a dir"), 0o644); err != nil {
+			t.Fatalf("WriteFile(unreadable-as-file): %v", err)
 		}
 		unreadablePath = filepath.Join(unreadablePath, "child")
 	}

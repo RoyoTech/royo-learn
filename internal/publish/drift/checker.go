@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 )
 
 // Status is the outcome of a single drift check on a target. The values
@@ -97,6 +98,19 @@ func (c *Checker) Check(ctx context.Context, target, expectedHash string) (Resul
 	}
 	if _, err := os.Stat(target); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			// On Unix, os.IsNotExist also returns true for ENOTDIR
+			// (parent path is a file, not a directory). Distinguish the
+			// two cases by stat-ing the parent: if the parent exists and
+			// is not a directory, the target is unreachable but not
+			// genuinely missing.
+			if parent := filepath.Dir(target); parent != "" && parent != target {
+				if pInfo, pErr := os.Stat(parent); pErr == nil && !pInfo.IsDir() {
+					return Result{
+						Status: StatusTargetUnreadable,
+						Err:    errors.Join(ErrTargetUnreadable, err),
+					}, nil
+				}
+			}
 			return Result{Status: StatusTargetMissing, Err: ErrTargetMissing}, nil
 		}
 		return Result{

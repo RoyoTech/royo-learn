@@ -5,6 +5,9 @@
 /royo-learn
 /royo-learn.exe
 
+# GoReleaser output
+/dist/
+
 # Temp files
 *test_isnotexist*
 *Temp/opencode/*

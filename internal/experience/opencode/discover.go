@@ -116,12 +116,15 @@ func (a *Adapter) Discover(ctx context.Context, projectRoot string) ([]SourceIns
 }
 
 // depthOf returns how many nested directories a relative path contains.
-// "a/b/c" -> 3, "." -> 0, "" -> 0.
+// "a/b/c" -> 3, "a/b/" -> 3, "." -> 0, "" -> 0.
+// Counts both '/' and the OS separator so literal forward-slash test
+// inputs and filepath.Rel output (OS separator) produce the same depth.
 func depthOf(rel string) int {
 	if rel == "" || rel == "." {
 		return 0
 	}
-	return strings.Count(rel, string(filepath.Separator)) + 1
+	n := strings.Count(rel, "/") + strings.Count(rel, string(filepath.Separator))
+	return n + 1
 }
 
 // locatorError maps projectpath errors onto the experience error vocabulary.

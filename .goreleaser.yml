@@ -43,8 +43,10 @@ archives:
       - install.ps1
 
 sboms:
-  - artifacts: archive
-    formats: ['spdx-json']
+  - id: default
+    artifacts: archive
+    documents:
+      - "${artifact}.spdx.json"
 
 checksum:
   name_template: "checksums.txt"
