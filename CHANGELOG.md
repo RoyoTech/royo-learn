@@ -172,22 +172,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   operator accepted the gap at operator responsibility rather than
   rolling back the work.
 
-## [v1.0.0] - no tag yet
+## [v1.0.0] - 2026-08-03
 
-No `v1.0.0` tag exists. The following Hito 12 preconditions must merge
-before tagging:
+First production-ready release of `royo-learn`. **Windows-only build**.
 
-- **SBOM emission** - `.goreleaser.yml` carries the `sboms:` block with
-  `formats: ['spdx-json']`.
-- **Release runbook** - `RELEASE.md` is self-contained at the repo root.
-- **CHANGELOG backfill** - Hitos 8-11 are under their version headings
-  (`[0.8.0]`-`[0.11.0]`); `[Unreleased]` carries only genuinely unreleased
-  items.
-- **Drift detection** - publication drift checker ships four outcomes
-  (`ok`, `drifted`, `target_missing`, `target_unreadable`) and is wired into
-  the publish path.
+### Added
 
-See [RELEASE.md](RELEASE.md) for the operator-facing release procedure.
+- All Hitos 0–12 features (experience loop, job engine, multi-agent
+  adapters, publication drift detection, unified CLI/MCP envelope).
+- **Windows-only build target** in `.goreleaser.yml` (project scope
+  is Windows).
+- **Release-blocking fixes** included at tag time:
+  - `internal/experience/opencode`: `depthOf` counts both `/` and OS
+    separator (test used literal `/`, code used `filepath.Separator`
+    on Windows).
+  - `internal/publish/drift`: `Checker` distinguishes ENOTDIR
+    (parent is a file) from true ENOENT and maps to
+    `target_unreadable` instead of `target_missing`.
+  - `internal/publish/drift`: test uses a file-shaped parent path
+    (`file/child`) on Windows and root since `chmod 0o000` is
+    ineffective on Windows ACLs.
+  - `.goreleaser.yml`: SBOM config uses the v2.17.x `documents:`
+    schema (the prior `formats: ['spdx-json']` is not valid in
+    goreleaser ≥2.10).
+- **CI gates** updated for Windows-only: cross-build matrix targets
+  `windows/amd64` and `windows/arm64`; PowerShell installer
+  fail-closed test runs on every PR.
+
+### Assets
+
+- `royo-learn-windows-amd64.zip` — Windows 64-bit (x86_64)
+- `royo-learn-windows-arm64.zip` — Windows ARM64
+- `*.spdx.json` — SBOMs (SPDX-JSON) for every archive
+- `checksums.txt` — SHA-256 for all archives
+- `install.ps1` — PowerShell installer
+
+### Installation
+
+```powershell
+Invoke-WebRequest -Uri https://github.com/RoyoTech/royo-learn/releases/download/v1.0.0/install.ps1 -OutFile install.ps1
+.\install.ps1
+```
+
+Tag: `v1.0.0` at commit `9b76eafe7618fa43b32d92a45a5c9435be7f9a98`.
 
 ## [0.11.0] - 2026
 
@@ -392,13 +419,12 @@ git log v0.1.0..v0.1.1 --oneline
 Backfilling these entries is a separate task; tracked outside this
 file.
 
-
-[^pr-11]: https://github.com/RoyoTech/royo-learn/pull/11
-[^pr-12]: https://github.com/RoyoTech/royo-learn/pull/12
-[^pr-26]: https://github.com/RoyoTech/royo-learn/pull/26
-[^pr-29]: https://github.com/RoyoTech/royo-learn/pull/29
-[^pr-30]: https://github.com/RoyoTech/royo-learn/pull/30
-[^pr-31]: https://github.com/RoyoTech/royo-learn/pull/31
+[^pr-11]: <https://github.com/RoyoTech/royo-learn/pull/11>
+[^pr-12]: <https://github.com/RoyoTech/royo-learn/pull/12>
+[^pr-26]: <https://github.com/RoyoTech/royo-learn/pull/26>
+[^pr-29]: <https://github.com/RoyoTech/royo-learn/pull/29>
+[^pr-30]: <https://github.com/RoyoTech/royo-learn/pull/30>
+[^pr-31]: <https://github.com/RoyoTech/royo-learn/pull/31>
 ---
 
 ## Version ↔ Ola map (proposed 2026-07-23)

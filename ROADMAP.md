@@ -6,11 +6,15 @@
 
 ## Dónde estamos
 
-- **Ola actual:** Ola 1 (v0.2.0)
-- **Último hito cerrado:** Hito 6 — pattern mining mergeado a `main`
-  como PR #23 (squash commit `55ef635`).
-- **Próximo tag candidate:** `v0.2.0` cuando mergee el PR de Hito 4
-  (último de Ola 1) a `main` remoto.
+- **Ola actual:** Ola 3 (v1.0.0) — release publicado.
+- **Último hito cerrado:** Hito 12 — drift + release hardening mergeado
+  como PRs #32/#33/#34 (commits `2f1594f`, `6dd9cb4`, `47ff411`).
+- **Tag publicado:** `v1.0.0` en `9b76eafe7618fa43b32d92a45a5c9435be7f9a98`
+  (Windows-only). Release en
+  <https://github.com/RoyoTech/royo-learn/releases/tag/v1.0.0>.
+- **Próximo tag candidate:** ninguno inmediato. Pendiente decidir si se
+  avanza con Hito 9 (FTS lexical), Hito 3 (OpenCode `--watch`) o
+  integración Pi para Ola 3+.
 
 ---
 
@@ -27,10 +31,10 @@ trazar."* (PLAN-MAESTRO §37)
 | 2 | OpenCode `--once` (adaptador read-only) | #21 | ✅ merged en `ad269a7` | `feat/hito2-opencode-once` (squashed, rama borrada) |
 | 5 | Detectores deterministas | #22 | ✅ merged en `59d5e74` | `feat/hito5-detectors` (squashed, rama borrada) |
 | 6 | Patrones + clustering + migración 005 | #23 | ✅ merged en `55ef635` | `feat/hito6-patterns` (squashed, rama borrada) |
-| 7 | Promoción vía `capture.Service` | TBD | ⏳ | — |
-| 4 | Trace progresivo (requiere 1 + 7) | TBD | ⏳ | — |
+| 7 | Promoción vía `capture.Service` | #24 | ✅ merged | `feat/hito7-promotion` (squashed) |
+| 4 | Trace progresivo (requiere 1 + 7) | #25 | ✅ merged | `feat/hito4-trace` (squashed) |
 
-**Trigger → tag `v0.2.0`:** merge del PR de Hito 4 a `origin/main`.
+**Tag `v0.2.0`:** publicado en `d7352c8`. Ola 1 cerrada.
 
 **Sub-slices de Hito 2 (referencia, ya shipped):** 2.0 scaffold ·
 2.1 discover · 2.2 health · 2.3 scan · 2.4 idempotencia · 2.5 resolveTrace
@@ -55,7 +59,7 @@ lexical, adaptadores multi-agente."* Por eso minor, no patch.
 | 8 | Motor de jobs (lease-based) + migración 007 | feat/hito8-jobs | ✅ |
 | 9 | Retrieval lexical (FTS5) | TBD | ⏳ |
 | 3 | OpenCode `--watch` (continuo, depende de 2) | TBD | ⏳ |
-| 10 | Adaptador Claude Code / Codex | TBD | ⏳ |
+| 10 | Adaptador Claude Code / Codex | feat/hito10-claudecode / feat/hito10-codex | ✅ |
 
 **Trigger → tag `v0.3.0`:** merge del PR de Hito 10 a `origin/main`.
 
@@ -69,11 +73,11 @@ major."*
 
 | # | Hito | PR | Estado |
 |---|---|---|---|
-| 12 | Drift + release hardening | TBD | ⏳ |
-| 11 | Semántica opcional (embeddings, opt-in) | TBD | ⏳ |
+| 12 | Drift + release hardening | #32/#33/#34 | ✅ merged | `feat/hito12-drift-core`, `feat/hito12-drift-surface`, `feat/hito12-release-extras` |
+| 11 | Semántica opcional (embeddings, opt-in) | feat/hito11-semantic | ✅ merged | `feat/hito11-semantic` |
 | — | Integración Pi | TBD | ⏳ |
 
-**Trigger → tag `v1.0.0`:** merge del PR de Pi a `origin/main`.
+**Tag `v1.0.0`:** publicado en `9b76eaf` (Windows-only). Pendiente: integración Pi queda como follow-up opcional para v1.0.1+.
 
 ---
 
