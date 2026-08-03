@@ -79,7 +79,7 @@ No debe despublicarse automáticamente.
 Para cortar o revertir una release, sigue el runbook autocontenido en
 [RELEASE.md](../RELEASE.md) (raíz del repo). Cubre la tabla de triggers,
 checks de CI obligatorios, creación de tags `vX.Y.Z` / `vX.Y.Z-pre.N`,
-verificación de instalación y receta de rollback con `install.sh --uninstall`.
+verificación de instalación y receta de rollback con `install.ps1 -Uninstall`.
 
 ## Compatibilidad
 

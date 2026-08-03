@@ -232,7 +232,7 @@ Comprobar:
 ## 6. Requisitos no funcionales
 
 - local-first;
-- multiplataforma;
+- **Windows-only** (Windows 10+ x86_64 o ARM64; sin builds para Linux/macOS desde v1.0.0);
 - arranque MCP inferior a 500 ms en equipo normal;
 - operaciones locales habituales inferiores a 250 ms sin Engram;
 - cero red obligatoria;

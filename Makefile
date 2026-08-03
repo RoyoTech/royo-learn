@@ -1,4 +1,4 @@
-.PHONY: fmt tidy-check verify test vet build quality build-all install clean
+.PHONY: fmt tidy-check verify test vet build quality build-windows install clean
 
 BINARY_NAME := royo-learn
 ifeq ($(OS),Windows_NT)
@@ -24,12 +24,9 @@ vet:
 build:
 	go build ./cmd/royo-learn
 
-build-all: ## Cross-compile for all platforms
+build-windows: ## Cross-compile for Windows (amd64 + arm64). Windows-only project.
 	GOOS=windows GOARCH=amd64 go build -o dist/royo-learn-windows-amd64.exe ./cmd/royo-learn
-	GOOS=linux GOARCH=amd64 go build -o dist/royo-learn-linux-amd64 ./cmd/royo-learn
-	GOOS=linux GOARCH=arm64 go build -o dist/royo-learn-linux-arm64 ./cmd/royo-learn
-	GOOS=darwin GOARCH=amd64 go build -o dist/royo-learn-darwin-amd64 ./cmd/royo-learn
-	GOOS=darwin GOARCH=arm64 go build -o dist/royo-learn-darwin-arm64 ./cmd/royo-learn
+	GOOS=windows GOARCH=arm64 go build -o dist/royo-learn-windows-arm64.exe ./cmd/royo-learn
 
 install: build ## Install locally
 	cp $(BINARY_NAME) $(shell go env GOPATH)/bin/royo-learn 2>/dev/null || true

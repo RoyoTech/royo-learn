@@ -45,15 +45,8 @@ El script:
 6. opcionalmente registra MCP;
 7. verifica.
 
-### Linux/macOS
-
-Destino:
-
-```text
-~/.local/bin/royo-learn
-```
-
-o Homebrew futuro.
+> **Nota:** el proyecto es Windows-only desde v1.0.0. No hay builds
+> para Linux/macOS.
 
 ## Registro Codex
 
@@ -111,19 +104,14 @@ Usar GoReleaser para:
 ```text
 windows/amd64
 windows/arm64
-linux/amd64
-linux/arm64
-darwin/amd64
-darwin/arm64
 ```
 
 Artefactos:
 
-- zip/tar.gz;
-- SHA256SUMS;
-- SBOM;
-- changelog;
-- signatures si hay infraestructura.
+- `.zip` por arquitectura;
+- SHA-256 `checksums.txt`;
+- SBOM (`*.spdx.json`) por archive;
+- changelog desde conventional commits.
 
 ## Update
 
@@ -144,7 +132,7 @@ Debe poder:
 
 El script final ejecuta:
 
-```bash
+```powershell
 royo-learn version
 royo-learn doctor --json
 codex mcp list

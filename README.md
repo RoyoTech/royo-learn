@@ -7,9 +7,9 @@
 >
 > — Frase final del producto (`docs/PLAN-recuperacion-contrato.md`).
 
-Binario único: `royo-learn` (`royo-learn.exe` en Windows). Servidor MCP
-principal por `stdio`. Sin proveedor LLM embebido. Sin base vectorial. Sin red
-obligatoria. Local-first, multiplataforma.
+Binario único: `royo-learn.exe`. Servidor MCP principal por `stdio`. Sin
+proveedor LLM embebido. Sin base vectorial. Sin red obligatoria. Local-first,
+**Windows-only**.
 
 ## Qué problema resuelve
 
@@ -224,7 +224,7 @@ opcionalmente con `royo-learn setup install --agent <claude-code|codex|opencode|
 
 ### Requisitos
 
-- Windows, Linux o macOS (incluye WSL).
+- **Windows 10 o superior** (x86_64 o ARM64).
 - Sin dependencias externas en runtime: el binario es estático, sin CGO.
 - Acceso a `https://github.com/RoyoTech/royo-learn/releases` para descargar.
 
@@ -240,29 +240,9 @@ agrega al `PATH` de usuario.
 Versión específica o desinstalación:
 
 ```powershell
-.\install.ps1 -Version v0.1.10
+.\install.ps1 -Version v1.0.0
 .\install.ps1 -Uninstall
 ```
-
-### Linux, macOS, WSL (bash)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/RoyoTech/royo-learn/main/install.sh | bash
-```
-
-El binario queda en `~/.local/bin/royo-learn`. Para sistemas donde
-`~/.local/bin` no esté en el `PATH`, agregarlo manualmente.
-
-Versión específica o desinstalación:
-
-```bash
-./install.sh --version v0.1.10
-./install.sh --uninstall
-```
-
-> **Importante:** el script de PowerShell **no** corre en Git Bash, MSYS ni
-> Cygwin. En WSL usá la versión bash. El script de bash detecta esos entornos
-> y aborta con instrucciones para PowerShell.
 
 ### Auto-actualización
 
@@ -285,21 +265,21 @@ Requisitos: Go 1.25+.
 ```bash
 git clone https://github.com/RoyoTech/royo-learn.git
 cd royo-learn
-make build         # binario local
-make build-all     # cross-compile windows/linux/darwin × amd64/arm64
+make build         # binario local Windows (royo-learn.exe)
+make build-windows # cross-compile windows/amd64 + windows/arm64
 make quality       # fmt + vet + test -race + build
 make test          # go test -race ./...
 ```
 
-El target `build-all` produce en `dist/`:
+El target `build-windows` produce en `dist/`:
 
 ```text
-royo-learn-windows-amd64.exe
-royo-learn-linux-amd64
-royo-learn-linux-arm64
-royo-learn-darwin-amd64
-royo-learn-darwin-arm64
+royo-learn-windows-amd64.zip
+royo-learn-windows-arm64.zip
 ```
+
+> **Nota:** el proyecto es Windows-only. Los targets `linux/*` y
+> `darwin/*` se removieron del pipeline de release en v1.0.0.
 
 ## Inicio rápido
 
@@ -464,7 +444,7 @@ OpenCode invoca:
     "content": [
       {
         "type": "text",
-        "text": "{\"ok\":true,\"version\":\"v0.1.10\",\"checks\":[{\"name\":\"database\",\"status\":\"pass\",\"message\":\"database connection ok\"},{\"name\":\"project\",\"status\":\"pass\",\"message\":\"project resolved\"}]}"
+        "text": "{\"ok\":true,\"version\":\"v1.0.0\",\"checks\":[{\"name\":\"database\",\"status\":\"pass\",\"message\":\"database connection ok\"},{\"name\":\"project\",\"status\":\"pass\",\"message\":\"project resolved\"}]}"
       }
     ]
   }
@@ -946,8 +926,8 @@ agent-royo-learn/
 ├── skills/                # Skills del proyecto
 ├── docs/                  # PRD, arquitectura, contratos, reports
 ├── examples/              # entradas de ejemplo
-├── install.sh             # instalador Linux/macOS/WSL
 ├── install.ps1            # instalador Windows (PowerShell)
+├── install.sh             # DEPRECATED en v1.0.0 (proyecto Windows-only)
 ├── Makefile               # fmt, vet, test -race, build, build-all, quality
 ├── .goreleaser.yml        # pipeline de release
 ├── AGENTS.md              # instrucciones del agente ejecutor
