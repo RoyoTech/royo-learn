@@ -14,10 +14,11 @@ const (
 	AgentClaudeCode AgentKind = "claude-code"
 	AgentCodex      AgentKind = "codex"
 	AgentOpenCode   AgentKind = "opencode"
+	AgentPi         AgentKind = "pi"
 )
 
 // AllAgents lists every supported agent in deterministic order.
-var AllAgents = []AgentKind{AgentClaudeCode, AgentCodex, AgentOpenCode}
+var AllAgents = []AgentKind{AgentClaudeCode, AgentCodex, AgentOpenCode, AgentPi}
 
 // Agent is the interface implemented by every supported AI coding agent.
 //
@@ -60,8 +61,10 @@ func ResolveAgent(kind AgentKind) (Agent, error) {
 		return NewCodex(), nil
 	case AgentOpenCode:
 		return NewOpenCode(), nil
+	case AgentPi:
+		return NewPi(), nil
 	default:
-		return nil, fmt.Errorf("setup: unknown agent %q (supported: claude-code, codex, opencode)", kind)
+		return nil, fmt.Errorf("setup: unknown agent %q (supported: claude-code, codex, opencode, pi)", kind)
 	}
 }
 

@@ -63,7 +63,7 @@ func runSetup(args []string, stdout, stderr io.Writer) int {
 
 func runSetupInstall(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("setup install", flag.ContinueOnError)
-	agentFlag := fs.String("agent", "all", "target agent: claude-code | codex | opencode | all")
+	agentFlag := fs.String("agent", "all", "target agent: claude-code | codex | opencode | pi | all")
 	binaryPath := fs.String("binary", "", "absolute path to the royo-learn binary (default: resolve from PATH)")
 	projectRoot := fs.String("project-root", "", "project root containing skills/ (default: current dir or repo root)")
 	dryRun := fs.Bool("dry-run", false, "report actions without applying changes")
@@ -119,7 +119,7 @@ func runSetupInstall(args []string, stdout, stderr io.Writer) int {
 
 func runSetupUninstall(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("setup uninstall", flag.ContinueOnError)
-	agentFlag := fs.String("agent", "all", "target agent: claude-code | codex | opencode | all")
+	agentFlag := fs.String("agent", "all", "target agent: claude-code | codex | opencode | pi | all")
 	dryRun := fs.Bool("dry-run", false, "report actions without applying changes")
 	jsonFlag := fs.Bool("json", false, "emit stable JSON to stdout")
 	if err := fs.Parse(args); err != nil {
@@ -230,7 +230,7 @@ type upgradeAgentResult struct {
 
 func runSetupUpgradeSkills(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("setup upgrade-skills", flag.ContinueOnError)
-	agentFlag := fs.String("agent", "all", "target agent: claude-code | codex | opencode | all")
+	agentFlag := fs.String("agent", "all", "target agent: claude-code | codex | opencode | pi | all")
 	projectRoot := fs.String("project-root", "", "project root containing skills/ (default: current dir or repo root)")
 	apply := fs.Bool("apply", false, "perform the upgrade; without it, report only (dry-run is the default)")
 	dryRun := fs.Bool("dry-run", false, "report actions without applying changes (the default)")
@@ -577,7 +577,7 @@ func printInstallSummary(w io.Writer, r setupResult) {
 func writeSetupError(stderr io.Writer, format string, args ...interface{}) int {
 	msg := fmt.Sprintf(format, args...)
 	_, _ = fmt.Fprintf(stderr, "[royo-learn] %s\n", msg)
-	_, _ = fmt.Fprintf(stderr, "usage: royo-learn setup {install|uninstall|status} [--agent claude-code|codex|opencode|all] [--json]\n")
+	_, _ = fmt.Fprintf(stderr, "usage: royo-learn setup {install|uninstall|status} [--agent claude-code|codex|opencode|pi|all] [--json]\n")
 	return exitFailure
 }
 

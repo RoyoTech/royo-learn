@@ -39,7 +39,7 @@ func TestSetupStatus_JSON_AllAgentsListed(t *testing.T) {
 	for _, e := range parsed.Agents {
 		kind, _ := e["agent"].(string)
 		switch setup.AgentKind(kind) {
-		case setup.AgentClaudeCode, setup.AgentCodex, setup.AgentOpenCode:
+		case setup.AgentClaudeCode, setup.AgentCodex, setup.AgentOpenCode, setup.AgentPi:
 		default:
 			t.Errorf("unexpected agent kind in status: %q", kind)
 		}
@@ -56,7 +56,7 @@ func TestSetupStatus_HumanOutput(t *testing.T) {
 	if code != exitSuccess {
 		t.Fatalf("status exit code = %d, stderr=%s", code, errOut.String())
 	}
-	for _, want := range []string{"Claude Code", "Codex CLI", "OpenCode"} {
+	for _, want := range []string{"Claude Code", "Codex CLI", "OpenCode", "Pi"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q\n%s", want, out.String())
 		}
